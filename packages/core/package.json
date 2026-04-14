@@ -1,0 +1,32 @@
+{
+  "name": "@pretext-epub/core",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --tsconfig tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run test"
+  },
+  "dependencies": {
+    "@chenglou/pretext": "^0.0.5",
+    "eventemitter3": "^5.0.1",
+    "fast-xml-parser": "^4.5.3",
+    "fflate": "^0.8.2",
+    "nanoid": "^5.1.5"
+  }
+}

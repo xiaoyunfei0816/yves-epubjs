@@ -1,0 +1,9 @@
+{
+  "id": "minimal-book",
+  "title": "Minimal Book Fixture",
+  "purpose": [
+    "validate fixture directory access",
+    "reserve a stable location for a future real epub sample"
+  ],
+  "status": "placeholder"
+}
