@@ -34,6 +34,8 @@ type PageBlockSlice =
 
 type ReaderPage = {
   pageNumber: number;
+  pageNumberInSection: number;
+  totalPagesInSection: number;
   spineIndex: number;
   sectionId: string;
   sectionHref: string;
@@ -75,12 +77,21 @@ export class EpubReader {
   private lastMeasuredWidth = 0;
   private pages: ReaderPage[] = [];
   private currentPageNumber = 1;
+  private isProgrammaticScroll = false;
+  private sectionEstimatedHeights: number[] = [];
+  private scrollWindowStart = -1;
+  private scrollWindowEnd = -1;
+  private scrollSyncFrame: number | null = null;
+  private scrollRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private static readonly SCROLL_WINDOW_RADIUS = 1;
 
   constructor(private readonly options: ReaderOptions = {}) {
     this.mode = options.mode ?? "scroll";
     this.theme = { ...DEFAULT_THEME, ...options.theme };
     this.typography = { ...DEFAULT_TYPOGRAPHY, ...options.typography };
     this.attachResizeObserver();
+    this.attachScrollListener();
   }
 
   async open(input: EpubInput): Promise<Book> {
@@ -101,7 +112,11 @@ export class EpubReader {
     this.resources = parsed.resources;
     this.revokeObjectUrls();
     this.pages = [];
+    this.sectionEstimatedHeights = [];
     this.currentPageNumber = 1;
+    this.scrollWindowStart = -1;
+    this.scrollWindowEnd = -1;
+    this.clearDeferredScrollRefresh();
     this.events.emit("opened", { book: this.book });
     return this.book;
   }
@@ -118,15 +133,9 @@ export class EpubReader {
       return;
     }
 
-    if (this.mode === "paginated") {
-      const nextPage = Math.min(this.currentPageNumber + 1, this.pages.length || 1);
-      await this.goToPage(nextPage);
-      return;
-    }
-
-    const lastIndex = Math.max(this.book.sections.length - 1, 0);
-    this.currentSectionIndex = Math.min(this.currentSectionIndex + 1, lastIndex);
-    await this.goToLocation({ spineIndex: this.currentSectionIndex, progressInSection: 0 });
+    this.ensurePages();
+    const nextPage = Math.min(this.currentPageNumber + 1, this.pages.length || 1);
+    await this.goToPage(nextPage);
   }
 
   async prev(): Promise<void> {
@@ -134,14 +143,9 @@ export class EpubReader {
       return;
     }
 
-    if (this.mode === "paginated") {
-      const previousPage = Math.max(this.currentPageNumber - 1, 1);
-      await this.goToPage(previousPage);
-      return;
-    }
-
-    this.currentSectionIndex = Math.max(this.currentSectionIndex - 1, 0);
-    await this.goToLocation({ spineIndex: this.currentSectionIndex, progressInSection: 0 });
+    this.ensurePages();
+    const previousPage = Math.max(this.currentPageNumber - 1, 1);
+    await this.goToPage(previousPage);
   }
 
   async goToLocation(locator: Locator): Promise<void> {
@@ -156,6 +160,16 @@ export class EpubReader {
 
     this.currentSectionIndex = nextIndex;
     this.locator = locator;
+    if (this.mode === "paginated") {
+      this.ensurePages();
+      const targetPage = this.findPageForLocator({
+        ...locator,
+        spineIndex: nextIndex
+      });
+      if (targetPage) {
+        this.currentPageNumber = targetPage.pageNumber;
+      }
+    }
     this.renderCurrentSection();
     this.events.emit("relocated", { locator: this.locator });
   }
@@ -170,12 +184,30 @@ export class EpubReader {
       return;
     }
 
-    const targetIndex = this.book.spine.findIndex((item) =>
-      tocItem.href.startsWith(item.href)
-    );
+    const [targetHref, targetAnchor] = splitHrefFragment(tocItem.href);
+    const normalizedTargetHref = normalizeBookHref(targetHref);
+
+    const targetIndex = this.book.sections.findIndex((section) => {
+      const normalizedSectionHref = normalizeBookHref(section.href);
+      return (
+        normalizedSectionHref === normalizedTargetHref ||
+        normalizedTargetHref.endsWith(normalizedSectionHref) ||
+        normalizedSectionHref.endsWith(normalizedTargetHref)
+      );
+    });
 
     if (targetIndex >= 0) {
-      await this.goToLocation({ spineIndex: targetIndex, progressInSection: 0 });
+      const section = this.book.sections[targetIndex];
+      const blockId =
+        section && targetAnchor ? section.anchors[targetAnchor] : undefined;
+      const locator: Locator = {
+        spineIndex: targetIndex,
+        progressInSection: 0
+      };
+      if (blockId) {
+        locator.blockId = blockId;
+      }
+      await this.goToLocation(locator);
     }
   }
 
@@ -221,13 +253,7 @@ export class EpubReader {
 
     this.currentSectionIndex = nextPage.spineIndex;
     this.currentPageNumber = nextPage.pageNumber;
-    this.locator = {
-      spineIndex: nextPage.spineIndex,
-      progressInSection:
-        this.pages.filter((page) => page.spineIndex === nextPage.spineIndex).length > 1
-          ? nextPage.blocks.length / Math.max(nextPage.blocks.length, 1)
-          : 0
-    };
+    this.locator = this.createLocatorForPage(nextPage);
     this.renderCurrentSection();
     this.events.emit("relocated", { locator: this.locator });
   }
@@ -291,7 +317,11 @@ export class EpubReader {
     this.resources = null;
     this.locator = null;
     this.pages = [];
+    this.sectionEstimatedHeights = [];
     this.currentPageNumber = 1;
+    this.scrollWindowStart = -1;
+    this.scrollWindowEnd = -1;
+    this.clearDeferredScrollRefresh();
     this.revokeObjectUrls();
     if (this.options.container) {
       this.options.container.innerHTML = "";
@@ -362,19 +392,33 @@ export class EpubReader {
     this.options.container.dataset.mode = this.mode;
     if (this.mode === "paginated") {
       this.ensurePages(layout);
-      const currentPage = this.findCurrentPageForSection(section.id);
+      const currentPage = this.resolveRenderedPage(section.id);
       this.options.container.innerHTML = this.renderPage(section, currentPage ?? null);
       if (currentPage) {
         this.currentPageNumber = currentPage.pageNumber;
+        this.locator = {
+          ...this.locator,
+          spineIndex: currentPage.spineIndex,
+          progressInSection:
+            currentPage.totalPagesInSection > 1
+              ? (currentPage.pageNumberInSection - 1) / (currentPage.totalPagesInSection - 1)
+              : 0
+        };
       }
     } else {
-      this.options.container.innerHTML = this.renderSection(section, layout.blocks);
-      this.syncCurrentPageFromSection();
+      this.ensurePages();
+      this.updateScrollWindowBounds();
+      this.options.container.innerHTML = this.renderScrollableBook();
+      this.scrollToCurrentLocation();
+      if (!this.syncPositionFromScroll(false)) {
+        this.syncCurrentPageFromSection();
+        this.locator = {
+          ...this.locator,
+          spineIndex: this.currentSectionIndex,
+          progressInSection: this.getProgressForCurrentLocator()
+        };
+      }
     }
-    this.locator = {
-      spineIndex: this.currentSectionIndex,
-      progressInSection: 0
-    };
   }
 
   private applyContainerTheme(): void {
@@ -382,10 +426,27 @@ export class EpubReader {
       return;
     }
 
+    const darkTheme = isDarkColor(this.theme.background);
     this.options.container.style.background = this.theme.background;
     this.options.container.style.color = this.theme.color;
     this.options.container.style.fontSize = `${this.typography.fontSize}px`;
     this.options.container.style.lineHeight = String(this.typography.lineHeight);
+    this.options.container.style.setProperty(
+      "--reader-code-bg",
+      darkTheme ? "#0b1220" : "#f4f4f5"
+    );
+    this.options.container.style.setProperty(
+      "--reader-code-color",
+      darkTheme ? "#e6edf7" : this.theme.color
+    );
+    this.options.container.style.setProperty(
+      "--reader-inline-code-bg",
+      darkTheme ? "rgba(148, 163, 184, 0.16)" : "rgba(15, 23, 42, 0.06)"
+    );
+    this.options.container.style.setProperty(
+      "--reader-inline-code-color",
+      darkTheme ? "#f8fafc" : "#0f172a"
+    );
   }
 
   private renderSection(section: SectionDocument, blocks: LayoutBlock[]): string {
@@ -396,6 +457,39 @@ export class EpubReader {
     return `<article class="epub-section" data-section-id="${section.id}" data-href="${section.href}">${title}${blocks
       .map((block) => this.renderLayoutBlock(block))
       .join("")}</article>`;
+  }
+
+  private renderScrollableBook(): string {
+    if (!this.book || !this.options.container) {
+      return "";
+    }
+
+    const blocksBySection = this.book.sections.map((section, index) => {
+      if (index < this.scrollWindowStart || index > this.scrollWindowEnd) {
+        return this.renderVirtualSection(section, index);
+      }
+
+      const layout = this.layoutEngine.layout(
+        {
+          section,
+          spineIndex: index,
+          viewportWidth: this.getContentWidth(),
+          viewportHeight: this.options.container!.clientHeight,
+          typography: this.typography,
+          fontFamily: this.getFontFamily()
+        },
+        "scroll"
+      );
+      this.lastMeasuredWidth = layout.width;
+      return this.renderSection(section, layout.blocks);
+    });
+
+    return blocksBySection.join("");
+  }
+
+  private renderVirtualSection(section: SectionDocument, index: number): string {
+    const height = Math.max(this.getPageHeight(), this.sectionEstimatedHeights[index] ?? this.getPageHeight());
+    return `<article class="epub-section epub-section-virtual" data-section-id="${section.id}" data-href="${section.href}" style="height:${height}px"></article>`;
   }
 
   private renderPage(section: SectionDocument, page: ReaderPage | null): string {
@@ -651,7 +745,11 @@ export class EpubReader {
           URL.revokeObjectURL(previous);
         }
         this.objectUrls.set(path, objectUrl);
-        this.renderCurrentSection();
+        if (this.mode === "scroll") {
+          this.updateRenderedResourceUrls(path, objectUrl);
+        } else {
+          this.renderCurrentSection();
+        }
       })
       .catch(() => {
         // Keep the original path when the resource cannot be resolved.
@@ -742,6 +840,37 @@ export class EpubReader {
     this.resizeObserver.observe(this.options.container);
   }
 
+  private attachScrollListener(): void {
+    if (!this.options.container) {
+      return;
+    }
+
+    this.options.container.addEventListener("scroll", () => {
+      if (this.mode !== "scroll") {
+        return;
+      }
+
+      const emitEvent = !this.isProgrammaticScroll;
+      if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+        this.syncPositionFromScroll(emitEvent);
+        this.scheduleDeferredScrollRefresh();
+        this.isProgrammaticScroll = false;
+        return;
+      }
+
+      if (this.scrollSyncFrame !== null) {
+        return;
+      }
+
+      this.scrollSyncFrame = window.requestAnimationFrame(() => {
+        this.scrollSyncFrame = null;
+        this.syncPositionFromScroll(emitEvent);
+        this.scheduleDeferredScrollRefresh();
+        this.isProgrammaticScroll = false;
+      });
+    });
+  }
+
   private async waitForFonts(): Promise<void> {
     if (typeof document === "undefined" || !("fonts" in document)) {
       return;
@@ -824,6 +953,8 @@ export class EpubReader {
 
       let currentPage: ReaderPage = {
         pageNumber,
+        pageNumberInSection: 1,
+        totalPagesInSection: 1,
         spineIndex: index,
         sectionId: section.id,
         sectionHref: section.href,
@@ -842,6 +973,8 @@ export class EpubReader {
               pageNumber += 1;
               currentPage = {
                 pageNumber,
+                pageNumberInSection: currentPage.pageNumberInSection + 1,
+                totalPagesInSection: 1,
                 spineIndex: index,
                 sectionId: section.id,
                 sectionHref: section.href,
@@ -866,6 +999,8 @@ export class EpubReader {
               pageNumber += 1;
               currentPage = {
                 pageNumber,
+                pageNumberInSection: currentPage.pageNumberInSection + 1,
+                totalPagesInSection: 1,
                 spineIndex: index,
                 sectionId: section.id,
                 sectionHref: section.href,
@@ -887,6 +1022,8 @@ export class EpubReader {
           pageNumber += 1;
           currentPage = {
             pageNumber,
+            pageNumberInSection: currentPage.pageNumberInSection + 1,
+            totalPagesInSection: 1,
             spineIndex: index,
             sectionId: section.id,
             sectionHref: section.href,
@@ -908,9 +1045,20 @@ export class EpubReader {
       }
     }
 
+    const totalPagesBySection = new Map<string, number>();
+    for (const page of pages) {
+      totalPagesBySection.set(page.sectionId, (totalPagesBySection.get(page.sectionId) ?? 0) + 1);
+    }
+
+    this.sectionEstimatedHeights = this.book.sections.map((section) => {
+      const sectionPageCount = totalPagesBySection.get(section.id) ?? 1;
+      return Math.max(pageHeight, sectionPageCount * pageHeight);
+    });
+
     this.pages = pages.map((page, index) => ({
       ...page,
-      pageNumber: index + 1
+      pageNumber: index + 1,
+      totalPagesInSection: totalPagesBySection.get(page.sectionId) ?? 1
     }));
   }
 
@@ -934,12 +1082,321 @@ export class EpubReader {
     return page;
   }
 
+  private findPageForLocator(locator: Locator): ReaderPage | null {
+    const sectionPages = this.pages.filter((page) => page.spineIndex === locator.spineIndex);
+    if (sectionPages.length === 0) {
+      return null;
+    }
+
+    if (locator.blockId) {
+      const blockPage = sectionPages.find((page) => this.pageContainsBlockId(page, locator.blockId!));
+      if (blockPage) {
+        return blockPage;
+      }
+    }
+
+    const sectionProgress = locator.progressInSection ?? 0;
+    const progress = Number.isFinite(sectionProgress)
+      ? Math.max(0, Math.min(sectionProgress, 1))
+      : 0;
+    const targetIndex = Math.min(
+      sectionPages.length - 1,
+      Math.round(progress * Math.max(sectionPages.length - 1, 0))
+    );
+
+    return sectionPages[targetIndex] ?? sectionPages[0] ?? null;
+  }
+
+  private resolveRenderedPage(sectionId: string): ReaderPage | null {
+    const currentPage = this.findCurrentPageForSection(sectionId);
+    if (currentPage) {
+      return currentPage;
+    }
+
+    if (this.locator) {
+      const locatorPage = this.findPageForLocator(this.locator);
+      if (locatorPage?.sectionId === sectionId) {
+        return locatorPage;
+      }
+    }
+
+    return this.pages.find((entry) => entry.sectionId === sectionId) ?? null;
+  }
+
   private syncCurrentPageFromSection(): void {
-    const matchingPage = this.pages.find((page) => page.spineIndex === this.currentSectionIndex);
+    const matchingPage = this.locator
+      ? this.findPageForLocator({
+          ...this.locator,
+          spineIndex: this.currentSectionIndex
+        })
+      : null;
     this.currentPageNumber = matchingPage?.pageNumber ?? this.currentSectionIndex + 1;
   }
+
+  private createLocatorForPage(page: ReaderPage): Locator {
+    return {
+      spineIndex: page.spineIndex,
+      progressInSection:
+        page.totalPagesInSection > 1
+          ? (page.pageNumberInSection - 1) / (page.totalPagesInSection - 1)
+          : 0
+    };
+  }
+
+  private pageContainsBlockId(page: ReaderPage, blockId: string): boolean {
+    return page.blocks.some((slice) =>
+      slice.type === "pretext" ? slice.block.id === blockId : slice.block.id === blockId
+    );
+  }
+
+  private getProgressForCurrentLocator(): number {
+    if (!this.locator) {
+      return 0;
+    }
+
+    const page = this.findPageForLocator({
+      ...this.locator,
+      spineIndex: this.currentSectionIndex
+    });
+    if (!page) {
+      return this.locator.progressInSection ?? 0;
+    }
+
+    return page.totalPagesInSection > 1
+      ? (page.pageNumberInSection - 1) / (page.totalPagesInSection - 1)
+      : 0;
+  }
+
+  private scrollToLocatorBlock(): void {
+    if (!this.options.container || !this.locator?.blockId) {
+      return;
+    }
+
+    const target = this.options.container.querySelector<HTMLElement>(
+      `[data-block-id="${this.locator.blockId}"]`
+    );
+    if (!target) {
+      return;
+    }
+
+    const offsetTop = target.offsetTop;
+    this.options.container.scrollTop = Math.max(0, offsetTop - 16);
+  }
+
+  private scrollToCurrentLocation(): void {
+    if (!this.options.container) {
+      return;
+    }
+
+    if (this.locator?.blockId) {
+      this.isProgrammaticScroll = true;
+      this.scrollToLocatorBlock();
+      return;
+    }
+
+    const section = this.book?.sections[this.currentSectionIndex];
+    if (!section) {
+      this.isProgrammaticScroll = true;
+      this.options.container.scrollTop = 0;
+      return;
+    }
+
+    const sectionElement = this.options.container.querySelector<HTMLElement>(
+      `[data-section-id="${section.id}"]`
+    );
+    if (!sectionElement) {
+      return;
+    }
+
+    const progress = this.locator?.progressInSection ?? 0;
+    const targetTop =
+      sectionElement.offsetTop +
+      Math.max(
+        0,
+        Math.min(
+          progress,
+          1
+        )
+      ) * Math.max(0, sectionElement.offsetHeight - this.options.container.clientHeight);
+    this.isProgrammaticScroll = true;
+    this.options.container.scrollTop = Math.max(0, targetTop);
+  }
+
+  private syncPositionFromScroll(emitEvent: boolean): boolean {
+    if (!this.options.container || !this.book || this.mode !== "scroll") {
+      return false;
+    }
+
+    const sectionElements = Array.from(
+      this.options.container.querySelectorAll<HTMLElement>("[data-section-id]")
+    );
+    if (sectionElements.length === 0) {
+      return false;
+    }
+
+    if (sectionElements.every((element) => element.offsetHeight <= 0)) {
+      return false;
+    }
+
+    const probe = this.options.container.scrollTop + this.options.container.clientHeight * 0.5;
+    const activeSectionElement =
+      sectionElements.find((element, index) => {
+        const top = element.offsetTop;
+        const bottom =
+          index < sectionElements.length - 1
+            ? sectionElements[index + 1]!.offsetTop
+            : top + element.offsetHeight;
+        return probe >= top && probe < bottom;
+      }) ?? sectionElements[sectionElements.length - 1];
+
+    if (!activeSectionElement) {
+      return false;
+    }
+
+    const sectionId = activeSectionElement.dataset.sectionId;
+    const nextSectionIndex = this.book.sections.findIndex((section) => section.id === sectionId);
+    if (nextSectionIndex < 0) {
+      return false;
+    }
+
+    const localOffset = probe - activeSectionElement.offsetTop;
+    const sectionScrollableHeight = Math.max(1, activeSectionElement.offsetHeight);
+    const progress = Math.max(0, Math.min(localOffset / sectionScrollableHeight, 1));
+    const previousSectionIndex = this.currentSectionIndex;
+    this.currentSectionIndex = nextSectionIndex;
+    this.locator = {
+      spineIndex: nextSectionIndex,
+      progressInSection: progress
+    };
+    this.syncCurrentPageFromSection();
+
+    if (emitEvent) {
+      this.events.emit("relocated", { locator: this.locator });
+    }
+
+    return true;
+  }
+
+  private updateScrollWindowBounds(): void {
+    if (!this.book) {
+      this.scrollWindowStart = -1;
+      this.scrollWindowEnd = -1;
+      return;
+    }
+
+    this.scrollWindowStart = Math.max(0, this.currentSectionIndex - EpubReader.SCROLL_WINDOW_RADIUS);
+    this.scrollWindowEnd = Math.min(
+      this.book.sections.length - 1,
+      this.currentSectionIndex + EpubReader.SCROLL_WINDOW_RADIUS
+    );
+  }
+
+  private refreshScrollWindowIfNeeded(): boolean {
+    if (!this.options.container || !this.book || this.mode !== "scroll") {
+      return false;
+    }
+
+    const nextStart = Math.max(0, this.currentSectionIndex - EpubReader.SCROLL_WINDOW_RADIUS);
+    const nextEnd = Math.min(
+      this.book.sections.length - 1,
+      this.currentSectionIndex + EpubReader.SCROLL_WINDOW_RADIUS
+    );
+
+    if (nextStart === this.scrollWindowStart && nextEnd === this.scrollWindowEnd) {
+      return false;
+    }
+
+    const scrollTop = this.options.container.scrollTop;
+    this.scrollWindowStart = nextStart;
+    this.scrollWindowEnd = nextEnd;
+    this.options.container.innerHTML = this.renderScrollableBook();
+    this.isProgrammaticScroll = true;
+    this.options.container.scrollTop = scrollTop;
+    return true;
+  }
+
+  private scheduleDeferredScrollRefresh(): void {
+    if (!this.options.container || this.mode !== "scroll") {
+      return;
+    }
+
+    this.clearDeferredScrollRefresh();
+    this.scrollRefreshTimer = setTimeout(() => {
+      this.scrollRefreshTimer = null;
+      this.refreshScrollWindowIfNeeded();
+    }, 90);
+  }
+
+  private clearDeferredScrollRefresh(): void {
+    if (this.scrollRefreshTimer !== null) {
+      clearTimeout(this.scrollRefreshTimer);
+      this.scrollRefreshTimer = null;
+    }
+  }
+
+  private updateRenderedResourceUrls(path: string, objectUrl: string): void {
+    if (!this.options.container) {
+      return;
+    }
+
+    const selector = `img[src="${cssEscapeAttribute(path)}"], img[data-fullsize-src="${cssEscapeAttribute(
+      path
+    )}"]`;
+    const images = this.options.container.querySelectorAll<HTMLImageElement>(selector);
+    for (const image of images) {
+      if (image.getAttribute("src") === path) {
+        image.setAttribute("src", objectUrl);
+      }
+      if (image.dataset.fullsizeSrc === path) {
+        image.dataset.fullsizeSrc = objectUrl;
+      }
+    }
+  }
+}
+
+function isDarkColor(color: string): boolean {
+  const normalized = color.trim().toLowerCase();
+  const hex = normalized.startsWith("#") ? normalized.slice(1) : normalized;
+  if (hex.length !== 3 && hex.length !== 6) {
+    return false;
+  }
+
+  const expanded =
+    hex.length === 3
+      ? hex
+          .split("")
+          .map((char) => `${char}${char}`)
+          .join("")
+      : hex;
+
+  const red = Number.parseInt(expanded.slice(0, 2), 16);
+  const green = Number.parseInt(expanded.slice(2, 4), 16);
+  const blue = Number.parseInt(expanded.slice(4, 6), 16);
+
+  if ([red, green, blue].some((value) => Number.isNaN(value))) {
+    return false;
+  }
+
+  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+  return luminance < 0.45;
 }
 
 function lineHeightToCss(lineHeight: number): string {
   return `${Math.max(1, Number.parseFloat(lineHeight.toFixed(2)))}px`;
+}
+
+function splitHrefFragment(href: string): [string, string | null] {
+  const [baseHref, fragment] = href.split("#", 2);
+  return [baseHref ?? href, fragment ?? null];
+}
+
+function normalizeBookHref(href: string): string {
+  return href
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "")
+    .toLowerCase();
+}
+
+function cssEscapeAttribute(value: string): string {
+  return value.replace(/["\\]/g, "\\$&");
 }
