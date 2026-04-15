@@ -1,4 +1,11 @@
 export type ReadingMode = "scroll" | "paginated";
+export type RenderMode = "canvas" | "dom";
+export type ChapterRenderReason = string;
+export type ChapterRenderDecision = {
+  mode: RenderMode;
+  score: number;
+  reasons: ChapterRenderReason[];
+};
 
 export type BookMetadata = {
   title: string;
@@ -331,11 +338,23 @@ export type HitTestResult =
 export type VisibleDrawBounds = Rect[];
 
 export type RenderMetrics = {
-  backend: "canvas";
+  backend: "canvas" | "dom";
   visibleSectionCount: number;
   visibleDrawOpCount: number;
   highlightedDrawOpCount: number;
   totalCanvasHeight: number;
+};
+
+export type RenderDiagnostics = {
+  mode: RenderMode;
+  score: number;
+  reasons: string[];
+  sectionId?: string;
+  sectionHref?: string;
+};
+
+export type VisibleSectionDiagnostics = RenderDiagnostics & {
+  isCurrent: boolean;
 };
 
 export type ReaderEventMap = {

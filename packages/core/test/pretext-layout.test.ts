@@ -2262,4 +2262,399 @@ describe("pretext layout integration", () => {
       }
     }
   });
+
+  it("captures scroll anchors from the actual scroll position instead of a stale current section", async () => {
+    const originalOffsetTop = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetTop"
+    );
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight"
+    );
+
+    try {
+      Object.defineProperty(HTMLElement.prototype, "offsetTop", {
+        configurable: true,
+        get() {
+          const sectionId = this.dataset?.sectionId;
+          if (sectionId === "section-1") {
+            return 0;
+          }
+          if (sectionId === "section-2") {
+            return 360;
+          }
+          if (sectionId === "section-3") {
+            return 720;
+          }
+          return originalOffsetTop?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+        configurable: true,
+        get() {
+          const sectionId = this.dataset?.sectionId;
+          if (sectionId === "section-1" || sectionId === "section-2" || sectionId === "section-3") {
+            return 360;
+          }
+          return originalOffsetHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      const container = document.createElement("div");
+      Object.defineProperty(container, "clientWidth", {
+        configurable: true,
+        value: 260
+      });
+      Object.defineProperty(container, "clientHeight", {
+        configurable: true,
+        value: 180
+      });
+      Object.defineProperty(container, "scrollTop", {
+        configurable: true,
+        writable: true,
+        value: 540
+      });
+      document.body.appendChild(container);
+
+      const reader = new EpubReader({
+        container,
+        mode: "scroll"
+      });
+
+      const repeatedText = Array.from({ length: 16 }, () => ({
+        kind: "text" as const,
+        text: "This is a long paragraph designed to spill across multiple pages. "
+      }));
+      const sections: SectionDocument[] = Array.from({ length: 3 }, (_, index) => ({
+        ...createSection(),
+        id: `section-${index + 1}`,
+        href: `OPS/chapter-${index + 1}.xhtml`,
+        title: `Chapter ${index + 1}`,
+        blocks: [{ id: `text-${index + 1}`, kind: "text", inlines: repeatedText }]
+      }));
+
+      const book: Book = {
+        metadata: { title: "Scroll Anchor Demo" },
+        manifest: [],
+        spine: sections.map((section, index) => ({
+          idref: `item-${index + 1}`,
+          href: section.href,
+          linear: true
+        })),
+        toc: [],
+        sections
+      };
+
+      (
+        reader as unknown as {
+          book: Book;
+          currentSectionIndex: number;
+          captureScrollAnchor(): { sectionId: string; offsetWithinSection: number; fallbackScrollTop: number };
+        }
+      ).book = book;
+      await reader.render();
+      container.scrollTop = 540;
+
+      (
+        reader as unknown as {
+          currentSectionIndex: number;
+        }
+      ).currentSectionIndex = 0;
+
+      const anchor = (
+        reader as unknown as {
+          captureScrollAnchor(): { sectionId: string; offsetWithinSection: number; fallbackScrollTop: number };
+        }
+      ).captureScrollAnchor();
+
+      expect(anchor.sectionId).toBe("section-2");
+      expect(anchor.offsetWithinSection).toBe(180);
+      expect(anchor.fallbackScrollTop).toBe(540);
+    } finally {
+      if (originalOffsetTop) {
+        Object.defineProperty(HTMLElement.prototype, "offsetTop", originalOffsetTop);
+      }
+      if (originalOffsetHeight) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "offsetHeight",
+          originalOffsetHeight
+        );
+      }
+    }
+  });
+
+  it("prefers rendered section geometry over stale global section estimates when capturing scroll anchors", async () => {
+    const originalOffsetTop = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetTop"
+    );
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight"
+    );
+
+    try {
+      Object.defineProperty(HTMLElement.prototype, "offsetTop", {
+        configurable: true,
+        get() {
+          const sectionId = this.dataset?.sectionId;
+          if (sectionId === "section-1") {
+            return 0;
+          }
+          if (sectionId === "section-2") {
+            return 420;
+          }
+          if (sectionId === "section-3") {
+            return 980;
+          }
+          return originalOffsetTop?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+        configurable: true,
+        get() {
+          const sectionId = this.dataset?.sectionId;
+          if (sectionId === "section-1") {
+            return 420;
+          }
+          if (sectionId === "section-2") {
+            return 560;
+          }
+          if (sectionId === "section-3") {
+            return 560;
+          }
+          return originalOffsetHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      const container = document.createElement("div");
+      Object.defineProperty(container, "clientWidth", {
+        configurable: true,
+        value: 260
+      });
+      Object.defineProperty(container, "clientHeight", {
+        configurable: true,
+        value: 180
+      });
+      Object.defineProperty(container, "scrollTop", {
+        configurable: true,
+        writable: true,
+        value: 700
+      });
+      document.body.appendChild(container);
+
+      const reader = new EpubReader({
+        container,
+        mode: "scroll"
+      });
+
+      const repeatedText = Array.from({ length: 12 }, () => ({
+        kind: "text" as const,
+        text: "This is a long paragraph designed to spill across multiple pages. "
+      }));
+      const sections: SectionDocument[] = Array.from({ length: 3 }, (_, index) => ({
+        ...createSection(),
+        id: `section-${index + 1}`,
+        href: `OPS/chapter-${index + 1}.xhtml`,
+        title: `Chapter ${index + 1}`,
+        blocks: [{ id: `text-${index + 1}`, kind: "text", inlines: repeatedText }]
+      }));
+
+      const book: Book = {
+        metadata: { title: "Rendered Geometry Demo" },
+        manifest: [],
+        spine: sections.map((section, index) => ({
+          idref: `item-${index + 1}`,
+          href: section.href,
+          linear: true
+        })),
+        toc: [],
+        sections
+      };
+
+      (
+        reader as unknown as {
+          book: Book;
+          sectionEstimatedHeights: number[];
+          captureScrollAnchor(): { sectionId: string; offsetWithinSection: number; fallbackScrollTop: number };
+        }
+      ).book = book;
+      (
+        reader as unknown as {
+          sectionEstimatedHeights: number[];
+        }
+      ).sectionEstimatedHeights = [1200, 120, 120];
+      await reader.render();
+      container.scrollTop = 700;
+
+      const anchor = (
+        reader as unknown as {
+          captureScrollAnchor(): { sectionId: string; offsetWithinSection: number; fallbackScrollTop: number };
+        }
+      ).captureScrollAnchor();
+
+      expect(anchor.sectionId).toBe("section-2");
+      expect(anchor.offsetWithinSection).toBe(280);
+      expect(anchor.fallbackScrollTop).toBe(700);
+    } finally {
+      if (originalOffsetTop) {
+        Object.defineProperty(HTMLElement.prototype, "offsetTop", originalOffsetTop);
+      }
+      if (originalOffsetHeight) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "offsetHeight",
+          originalOffsetHeight
+        );
+      }
+    }
+  });
+
+  it("ignores virtual section placeholders when capturing preserve anchors", () => {
+    const originalOffsetTop = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetTop"
+    );
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight"
+    );
+
+    try {
+      Object.defineProperty(HTMLElement.prototype, "offsetTop", {
+        configurable: true,
+        get() {
+          const sectionId = this.dataset?.sectionId;
+          if (sectionId === "section-1") {
+            return 0;
+          }
+          if (sectionId === "section-2") {
+            return 360;
+          }
+          if (sectionId === "section-3") {
+            return 720;
+          }
+          return originalOffsetTop?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+        configurable: true,
+        get() {
+          const sectionId = this.dataset?.sectionId;
+          if (sectionId === "section-1" || sectionId === "section-2" || sectionId === "section-3") {
+            return 360;
+          }
+          return originalOffsetHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      const container = document.createElement("div");
+      Object.defineProperty(container, "scrollTop", {
+        configurable: true,
+        writable: true,
+        value: 780
+      });
+
+      for (let index = 1; index <= 3; index += 1) {
+        const wrapper = document.createElement("article");
+        wrapper.className = "epub-section epub-section-virtual";
+        wrapper.dataset.sectionId = `section-${index}`;
+        container.appendChild(wrapper);
+      }
+
+      const reader = new EpubReader({
+        container,
+        mode: "scroll"
+      });
+
+      const sections: SectionDocument[] = Array.from({ length: 3 }, (_, index) => ({
+        ...createSection(),
+        id: `section-${index + 1}`,
+        href: `OPS/chapter-${index + 1}.xhtml`,
+        title: `Chapter ${index + 1}`
+      }));
+
+      (
+        reader as unknown as {
+          book: Book;
+          captureScrollAnchor(): { sectionId: string; offsetWithinSection: number; fallbackScrollTop: number };
+        }
+      ).book = {
+        metadata: { title: "Virtual Placeholder Demo" },
+        manifest: [],
+        spine: sections.map((section, index) => ({
+          idref: `item-${index + 1}`,
+          href: section.href,
+          linear: true
+        })),
+        toc: [],
+        sections
+      };
+
+      const anchor = (
+        reader as unknown as {
+          captureScrollAnchor(): { sectionId: string; offsetWithinSection: number; fallbackScrollTop: number };
+        }
+      ).captureScrollAnchor();
+
+      expect(anchor.sectionId).toBe("");
+      expect(anchor.offsetWithinSection).toBe(0);
+      expect(anchor.fallbackScrollTop).toBe(780);
+    } finally {
+      if (originalOffsetTop) {
+        Object.defineProperty(HTMLElement.prototype, "offsetTop", originalOffsetTop);
+      }
+      if (originalOffsetHeight) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "offsetHeight",
+          originalOffsetHeight
+        );
+      }
+    }
+  });
+
+  it("preserves scroll offsets when refreshing scroll slices", () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 28207
+    });
+    Object.defineProperty(container, "scrollLeft", {
+      configurable: true,
+      writable: true,
+      value: 18
+    });
+
+    const reader = new EpubReader({
+      container,
+      mode: "scroll"
+    });
+
+    (
+      reader as unknown as {
+        renderScrollableCanvas(renderVersion: number): void;
+        renderVersion: number;
+        rerenderScrollSlicesPreservingScrollTop(): void;
+      }
+    ).renderScrollableCanvas = () => {
+      container.scrollTop = 0;
+      container.scrollLeft = 0;
+    };
+
+    (
+      reader as unknown as {
+        rerenderScrollSlicesPreservingScrollTop(): void;
+      }
+    ).rerenderScrollSlicesPreservingScrollTop();
+
+    expect(container.scrollTop).toBe(28207);
+    expect(container.scrollLeft).toBe(18);
+  });
 });

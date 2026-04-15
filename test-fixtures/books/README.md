@@ -15,3 +15,4 @@
 当前新增：
 
 - `reflowable-compat`：常见文本书章节样本，覆盖 inline、figure、list、table、footnote、definition-list
+- `hybrid-render-fallback`：章节级 `canvas/dom` fallback 样本，覆盖线性章节与复杂章节分流

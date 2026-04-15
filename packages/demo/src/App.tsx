@@ -2,15 +2,20 @@ import { useEffect, useId, useRef, useState } from "react";
 import {
   EpubReader,
   type PaginationInfo,
+  type RenderDiagnostics,
   type SearchResult,
   type Theme,
-  type TocItem
+  type TocItem,
+  type VisibleSectionDiagnostics
 } from "../../core/src/index";
 
 type ReaderSnapshot = {
   metaText: string;
   pagination: PaginationInfo;
   toc: TocItem[];
+  renderBackend: "canvas" | "dom" | null;
+  diagnostics: RenderDiagnostics | null;
+  visibleSectionDiagnostics: VisibleSectionDiagnostics[];
 };
 
 const THEMES = {
@@ -34,7 +39,10 @@ const INITIAL_SNAPSHOT: ReaderSnapshot = {
     currentPage: 1,
     totalPages: 1
   },
-  toc: []
+  toc: [],
+  renderBackend: null,
+  diagnostics: null,
+  visibleSectionDiagnostics: []
 };
 
 export function App(): JSX.Element {
@@ -66,12 +74,18 @@ export function App(): JSX.Element {
     const syncSnapshot = (): void => {
       const book = reader.getBook();
       const locator = reader.getCurrentLocation();
+      const metrics = reader.getRenderMetrics();
+      const diagnostics = reader.getRenderDiagnostics();
+      const visibleSectionDiagnostics = reader.getVisibleSectionDiagnostics();
 
       if (!book || !locator) {
         setSnapshot({
           metaText: "No book loaded",
           pagination: reader.getPaginationInfo(),
-          toc: book?.toc ?? []
+          toc: book?.toc ?? [],
+          renderBackend: metrics.backend,
+          diagnostics,
+          visibleSectionDiagnostics
         });
         setPageValue("1");
         return;
@@ -83,9 +97,12 @@ export function App(): JSX.Element {
       setSnapshot({
         metaText: `${book.metadata.title} · ${section?.title ?? section?.href ?? "Section"} · ${
           locator.spineIndex + 1
-        } / ${book.sections.length} · Page ${pagination.currentPage} / ${pagination.totalPages} · canvas`,
+        } / ${book.sections.length} · Page ${pagination.currentPage} / ${pagination.totalPages} · ${metrics.backend}`,
         pagination,
-        toc: book.toc
+        toc: book.toc,
+        renderBackend: metrics.backend,
+        diagnostics,
+        visibleSectionDiagnostics
       });
       setActiveTocId(nextActiveTocId);
       if (nextActiveTocId) {
@@ -229,7 +246,7 @@ export function App(): JSX.Element {
                     type="button"
                     className="search-card"
                     onClick={async () => {
-                      await readerRef.current?.goToLocation(result.locator);
+                      await readerRef.current?.goToSearchResult(result);
                     }}
                   >
                     <span className="block text-sm font-semibold">{result.href}</span>
@@ -395,53 +412,103 @@ export function App(): JSX.Element {
         </aside>
 
           <section className="reader-panel">
-            <div className="reader-toolbar">
-              <ToolbarButton onClick={async () => readerRef.current?.prev()}>Previous</ToolbarButton>
-              <ToolbarButton onClick={async () => readerRef.current?.next()}>Next</ToolbarButton>
-              <label className="page-jump">
-                <span>Page</span>
-                <input
-                  type="number"
-                  min="1"
-                  max={snapshot.pagination.totalPages}
-                  value={pageValue}
-                  onChange={(event) => setPageValue(event.target.value)}
-                  onKeyDown={async (event) => {
-                    if (event.key === "Enter") {
-                      await goToPage(Number(pageValue));
-                    }
-                  }}
-                  className="field-input page-input"
-                />
-              </label>
-              <ToolbarButton onClick={async () => goToPage(Number(pageValue))}>Go</ToolbarButton>
-            </div>
+            <div className="reader-layout">
+              <div className="reader-main">
+                <div className="reader-toolbar">
+                  <ToolbarButton onClick={async () => readerRef.current?.prev()}>Previous</ToolbarButton>
+                  <ToolbarButton onClick={async () => readerRef.current?.next()}>Next</ToolbarButton>
+                  <label className="page-jump">
+                    <span>Page</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max={snapshot.pagination.totalPages}
+                      value={pageValue}
+                      onChange={(event) => setPageValue(event.target.value)}
+                      onKeyDown={async (event) => {
+                        if (event.key === "Enter") {
+                          await goToPage(Number(pageValue));
+                        }
+                      }}
+                      className="field-input page-input"
+                    />
+                  </label>
+                  <ToolbarButton onClick={async () => goToPage(Number(pageValue))}>Go</ToolbarButton>
+                </div>
 
-            <p className="reader-meta">{snapshot.metaText}</p>
+                <p className="reader-meta">{snapshot.metaText}</p>
 
-            <div className="reader-progress">
-              <input
-                type="range"
-                min="1"
-                max={snapshot.pagination.totalPages}
-                value={snapshot.pagination.currentPage}
-                onChange={async (event) => goToPage(Number(event.target.value))}
-                className="page-range"
-              />
-              <div className="page-status">
-                Page {snapshot.pagination.currentPage} / {snapshot.pagination.totalPages}
+                <div className="reader-progress">
+                  <input
+                    type="range"
+                    min="1"
+                    max={snapshot.pagination.totalPages}
+                    value={snapshot.pagination.currentPage}
+                    onChange={async (event) => goToPage(Number(event.target.value))}
+                    className="page-range"
+                  />
+                  <div className="page-status">
+                    Page {snapshot.pagination.currentPage} / {snapshot.pagination.totalPages}
+                  </div>
+                </div>
+
+                <div
+                  ref={containerRef}
+                  data-mode={mode}
+                  className="reader-root"
+                >
+                  <article className="placeholder-page">
+                    <h2>Waiting for an EPUB</h2>
+                    <p>Select a local EPUB file to parse and render it.</p>
+                  </article>
+                </div>
               </div>
-            </div>
 
-            <div
-              ref={containerRef}
-              data-mode={mode}
-              className="reader-root"
-            >
-              <article className="placeholder-page">
-                <h2>Waiting for an EPUB</h2>
-                <p>Select a local EPUB file to parse and render it.</p>
-              </article>
+              <aside className="reader-side">
+                <div className="reader-diagnostics" data-render-backend={snapshot.renderBackend ?? "none"}>
+                  <div className="reader-diagnostics-header">Chapter Diagnostics</div>
+                  <div className="reader-diagnostics-grid">
+                    <span>Backend</span>
+                    <strong>{snapshot.renderBackend ?? "none"}</strong>
+                    <span>Mode</span>
+                    <strong>{snapshot.diagnostics?.mode ?? "none"}</strong>
+                    <span>Score</span>
+                    <strong>{snapshot.diagnostics?.score ?? 0}</strong>
+                    <span>Reasons</span>
+                    <strong>
+                      {snapshot.diagnostics?.reasons.length
+                        ? snapshot.diagnostics.reasons.join(", ")
+                        : "none"}
+                    </strong>
+                  </div>
+                  <div className="reader-diagnostics-list">
+                    {snapshot.visibleSectionDiagnostics.length === 0 ? (
+                      <p className="reader-diagnostics-empty">No visible sections</p>
+                    ) : (
+                      snapshot.visibleSectionDiagnostics.map((diagnostic) => (
+                        <article
+                          key={diagnostic.sectionId ?? diagnostic.sectionHref ?? diagnostic.mode}
+                          className="reader-diagnostics-card"
+                          data-current={diagnostic.isCurrent ? "true" : "false"}
+                          data-mode={diagnostic.mode}
+                        >
+                          <div className="reader-diagnostics-card-header">
+                            <strong>{diagnostic.sectionHref ?? diagnostic.sectionId ?? "Unknown section"}</strong>
+                            <span>{diagnostic.isCurrent ? "Current" : "Visible"}</span>
+                          </div>
+                          <div className="reader-diagnostics-card-meta">
+                            <span>Mode {diagnostic.mode}</span>
+                            <span>Score {diagnostic.score}</span>
+                          </div>
+                          <p className="reader-diagnostics-card-reasons">
+                            {diagnostic.reasons.length ? diagnostic.reasons.join(", ") : "No fallback reasons"}
+                          </p>
+                        </article>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </aside>
             </div>
           </section>
         </section>

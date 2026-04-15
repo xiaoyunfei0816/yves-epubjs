@@ -5,6 +5,13 @@ export default defineConfig({
   testMatch: ["**/*.spec.js"],
   timeout: 30_000,
   use: {
+    baseURL: "http://127.0.0.1:4173",
     headless: true
-  }
+  },
+  webServer: {
+    command: "pnpm --filter @pretext-epub/demo dev --host 127.0.0.1 --port 4173",
+    url: "http://127.0.0.1:4173",
+    reuseExistingServer: true,
+    timeout: 30_000
+  },
 });

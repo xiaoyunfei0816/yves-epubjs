@@ -17,6 +17,10 @@ export type BookParserInput = {
 export type BookParseResult = {
   book: Book;
   resources: ResourceContainer;
+  sectionContents: Array<{
+    href: string;
+    content: string;
+  }>;
 };
 
 export class BookParser {
@@ -43,20 +47,32 @@ export class BookParser {
             ncxManifestItem.href
           )
         : [];
-    const sections = await Promise.all(
+    const sectionContents = await Promise.all(
       opf.spine.map(async (spineItem, index) => {
         const sectionXml = await container.readText(spineItem.href);
-        const section = parseSpineContentDocument({
+        return {
           href: spineItem.href,
           content: sectionXml,
+          index
+        };
+      })
+    );
+    const sections = sectionContents.map((entry) => {
+      const spineItem = opf.spine[entry.index];
+      if (!spineItem) {
+        throw new Error(`Missing spine item at index ${entry.index}`);
+      }
+
+        const section = parseSpineContentDocument({
+          href: spineItem.href,
+          content: entry.content,
           ...(spineItem.mediaType ? { mediaType: spineItem.mediaType } : {})
         });
         return {
           ...section,
-          id: `section-${index + 1}`
+          id: `section-${entry.index + 1}`
         };
-      })
-    );
+      });
 
     return {
       book: {
@@ -66,7 +82,8 @@ export class BookParser {
         toc,
         sections
       },
-      resources: container
+      resources: container,
+      sectionContents: sectionContents.map(({ href, content }) => ({ href, content }))
     };
   }
 

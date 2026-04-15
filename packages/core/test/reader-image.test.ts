@@ -109,6 +109,8 @@ describe("EpubReader image resources", () => {
     await reader.render();
     await Promise.resolve();
     await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await Promise.resolve();
 
     const hit = reader.hitTest({
       x: 160,
@@ -117,6 +119,57 @@ describe("EpubReader image resources", () => {
 
     expect(hit?.kind).toBe("image");
     expect(hit && hit.kind === "image" ? hit.src : null).toBe("blob:cover-image");
+
+    reader.destroy();
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
+  });
+
+  it("patches rendered DOM image resources in place without forcing a scroll rerender", async () => {
+    const createObjectURL = vi.fn(() => "blob:dom-cover-image");
+    const revokeObjectURL = vi.fn();
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+
+    const container = document.createElement("div");
+    container.innerHTML =
+      '<div class="epub-dom-section"><img src="OPS/images/dom-cover.png" alt="Cover"></div>';
+    const reader = new EpubReader({ container });
+    const renderSpy = vi.spyOn(
+      reader as unknown as { renderCurrentSection(renderBehavior?: "relocate" | "preserve"): void },
+      "renderCurrentSection"
+    );
+
+    const resources = new InMemoryResourceContainer({
+      "OPS/images/dom-cover.png": new Uint8Array([137, 80, 78, 71])
+    });
+
+    (
+      reader as unknown as {
+        resources: typeof resources;
+        resolveDomResourceUrl(path: string): string;
+      }
+    ).resources = resources;
+
+    expect(
+      (
+        reader as unknown as {
+          resolveDomResourceUrl(path: string): string;
+        }
+      ).resolveDomResourceUrl("OPS/images/dom-cover.png")
+    ).toBe("OPS/images/dom-cover.png");
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const image = container.querySelector("img");
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(image?.getAttribute("src")).toBe("blob:dom-cover-image");
+    expect(renderSpy).not.toHaveBeenCalled();
 
     reader.destroy();
     URL.createObjectURL = originalCreateObjectURL;

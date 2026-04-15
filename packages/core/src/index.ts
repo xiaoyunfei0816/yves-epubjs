@@ -1,5 +1,11 @@
 export * from "./model/types";
 export * from "./runtime/reader";
+export * from "./runtime/chapter-preprocess";
+export * from "./runtime/chapter-analysis-input";
+export * from "./runtime/chapter-render-decision";
+export * from "./runtime/chapter-render-input";
+export * from "./runtime/chapter-render-analyzer";
+export * from "./runtime/chapter-render-decision-cache";
 export * from "./container/resource-container";
 export * from "./container/normalize-input";
 export * from "./container/resource-path";
@@ -23,3 +29,5 @@ export * from "./layout/layout-engine";
 export * from "./renderer/draw-ops";
 export * from "./renderer/display-list-builder";
 export * from "./renderer/canvas-renderer";
+export * from "./renderer/dom-chapter-renderer";
+export * from "./renderer/dom-chapter-style";

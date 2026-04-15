@@ -1,0 +1,19 @@
+{
+  "id": "hybrid-render-fallback",
+  "title": "Chapter-Level Hybrid Render Fixture Set",
+  "status": "active",
+  "samples": [
+    {
+      "id": "canvas-linear",
+      "file": "chapters/canvas-linear.xhtml",
+      "expectedMode": "canvas",
+      "covers": ["analyzer", "runtime", "demo"]
+    },
+    {
+      "id": "dom-complex",
+      "file": "chapters/dom-complex.xhtml",
+      "expectedMode": "dom",
+      "covers": ["analyzer", "runtime", "demo"]
+    }
+  ]
+}

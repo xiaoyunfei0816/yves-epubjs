@@ -1,5 +1,6 @@
 import EventEmitter from "eventemitter3";
 import { getMimeTypeFromPath } from "../container/resource-mime";
+import { resolveResourcePath } from "../container/resource-path";
 import {
   LayoutEngine,
   type LayoutBlock,
@@ -7,6 +8,7 @@ import {
 } from "../layout/layout-engine";
 import { CanvasRenderer } from "../renderer/canvas-renderer";
 import { DisplayListBuilder } from "../renderer/display-list-builder";
+import { DomChapterRenderer } from "../renderer/dom-chapter-renderer";
 import { BookParser } from "../parser/book-parser";
 import {
   normalizeEpubInput,
@@ -15,11 +17,13 @@ import {
 import type {
   BlockNode,
   Book,
+  ChapterRenderDecision,
   HitTestResult,
   InlineNode,
   Locator,
   Point,
   RenderMetrics,
+  RenderDiagnostics,
   ReaderEvent,
   ReaderEventMap,
   ReaderOptions,
@@ -27,6 +31,7 @@ import type {
   SearchResult,
   Theme,
   TypographyOptions,
+  VisibleSectionDiagnostics,
   VisibleDrawBounds
 } from "../model/types";
 import type {
@@ -37,6 +42,15 @@ import {
   extractBlockText as collectBlockText,
   extractInlineText as collectInlineText
 } from "../utils/block-text";
+import { buildChapterAnalysisInput } from "./chapter-analysis-input";
+import {
+  analyzeChapterRenderMode
+} from "./chapter-render-analyzer";
+import { ChapterRenderDecisionCache } from "./chapter-render-decision-cache";
+import {
+  createSharedChapterRenderInput,
+  type SharedChapterRenderInput
+} from "./chapter-render-input";
 
 type PageBlockSlice =
   | {
@@ -68,6 +82,8 @@ type ScrollAnchor = {
   fallbackScrollTop: number;
 };
 
+type ResourceConsumer = "canvas" | "dom";
+
 export type PaginationInfo = {
   currentPage: number;
   totalPages: number;
@@ -90,17 +106,21 @@ export class EpubReader {
   private readonly layoutEngine = new LayoutEngine();
   private readonly displayListBuilder = new DisplayListBuilder();
   private readonly canvasRenderer = new CanvasRenderer();
+  private readonly domChapterRenderer = new DomChapterRenderer();
+  private readonly chapterRenderDecisionCache = new ChapterRenderDecisionCache();
 
   private book: Book | null = null;
   private resources: {
     readBinary(path: string): Promise<Uint8Array>;
   } | null = null;
+  private chapterRenderInputs: SharedChapterRenderInput[] = [];
   private locator: Locator | null = null;
   private mode: "scroll" | "paginated";
   private theme: Theme;
   private typography: TypographyOptions;
   private currentSectionIndex = 0;
   private readonly objectUrls = new Map<string, string>();
+  private readonly pendingResourceConsumers = new Map<string, Set<ResourceConsumer>>();
   private resizeObserver: ResizeObserver | null = null;
   private lastMeasuredWidth = 0;
   private pages: ReaderPage[] = [];
@@ -111,6 +131,7 @@ export class EpubReader {
   private scrollWindowEnd = -1;
   private scrollSyncFrame: number | null = null;
   private scrollRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private resourceRenderRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private lastVisibleBounds: VisibleDrawBounds = [];
   private lastInteractionRegions: InteractionRegion[] = [];
   private lastRenderedSectionIds: string[] = [];
@@ -124,6 +145,7 @@ export class EpubReader {
     totalCanvasHeight: 0
   };
   private renderVersion = 0;
+  private lastChapterRenderDecision: ChapterRenderDecision | null = null;
 
   private static readonly SCROLL_WINDOW_RADIUS = 1;
   private static readonly SCROLL_SLICE_OVERSCAN_MULTIPLIER = 0.75;
@@ -154,8 +176,12 @@ export class EpubReader {
     this.book = parsed.book;
     this.resources = parsed.resources;
     this.revokeObjectUrls();
+    this.chapterRenderInputs = parsed.sectionContents.map((entry) =>
+      createSharedChapterRenderInput(entry)
+    );
     this.pages = [];
     this.sectionEstimatedHeights = [];
+    this.pendingResourceConsumers.clear();
     this.currentPageNumber = 1;
     this.scrollWindowStart = -1;
     this.scrollWindowEnd = -1;
@@ -171,7 +197,9 @@ export class EpubReader {
       highlightedDrawOpCount: 0,
       totalCanvasHeight: 0
     };
+    this.lastChapterRenderDecision = null;
     this.clearDeferredScrollRefresh();
+    this.clearDeferredResourceRenderRefresh();
     this.events.emit("opened", { book: this.book });
     return this.book;
   }
@@ -242,29 +270,8 @@ export class EpubReader {
       return;
     }
 
-    const [targetHref, targetAnchor] = splitHrefFragment(tocItem.href);
-    const normalizedTargetHref = normalizeBookHref(targetHref);
-
-    const targetIndex = this.book.sections.findIndex((section) => {
-      const normalizedSectionHref = normalizeBookHref(section.href);
-      return (
-        normalizedSectionHref === normalizedTargetHref ||
-        normalizedTargetHref.endsWith(normalizedSectionHref) ||
-        normalizedSectionHref.endsWith(normalizedTargetHref)
-      );
-    });
-
-    if (targetIndex >= 0) {
-      const section = this.book.sections[targetIndex];
-      const blockId =
-        section && targetAnchor ? section.anchors[targetAnchor] : undefined;
-      const locator: Locator = {
-        spineIndex: targetIndex,
-        progressInSection: 0
-      };
-      if (blockId) {
-        locator.blockId = blockId;
-      }
+    const locator = this.resolveHrefLocator(tocItem.href);
+    if (locator) {
       await this.goToLocation(locator);
     }
   }
@@ -357,6 +364,10 @@ export class EpubReader {
     return results;
   }
 
+  async goToSearchResult(result: SearchResult): Promise<void> {
+    await this.goToLocation(result.locator);
+  }
+
   getCurrentLocation(): Locator | null {
     return this.locator;
   }
@@ -390,6 +401,58 @@ export class EpubReader {
 
   getRenderMetrics(): RenderMetrics {
     return { ...this.lastRenderMetrics };
+  }
+
+  getRenderDiagnostics(): RenderDiagnostics | null {
+    if (!this.book || !this.lastChapterRenderDecision) {
+      return null;
+    }
+
+    const section = this.book.sections[this.currentSectionIndex];
+    return {
+      mode: this.lastChapterRenderDecision.mode,
+      score: this.lastChapterRenderDecision.score,
+      reasons: [...this.lastChapterRenderDecision.reasons],
+      ...(section?.id ? { sectionId: section.id } : {}),
+      ...(section?.href ? { sectionHref: section.href } : {})
+    };
+  }
+
+  getVisibleSectionDiagnostics(): VisibleSectionDiagnostics[] {
+    if (!this.book) {
+      return [];
+    }
+
+    const visibleSectionIds = this.lastRenderedSectionIds.length
+      ? this.lastRenderedSectionIds
+      : this.book.sections[this.currentSectionIndex]?.id
+        ? [this.book.sections[this.currentSectionIndex]!.id]
+        : [];
+
+    const diagnostics: VisibleSectionDiagnostics[] = [];
+    for (const sectionId of visibleSectionIds) {
+      const sectionIndex = this.book.sections.findIndex((section) => section.id === sectionId);
+      if (sectionIndex < 0) {
+        continue;
+      }
+
+      const section = this.book.sections[sectionIndex];
+      if (!section) {
+        continue;
+      }
+
+      const decision = this.resolveChapterRenderDecision(sectionIndex);
+      diagnostics.push({
+        mode: decision.mode,
+        score: decision.score,
+        reasons: [...decision.reasons],
+        sectionId: section.id,
+        sectionHref: section.href,
+        isCurrent: sectionIndex === this.currentSectionIndex
+      });
+    }
+
+    return diagnostics;
   }
 
   mapLocatorToViewport(locator: Locator): VisibleDrawBounds {
@@ -441,6 +504,7 @@ export class EpubReader {
     this.events.removeAllListeners();
     this.book = null;
     this.resources = null;
+    this.chapterRenderInputs = [];
     this.locator = null;
     this.pages = [];
     this.sectionEstimatedHeights = [];
@@ -458,7 +522,9 @@ export class EpubReader {
       highlightedDrawOpCount: 0,
       totalCanvasHeight: 0
     };
+    this.lastChapterRenderDecision = null;
     this.clearDeferredScrollRefresh();
+    this.clearDeferredResourceRenderRefresh();
     this.revokeObjectUrls();
     if (this.options.container) {
       this.options.container.innerHTML = "";
@@ -482,6 +548,9 @@ export class EpubReader {
 
   getPaginationInfo(): PaginationInfo {
     this.ensurePages();
+    if (this.mode === "scroll") {
+      this.syncCurrentPageFromSection();
+    }
     return {
       currentPage: Math.max(
         1,
@@ -518,29 +587,43 @@ export class EpubReader {
       return;
     }
 
+    const locator = this.resolveHrefLocator(href);
+    if (locator) {
+      await this.goToLocation(locator);
+    }
+  }
+
+  private resolveHrefLocator(href: string): Locator | null {
+    if (!this.book) {
+      return null;
+    }
+
     const [targetHref, targetAnchor] = splitHrefFragment(href);
-    const normalizedTargetHref = normalizeBookHref(targetHref);
-    const targetIndex = this.book.sections.findIndex((section) => {
-      const normalizedSectionHref = normalizeBookHref(section.href);
-      return (
-        normalizedSectionHref === normalizedTargetHref ||
-        normalizedTargetHref.endsWith(normalizedSectionHref) ||
-        normalizedSectionHref.endsWith(normalizedTargetHref)
-      );
-    });
+    const targetIndex = targetHref.trim()
+      ? this.book.sections.findIndex((section) => {
+          const normalizedSectionHref = normalizeBookHref(section.href);
+          const normalizedTargetHref = normalizeBookHref(targetHref);
+          return (
+            normalizedSectionHref === normalizedTargetHref ||
+            normalizedTargetHref.endsWith(normalizedSectionHref) ||
+            normalizedSectionHref.endsWith(normalizedTargetHref)
+          );
+        })
+      : this.currentSectionIndex;
 
     if (targetIndex < 0) {
-      return;
+      return null;
     }
 
     const section = this.book.sections[targetIndex];
     const blockId =
       section && targetAnchor ? section.anchors[targetAnchor] : undefined;
-    await this.goToLocation({
+
+    return {
       spineIndex: targetIndex,
       progressInSection: 0,
       ...(blockId ? { blockId } : {})
-    });
+    };
   }
 
   private renderCurrentSection(renderBehavior: RenderBehavior = "relocate"): void {
@@ -553,30 +636,47 @@ export class EpubReader {
         ? this.captureScrollAnchor()
         : null;
     if (this.mode === "scroll" && renderBehavior === "preserve") {
-      this.syncPositionFromScroll(false);
+      const anchoredSectionIndex = preservedScrollAnchor?.sectionId
+        ? this.book.sections.findIndex(
+            (candidate) => candidate.id === preservedScrollAnchor.sectionId
+          )
+        : -1;
+      if (anchoredSectionIndex >= 0) {
+        this.currentSectionIndex = anchoredSectionIndex;
+      }
     }
 
     const section = this.book.sections[this.currentSectionIndex];
     if (!section) {
       return;
     }
+    const chapterRenderDecision = this.resolveChapterRenderDecision(this.currentSectionIndex);
+    this.lastChapterRenderDecision = chapterRenderDecision;
 
     this.applyContainerTheme();
-    const layout = this.layoutEngine.layout(
-      {
-        section,
-        spineIndex: this.currentSectionIndex,
-        viewportWidth: this.getContentWidth(),
-        viewportHeight: this.options.container.clientHeight,
-        typography: this.typography,
-        fontFamily: this.getFontFamily()
-      },
-      this.mode
-    );
-    this.lastMeasuredWidth = layout.width;
+    this.options.container.dataset.renderMode = chapterRenderDecision.mode;
     this.options.container.dataset.mode = this.mode;
     const renderVersion = ++this.renderVersion;
     if (this.mode === "paginated") {
+      const layout = this.layoutEngine.layout(
+        {
+          section,
+          spineIndex: this.currentSectionIndex,
+          viewportWidth: this.getContentWidth(),
+          viewportHeight: this.options.container.clientHeight,
+          typography: this.typography,
+          fontFamily: this.getFontFamily()
+        },
+        this.mode
+      );
+      this.lastMeasuredWidth = layout.width;
+      if (chapterRenderDecision.mode === "dom") {
+        this.pages = [];
+        this.currentPageNumber = 1;
+        this.renderDomSection(section, renderVersion);
+        this.syncDomSectionStateAfterRender(renderBehavior, preservedScrollAnchor);
+        return;
+      }
       this.ensurePages(layout);
       const currentPage = this.resolveRenderedPage(section.id);
       this.renderPaginatedCanvas(section, currentPage, renderVersion);
@@ -593,7 +693,7 @@ export class EpubReader {
         };
       }
     } else {
-      this.ensurePages();
+      this.lastMeasuredWidth = this.getContentWidth();
       this.updateScrollWindowBounds();
       this.renderScrollableCanvas(renderVersion);
       if (renderBehavior === "relocate") {
@@ -610,6 +710,15 @@ export class EpubReader {
         };
         return;
       }
+      if (renderBehavior === "relocate" && this.locator) {
+        this.syncCurrentPageFromSection();
+        this.locator = {
+          ...this.locator,
+          spineIndex: this.currentSectionIndex,
+          progressInSection: clampProgress(this.locator.progressInSection ?? 0)
+        };
+        return;
+      }
       if (!this.syncPositionFromScroll(false)) {
         this.syncCurrentPageFromSection();
         this.locator = {
@@ -619,6 +728,106 @@ export class EpubReader {
         };
       }
     }
+  }
+
+  private renderDomSection(section: SectionDocument, renderVersion: number): void {
+    if (!this.options.container || renderVersion !== this.renderVersion) {
+      return;
+    }
+
+    const input = this.chapterRenderInputs[this.currentSectionIndex];
+    if (!input) {
+      return;
+    }
+
+    this.domChapterRenderer.render(this.options.container, {
+      sectionId: section.id,
+      sectionHref: section.href,
+      nodes: input.preprocessed.nodes,
+      theme: this.theme,
+      typography: this.typography,
+      fontFamily: this.getFontFamily(),
+      resolveAttributeValue: ({ tagName, attributeName, value }) =>
+        this.resolveDomAttributeValue(section.href, tagName, attributeName, value)
+    });
+    this.lastInteractionRegions = [];
+    this.lastVisibleBounds = [];
+    this.lastRenderedSectionIds = [section.id];
+    this.lastRenderMetrics = {
+      backend: "dom",
+      visibleSectionCount: 1,
+      visibleDrawOpCount: 0,
+      highlightedDrawOpCount: 0,
+      totalCanvasHeight: this.options.container.scrollHeight
+    };
+  }
+
+  private syncDomSectionStateAfterRender(
+    renderBehavior: RenderBehavior,
+    preservedScrollAnchor: ScrollAnchor | null
+  ): void {
+    if (!this.options.container) {
+      return;
+    }
+
+    if (this.mode === "scroll") {
+      if (renderBehavior === "preserve" && preservedScrollAnchor) {
+        this.options.container.scrollTop = preservedScrollAnchor.fallbackScrollTop;
+      } else {
+        this.scrollDomSectionToProgress(this.locator?.progressInSection ?? 0);
+      }
+    }
+
+    this.locator = {
+      ...this.locator,
+      spineIndex: this.currentSectionIndex,
+      progressInSection: this.locator?.progressInSection ?? 0
+    };
+  }
+
+  private scrollDomSectionToProgress(progressInSection: number): void {
+    if (!this.options.container) {
+      return;
+    }
+
+    const section = this.options.container.querySelector(".epub-dom-section");
+    const sectionHeight =
+      (section instanceof HTMLElement
+        ? section.scrollHeight || section.offsetHeight
+        : 0) || this.options.container.scrollHeight;
+    const clamped = Number.isFinite(progressInSection)
+      ? Math.max(0, Math.min(progressInSection, 1))
+      : 0;
+    const availableScroll = Math.max(
+      0,
+      sectionHeight - this.options.container.clientHeight
+    );
+    this.options.container.scrollTop = availableScroll * clamped;
+  }
+
+  private resolveChapterRenderDecision(sectionIndex: number): ChapterRenderDecision {
+    const input = this.chapterRenderInputs[sectionIndex];
+    if (!input) {
+      return {
+        mode: "canvas",
+        score: 0,
+        reasons: []
+      };
+    }
+
+    return this.chapterRenderDecisionCache.resolve(
+      {
+        href: input.href,
+        content: input.content
+      },
+      () =>
+        analyzeChapterRenderMode(
+          buildChapterAnalysisInput({
+            href: input.href,
+            chapter: input.preprocessed
+          })
+        )
+    );
   }
 
   private applyContainerTheme(): void {
@@ -696,6 +905,7 @@ export class EpubReader {
         top: number;
         height: number;
       }>;
+      domHtml?: string;
     }> = [];
     const measuredSectionHeights: number[] = [];
 
@@ -712,6 +922,35 @@ export class EpubReader {
           sectionId: section.id,
           sectionHref: section.href,
           height
+        });
+        continue;
+      }
+
+      const chapterRenderDecision = this.resolveChapterRenderDecision(index);
+      if (chapterRenderDecision.mode === "dom") {
+        const input = this.chapterRenderInputs[index];
+        const height =
+          this.sectionEstimatedHeights[index] ??
+          Math.max(this.getPageHeight(), this.options.container.clientHeight);
+        measuredSectionHeights[index] = height;
+        sectionsToRender.push({
+          sectionId: section.id,
+          sectionHref: section.href,
+          height,
+          ...(input
+            ? {
+                domHtml: this.domChapterRenderer.createMarkup({
+                  sectionId: section.id,
+                  sectionHref: section.href,
+                  nodes: input.preprocessed.nodes,
+                  theme: this.theme,
+                  typography: this.typography,
+                  fontFamily: this.getFontFamily(),
+                  resolveAttributeValue: ({ tagName, attributeName, value }) =>
+                    this.resolveDomAttributeValue(section.href, tagName, attributeName, value)
+                })
+              }
+            : {})
         });
         continue;
       }
@@ -737,7 +976,7 @@ export class EpubReader {
         typography: this.typography,
         locatorMap: layout.locatorMap,
         resolveImageLoaded: (src) => this.isImageResourceReady(src),
-        resolveImageUrl: (src) => this.resolveRenderableResourceUrl(src),
+        resolveImageUrl: (src) => this.resolveCanvasResourceUrl(src),
         highlightedBlockIds: this.highlightedBlockIds,
         activeBlockId: this.locator?.blockId
       });
@@ -809,14 +1048,22 @@ export class EpubReader {
       sectionsToRender,
       this.options.canvas
     );
+    for (let index = 0; index < this.book.sections.length; index += 1) {
+      const section = this.book.sections[index];
+      if (!section) {
+        continue;
+      }
+      this.sectionEstimatedHeights[index] = this.getSectionHeight(section.id);
+    }
     this.lastInteractionRegions = this.offsetInteractionRegionsForScroll(result.sections);
     this.lastVisibleBounds = this.collectVisibleBoundsForScroll(sectionsToRender);
-    this.lastRenderedSectionIds = result.sections.map((entry) => entry.sectionId);
+    this.lastRenderedSectionIds = sectionsToRender.map((entry) => entry.sectionId);
     const highlightedDrawOpCount = sectionsToRender
       .flatMap((entry) => entry.displayList?.ops ?? [])
       .filter((op) => op.kind === "text" && Boolean(op.highlightColor)).length;
+    const currentDecision = this.resolveChapterRenderDecision(this.currentSectionIndex);
     this.lastRenderMetrics = {
-      backend: "canvas",
+      backend: currentDecision.mode,
       visibleSectionCount: result.sections.length,
       visibleDrawOpCount: result.drawOpCount,
       highlightedDrawOpCount,
@@ -867,7 +1114,7 @@ export class EpubReader {
       typography: this.typography,
       locatorMap,
       resolveImageLoaded: (src) => this.isImageResourceReady(src),
-      resolveImageUrl: (src) => this.resolveRenderableResourceUrl(src),
+      resolveImageUrl: (src) => this.resolveCanvasResourceUrl(src),
       highlightedBlockIds: this.highlightedBlockIds,
       activeBlockId: this.locator?.blockId
     });
@@ -907,7 +1154,18 @@ export class EpubReader {
     return inlines.map((inline) => collectInlineText(inline)).join("");
   }
 
-  private resolveRenderableResourceUrl(path: string): string {
+  private resolveCanvasResourceUrl(path: string): string {
+    return this.resolveRenderableResourceUrl(path, "canvas");
+  }
+
+  private resolveDomResourceUrl(path: string): string {
+    return this.resolveRenderableResourceUrl(path, "dom");
+  }
+
+  private resolveRenderableResourceUrl(
+    path: string,
+    consumer: ResourceConsumer
+  ): string {
     if (
       !this.resources ||
       typeof Blob === "undefined" ||
@@ -916,6 +1174,7 @@ export class EpubReader {
       return path;
     }
 
+    this.trackRenderableResourceConsumer(path, consumer);
     const cached = this.objectUrls.get(path);
     if (cached) {
       return cached;
@@ -945,14 +1204,50 @@ export class EpubReader {
           URL.revokeObjectURL(previous);
         }
         this.objectUrls.set(path, objectUrl);
-        this.renderCurrentSection("preserve");
+        const consumers = this.pendingResourceConsumers.get(path);
+        if (consumers?.has("dom")) {
+          this.patchRenderedDomResource(path, objectUrl);
+        }
+        if (consumers?.has("canvas")) {
+          this.scheduleDeferredResourceRenderRefresh();
+        }
+        this.pendingResourceConsumers.delete(path);
       })
       .catch(() => {
         // Keep the original path when the resource cannot be resolved.
+        this.pendingResourceConsumers.delete(path);
       });
 
     this.objectUrls.set(path, placeholder);
     return placeholder;
+  }
+
+  private resolveDomAttributeValue(
+    sectionHref: string,
+    tagName: string,
+    attributeName: string,
+    value: string
+  ): string {
+    const normalizedTagName = tagName.toLowerCase();
+    const normalizedAttributeName = attributeName.toLowerCase();
+
+    if (
+      normalizedAttributeName !== "src" ||
+      (normalizedTagName !== "img" && normalizedTagName !== "source")
+    ) {
+      return value;
+    }
+
+    if (
+      value.startsWith("data:") ||
+      value.startsWith("blob:") ||
+      value.startsWith("//") ||
+      /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value)
+    ) {
+      return value;
+    }
+
+    return this.resolveDomResourceUrl(resolveResourcePath(sectionHref, value));
   }
 
   private revokeObjectUrls(): void {
@@ -971,6 +1266,7 @@ export class EpubReader {
     }
 
     this.objectUrls.clear();
+    this.pendingResourceConsumers.clear();
   }
 
   private getContentWidth(): number {
@@ -1084,6 +1380,11 @@ export class EpubReader {
 
     this.options.container.addEventListener("click", (event) => {
       const target = event.target;
+      if (target instanceof HTMLElement && target.closest(".epub-dom-section")) {
+        this.handleDomClick(event);
+        return;
+      }
+
       if (!(target instanceof HTMLElement) || !this.options.container) {
         return;
       }
@@ -1114,6 +1415,58 @@ export class EpubReader {
         this.events.emit("relocated", { locator: this.locator });
       }
     });
+  }
+
+  private handleDomClick(event: MouseEvent): void {
+    if (!this.options.container || !this.book) {
+      return;
+    }
+
+    if (hasActiveTextSelection()) {
+      return;
+    }
+
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const link = target.closest("a[href]");
+    if (link instanceof HTMLAnchorElement) {
+      const href = link.getAttribute("href");
+      if (!href) {
+        return;
+      }
+
+      event.preventDefault();
+      void this.goToHref(href);
+      return;
+    }
+
+    const sectionElement = target.closest(".epub-dom-section");
+    if (!(sectionElement instanceof HTMLElement)) {
+      return;
+    }
+
+    const sectionId = sectionElement.dataset.sectionId;
+    const sectionIndex = sectionId
+      ? this.book.sections.findIndex((section) => section.id === sectionId)
+      : this.currentSectionIndex;
+    if (sectionIndex < 0) {
+      return;
+    }
+
+    const sectionHeight = Math.max(1, sectionElement.scrollHeight || sectionElement.offsetHeight || 1);
+    const clickY = event.clientY - sectionElement.getBoundingClientRect().top;
+    const progress = Math.max(0, Math.min(clickY / sectionHeight, 1));
+
+    this.currentSectionIndex = sectionIndex;
+    this.locator = {
+      spineIndex: sectionIndex,
+      progressInSection: progress
+    };
+    this.syncCurrentPageFromSection();
+    this.events.emit("relocated", { locator: this.locator });
   }
 
   private async waitForFonts(): Promise<void> {
@@ -1567,8 +1920,15 @@ export class EpubReader {
 
     for (const sectionId of this.lastRenderedSectionIds) {
       const window = this.lastScrollRenderWindows.get(sectionId);
+      const sectionIndex = this.book.sections.findIndex((section) => section.id === sectionId);
+      if (
+        sectionIndex >= 0 &&
+        this.resolveChapterRenderDecision(sectionIndex).mode === "dom"
+      ) {
+        continue;
+      }
       if (!window || window.length === 0) {
-        this.renderScrollableCanvas(this.renderVersion);
+        this.rerenderScrollSlicesPreservingScrollTop();
         return true;
       }
 
@@ -1590,7 +1950,7 @@ export class EpubReader {
         localVisibleTop < coverageTop + refreshGuard ||
         localVisibleBottom > coverageBottom - refreshGuard
       ) {
-        this.renderScrollableCanvas(this.renderVersion);
+        this.rerenderScrollSlicesPreservingScrollTop();
         return true;
       }
     }
@@ -1617,25 +1977,96 @@ export class EpubReader {
     }
   }
 
+  private rerenderScrollSlicesPreservingScrollTop(): void {
+    if (!this.options.container) {
+      return;
+    }
+
+    const preservedScrollTop = this.options.container.scrollTop;
+    const preservedScrollLeft = this.options.container.scrollLeft;
+    this.isProgrammaticScroll = true;
+    this.renderScrollableCanvas(this.renderVersion);
+    this.options.container.scrollTop = preservedScrollTop;
+    this.options.container.scrollLeft = preservedScrollLeft;
+  }
+
+  private scheduleDeferredResourceRenderRefresh(): void {
+    if (!this.book || !this.options.container) {
+      return;
+    }
+
+    if (this.resourceRenderRefreshTimer !== null) {
+      return;
+    }
+
+    this.resourceRenderRefreshTimer = setTimeout(() => {
+      this.resourceRenderRefreshTimer = null;
+      this.renderCurrentSection("preserve");
+    }, 48);
+  }
+
+  private clearDeferredResourceRenderRefresh(): void {
+    if (this.resourceRenderRefreshTimer !== null) {
+      clearTimeout(this.resourceRenderRefreshTimer);
+      this.resourceRenderRefreshTimer = null;
+    }
+  }
+
   private captureScrollAnchor(): ScrollAnchor | null {
     if (!this.options.container || !this.book) {
       return null;
     }
 
     const scrollTop = this.options.container.scrollTop;
-    const sectionIndex = this.findSectionIndexForOffset(scrollTop);
-    const section = this.book.sections[sectionIndex];
-    if (!section) {
+    const renderedSections = Array.from(
+      this.options.container.querySelectorAll<HTMLElement>(
+        "article[data-section-id]:not(.epub-section-virtual)"
+      )
+    )
+      .map((element) => {
+        const sectionId = element.dataset.sectionId;
+        if (!sectionId) {
+          return null;
+        }
+
+        const height = getRenderedSectionHeight(element);
+        if (height <= 0) {
+          return null;
+        }
+
+        return {
+          sectionId,
+          top: element.offsetTop,
+          height
+        };
+      })
+      .filter(
+        (
+          entry
+        ): entry is {
+          sectionId: string;
+          top: number;
+          height: number;
+        } => entry !== null
+      )
+      .sort((left, right) => left.top - right.top);
+
+    const renderedMatch =
+      renderedSections.find(
+        (entry) => scrollTop >= entry.top && scrollTop < entry.top + entry.height
+      ) ?? null;
+
+    if (renderedMatch) {
       return {
-        sectionId: "",
-        offsetWithinSection: 0,
+        sectionId: renderedMatch.sectionId,
+        offsetWithinSection: Math.max(0, scrollTop - renderedMatch.top),
         fallbackScrollTop: scrollTop
       };
     }
 
     return {
-      sectionId: section.id,
-      offsetWithinSection: Math.max(0, scrollTop - this.getSectionTop(section.id)),
+      sectionId: "",
+      offsetWithinSection: 0,
       fallbackScrollTop: scrollTop
     };
   }
@@ -1656,6 +2087,37 @@ export class EpubReader {
       0,
       sectionTop + anchor.offsetWithinSection
     );
+  }
+
+  private trackRenderableResourceConsumer(
+    path: string,
+    consumer: ResourceConsumer
+  ): void {
+    const consumers = this.pendingResourceConsumers.get(path) ?? new Set<ResourceConsumer>();
+    consumers.add(consumer);
+    this.pendingResourceConsumers.set(path, consumers);
+  }
+
+  private patchRenderedDomResource(path: string, objectUrl: string): boolean {
+    if (!this.options.container) {
+      return false;
+    }
+
+    const candidates = this.options.container.querySelectorAll<HTMLElement>(
+      ".epub-dom-section img[src], .epub-dom-section source[src]"
+    );
+    let patched = false;
+
+    for (const element of candidates) {
+      if (element.getAttribute("src") !== path) {
+        continue;
+      }
+
+      element.setAttribute("src", objectUrl);
+      patched = true;
+    }
+
+    return patched;
   }
 
   private collectRenderedCanvasSections(): Array<{
@@ -1792,6 +2254,15 @@ export class EpubReader {
     if (sectionElement && sectionElement.offsetHeight > 0) {
       return sectionElement.offsetHeight;
     }
+    if (sectionElement) {
+      const domSection = sectionElement.querySelector<HTMLElement>(".epub-dom-section");
+      if (domSection) {
+        const domHeight = domSection.scrollHeight || domSection.offsetHeight;
+        if (domHeight > 0) {
+          return domHeight;
+        }
+      }
+    }
 
     if (!this.book) {
       return this.getPageHeight();
@@ -1880,4 +2351,34 @@ function dedupeScrollRenderWindows(
   }
 
   return deduped.sort((left, right) => left.top - right.top);
+}
+
+function hasActiveTextSelection(): boolean {
+  if (typeof window === "undefined" || typeof window.getSelection !== "function") {
+    return false;
+  }
+
+  const selection = window.getSelection();
+  return Boolean(selection && selection.toString().trim());
+}
+
+function clampProgress(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(value, 1));
+}
+
+function getRenderedSectionHeight(element: HTMLElement): number {
+  const domSection = element.querySelector<HTMLElement>(".epub-dom-section");
+  if (domSection) {
+    return Math.max(
+      domSection.scrollHeight || 0,
+      domSection.offsetHeight || 0,
+      element.offsetHeight || 0
+    );
+  }
+
+  return element.offsetHeight || 0;
 }

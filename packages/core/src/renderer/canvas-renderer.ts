@@ -80,6 +80,7 @@ export class CanvasRenderer {
       height: number;
       displayList?: SectionDisplayList;
       renderWindows?: ScrollRenderWindow[];
+      domHtml?: string;
     }>,
     externalCanvas?: HTMLCanvasElement
   ): CanvasRenderResult {
@@ -101,6 +102,18 @@ export class CanvasRenderer {
       const wrapper =
         existingWrappers.get(sectionEntry.sectionId) ?? document.createElement("article");
       existingWrappers.delete(sectionEntry.sectionId);
+
+      if (sectionEntry.domHtml) {
+        wrapper.className = "epub-section epub-section-dom";
+        wrapper.dataset.sectionId = sectionEntry.sectionId;
+        wrapper.dataset.href = sectionEntry.sectionHref;
+        wrapper.style.removeProperty("position");
+        wrapper.style.removeProperty("height");
+        wrapper.innerHTML = sectionEntry.domHtml;
+        container.appendChild(wrapper);
+        totalCanvasHeight += wrapper.offsetHeight || sectionEntry.height;
+        continue;
+      }
 
       if (!sectionEntry.displayList) {
         wrapper.className = "epub-section epub-section-virtual";
