@@ -19,6 +19,7 @@ export type SpineItem = {
   idref: string;
   href: string;
   linear: boolean;
+  mediaType?: string;
   properties?: string;
 };
 
@@ -45,47 +46,92 @@ export type TextStyle = {
   wordBreak?: "normal" | "keep-all" | "break-word";
 };
 
+export type NodeAttributes = {
+  tagName?: string;
+  className?: string;
+  lang?: string;
+  dir?: string;
+};
+
 export type BlockStyle = TextStyle & {
   marginTop?: number;
   marginBottom?: number;
   marginLeft?: number;
   marginRight?: number;
+  paddingTop?: number;
+  paddingBottom?: number;
+  paddingLeft?: number;
+  paddingRight?: number;
+};
+
+type InlineBase = NodeAttributes & {
+  style?: TextStyle;
 };
 
 export type InlineNode =
-  | {
+  | (InlineBase & {
       kind: "text";
       text: string;
-    }
-  | {
+    })
+  | (InlineBase & {
+      kind: "span";
+      children: InlineNode[];
+    })
+  | (InlineBase & {
       kind: "emphasis";
       children: InlineNode[];
-    }
-  | {
+    })
+  | (InlineBase & {
       kind: "strong";
       children: InlineNode[];
-    }
-  | {
+    })
+  | (InlineBase & {
+      kind: "sub";
+      children: InlineNode[];
+    })
+  | (InlineBase & {
+      kind: "sup";
+      children: InlineNode[];
+    })
+  | (InlineBase & {
+      kind: "small";
+      children: InlineNode[];
+    })
+  | (InlineBase & {
+      kind: "mark";
+      children: InlineNode[];
+    })
+  | (InlineBase & {
+      kind: "del";
+      children: InlineNode[];
+    })
+  | (InlineBase & {
+      kind: "ins";
+      children: InlineNode[];
+    })
+  | (InlineBase & {
       kind: "code";
       text: string;
-    }
-  | {
+    })
+  | (InlineBase & {
       kind: "link";
       href: string;
       children: InlineNode[];
       title?: string;
-    }
-  | {
+    })
+  | (InlineBase & {
       kind: "image";
       src: string;
       alt?: string;
       title?: string;
-    }
-  | {
+      width?: number;
+      height?: number;
+    })
+  | (InlineBase & {
       kind: "line-break";
-    };
+    });
 
-export type BaseBlock = {
+export type BaseBlock = NodeAttributes & {
   id: string;
   kind: string;
   style?: BlockStyle;
@@ -151,6 +197,34 @@ export type TableRow = {
 export type TableBlock = BaseBlock & {
   kind: "table";
   rows: TableRow[];
+  caption?: BlockNode[];
+};
+
+export type FigureBlock = BaseBlock & {
+  kind: "figure";
+  blocks: BlockNode[];
+  caption?: BlockNode[];
+};
+
+export type AsideBlock = BaseBlock & {
+  kind: "aside";
+  blocks: BlockNode[];
+};
+
+export type NavBlock = BaseBlock & {
+  kind: "nav";
+  blocks: BlockNode[];
+};
+
+export type DefinitionListItem = {
+  id: string;
+  term: BlockNode[];
+  descriptions: BlockNode[][];
+};
+
+export type DefinitionListBlock = BaseBlock & {
+  kind: "definition-list";
+  items: DefinitionListItem[];
 };
 
 export type ThematicBreakBlock = BaseBlock & {
@@ -165,6 +239,10 @@ export type BlockNode =
   | CodeBlock
   | ListBlock
   | TableBlock
+  | FigureBlock
+  | AsideBlock
+  | NavBlock
+  | DefinitionListBlock
   | ThematicBreakBlock;
 
 export type SectionDocument = {

@@ -150,7 +150,8 @@ export function parseOpfDocument(
     const spineItem: SpineItem = {
       idref,
       href: manifestItem.href,
-      linear: item["@_linear"] !== "no"
+      linear: item["@_linear"] !== "no",
+      mediaType: manifestItem.mediaType
     };
 
     if (typeof item["@_properties"] === "string" && item["@_properties"].trim()) {

@@ -11,3 +11,7 @@
 - `long-section-book`：包含长章节，验证虚拟化与性能
 
 当前阶段先提供一个最小占位样本目录，后续在 B2、C2、C3 等任务中逐步补成真实 `.epub` 或解包后的测试资源。
+
+当前新增：
+
+- `reflowable-compat`：常见文本书章节样本，覆盖 inline、figure、list、table、footnote、definition-list

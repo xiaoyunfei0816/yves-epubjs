@@ -309,6 +309,10 @@ export class CanvasRenderer {
 
   private paintText(context: CanvasRenderingContext2D, op: TextRunDrawOp): void {
     context.save();
+    if (op.backgroundColor) {
+      context.fillStyle = op.backgroundColor;
+      context.fillRect(op.rect.x, op.rect.y, op.rect.width, op.rect.height);
+    }
     if (op.highlightColor) {
       context.fillStyle = op.highlightColor;
       context.fillRect(op.rect.x, op.rect.y, op.rect.width, op.rect.height);

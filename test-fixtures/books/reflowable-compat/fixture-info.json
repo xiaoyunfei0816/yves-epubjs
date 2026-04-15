@@ -1,0 +1,37 @@
+{
+  "id": "reflowable-compat",
+  "title": "Reflowable Compatibility Fixture Set",
+  "status": "active",
+  "samples": [
+    {
+      "id": "novel-inline",
+      "file": "chapters/novel-inline.xhtml",
+      "covers": ["parser", "layout", "renderer", "reader"]
+    },
+    {
+      "id": "figure-note",
+      "file": "chapters/figure-note.xhtml",
+      "covers": ["parser", "layout", "renderer", "reader"]
+    },
+    {
+      "id": "nested-list",
+      "file": "chapters/nested-list.xhtml",
+      "covers": ["parser", "layout", "renderer"]
+    },
+    {
+      "id": "table-data",
+      "file": "chapters/table-data.xhtml",
+      "covers": ["parser", "layout", "renderer", "reader"]
+    },
+    {
+      "id": "footnotes",
+      "file": "chapters/footnotes.xhtml",
+      "covers": ["parser", "reader", "toc"]
+    },
+    {
+      "id": "definition-list",
+      "file": "chapters/definition-list.xhtml",
+      "covers": ["parser", "renderer", "reader"]
+    }
+  ]
+}

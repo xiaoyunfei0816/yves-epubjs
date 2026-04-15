@@ -68,6 +68,25 @@ describe("parseXhtmlDocument", () => {
     });
   });
 
+  it("preserves preformatted code indentation while trimming only wrapper newlines", () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+      <html xmlns="http://www.w3.org/1999/xhtml">
+        <body>
+          <pre><code>
+  const answer = 42
+    return answer
+          </code></pre>
+        </body>
+      </html>`;
+
+    const section = parseXhtmlDocument(xml, "OPS/code.xhtml");
+
+    expect(section.blocks[0]).toMatchObject({
+      kind: "code",
+      text: "  const answer = 42\n    return answer"
+    });
+  });
+
   it("parses ordered lists and tables into structured blocks", () => {
     const xml = `<?xml version="1.0"?>
       <html>
@@ -100,6 +119,7 @@ describe("parseXhtmlDocument", () => {
       blocks: [
         {
           kind: "list",
+          tagName: "ol",
           ordered: true,
           start: 3,
           items: [
@@ -107,6 +127,7 @@ describe("parseXhtmlDocument", () => {
               blocks: [
                 {
                   kind: "text",
+                  tagName: "li",
                   inlines: [{ kind: "text", text: "Third" }]
                 }
               ]
@@ -115,6 +136,7 @@ describe("parseXhtmlDocument", () => {
               blocks: [
                 {
                   kind: "text",
+                  tagName: "li",
                   inlines: [{ kind: "text", text: "Fourth" }]
                 }
               ]
@@ -123,6 +145,7 @@ describe("parseXhtmlDocument", () => {
         },
         {
           kind: "table",
+          tagName: "table",
           rows: [
             {
               cells: [
@@ -153,7 +176,7 @@ describe("parseXhtmlDocument", () => {
     });
   });
 
-  it("flattens structural wrapper elements and ignores unsupported tags", () => {
+  it("flattens structural wrapper elements and preserves supported semantic blocks", () => {
     const xml = `<?xml version="1.0"?>
       <html>
         <body>
@@ -169,9 +192,10 @@ describe("parseXhtmlDocument", () => {
 
     const section = parseXhtmlDocument(xml, "OPS/wrapped.xhtml");
 
-    expect(section.blocks).toHaveLength(2);
+    expect(section.blocks).toHaveLength(3);
     expect(section.blocks[0]).toMatchObject({ kind: "heading", level: 2 });
-    expect(section.blocks[1]).toMatchObject({ kind: "text" });
+    expect(section.blocks[1]).toMatchObject({ kind: "aside" });
+    expect(section.blocks[2]).toMatchObject({ kind: "text" });
     expect(section.anchors["chapter-2"]).toBe("heading-1");
     expect(section.anchors["heading-anchor"]).toBe("heading-1");
   });
@@ -195,5 +219,120 @@ describe("parseXhtmlDocument", () => {
     expect(section.anchors["chapter-4"]).toBe("heading-1");
     expect(section.anchors["chapter-4-name"]).toBe("heading-1");
     expect(section.anchors["chapter-4-span"]).toBe("heading-1");
+  });
+
+  it("maps figure, aside, nav, definition lists, and table captions into structured blocks", () => {
+    const xml = `<?xml version="1.0"?>
+      <html>
+        <body>
+          <figure id="fig-1">
+            <img src="images/figure.png" alt="Figure" />
+            <figcaption>Figure caption</figcaption>
+          </figure>
+          <aside><p>Side note</p></aside>
+          <nav><p>Related links</p></nav>
+          <dl>
+            <dt>Term</dt>
+            <dd>Definition</dd>
+          </dl>
+          <table>
+            <caption>Table caption</caption>
+            <tr><td>Value</td></tr>
+          </table>
+        </body>
+      </html>`;
+
+    const section = parseXhtmlDocument(xml, "OPS/semantic.xhtml");
+
+    expect(section.blocks.map((block) => block.kind)).toEqual([
+      "figure",
+      "aside",
+      "nav",
+      "definition-list",
+      "table"
+    ]);
+    expect(section.blocks[0]).toMatchObject({
+      kind: "figure",
+      blocks: [{ kind: "image" }],
+      caption: [{ kind: "text", inlines: [{ kind: "text", text: "Figure caption" }] }]
+    });
+    expect(section.blocks[1]).toMatchObject({
+      kind: "aside",
+      blocks: [{ kind: "text" }]
+    });
+    expect(section.blocks[2]).toMatchObject({
+      kind: "nav",
+      blocks: [{ kind: "text" }]
+    });
+    expect(section.blocks[3]).toMatchObject({
+      kind: "definition-list",
+      items: [
+        {
+          term: [{ kind: "text" }],
+          descriptions: [[{ kind: "text" }]]
+        }
+      ]
+    });
+    expect(section.blocks[4]).toMatchObject({
+      kind: "table",
+      caption: [{ kind: "text", inlines: [{ kind: "text", text: "Table caption" }] }]
+    });
+  });
+
+  it("keeps footnote-style links and anchors resolvable within the same section", () => {
+    const xml = `<?xml version="1.0"?>
+      <html>
+        <body>
+          <p>Reference <a href="#fn-1">1</a></p>
+          <aside id="fn-1">
+            <p>Footnote body</p>
+          </aside>
+        </body>
+      </html>`;
+
+    const section = parseXhtmlDocument(xml, "OPS/text/chapter.xhtml");
+
+    expect(section.blocks[0]).toMatchObject({
+      kind: "text",
+      inlines: [
+        { kind: "text", text: "Reference " },
+        {
+          kind: "link",
+          href: "OPS/text/chapter.xhtml#fn-1",
+          children: [{ kind: "text", text: "1" }]
+        }
+      ]
+    });
+    expect(section.blocks[1]).toMatchObject({ kind: "aside" });
+    expect(section.anchors["fn-1"]).toBe("aside-2");
+  });
+
+  it("falls back unknown block tags to child content and preserves supported inline style metadata", () => {
+    const xml = `<?xml version="1.0"?>
+      <html>
+        <body>
+          <custom-block id="custom-1" class="note-shell" style="text-align: center; position: absolute;">
+            <unknown-inline style="color: #333; inset: 0;">Lead text</unknown-inline>
+          </custom-block>
+          <script>window.__ignored = true;</script>
+        </body>
+      </html>`;
+
+    const section = parseXhtmlDocument(xml, "OPS/fallback.xhtml");
+
+    expect(section.blocks).toHaveLength(1);
+    expect(section.blocks[0]).toMatchObject({
+      kind: "text",
+      tagName: "unknown-inline",
+      className: "note-shell",
+      style: {
+        color: "#333",
+        textAlign: "center"
+      },
+      inlines: [
+        { kind: "text", text: "Lead text" }
+      ]
+    });
+    expect(section.anchors["custom-1"]).toBe("text-1");
   });
 });

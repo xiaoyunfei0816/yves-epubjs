@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { LayoutEngine } from "../src/layout/layout-engine";
-import type { ImageDrawOp } from "../src/renderer/draw-ops";
+import type { ImageDrawOp, TextRunDrawOp } from "../src/renderer/draw-ops";
 import { DisplayListBuilder } from "../src/renderer/display-list-builder";
 import { resolveImageLayout } from "../src/utils/image-layout";
 import type { SectionDocument } from "../src/model/types";
@@ -108,5 +108,110 @@ describe("image layout strategy", () => {
       height: 90
     });
     expect(displayList.height).toBe(106);
+  });
+
+  it("keeps code block indentation and wraps long lines consistently", () => {
+    const section: SectionDocument = {
+      id: "section-code",
+      href: "OPS/code.xhtml",
+      anchors: {},
+      blocks: [
+        {
+          id: "code-1",
+          kind: "code",
+          text: "  const answer = 42\nveryLongIdentifierNameThatNeedsWrapping()"
+        }
+      ]
+    };
+
+    const engine = new LayoutEngine();
+    const layout = engine.layout(
+      {
+        section,
+        spineIndex: 0,
+        viewportWidth: 220,
+        viewportHeight: 600,
+        typography,
+        fontFamily: "serif"
+      },
+      "scroll"
+    );
+    const builder = new DisplayListBuilder();
+    const displayList = builder.buildSection({
+      section,
+      width: 220,
+      viewportHeight: 600,
+      blocks: layout.blocks,
+      theme,
+      typography,
+      activeBlockId: undefined
+    });
+
+    const codeTextOps = displayList.ops.filter(
+      (op): op is TextRunDrawOp => op.kind === "text" && op.blockId === "code-1"
+    );
+
+    expect(layout.blocks[0]?.estimatedHeight).toBeGreaterThan(70);
+    expect(codeTextOps.length).toBeGreaterThanOrEqual(3);
+    expect(codeTextOps[0]?.text.startsWith("  ")).toBe(true);
+    expect(codeTextOps.map((op) => op.text).join("")).toContain(
+      "veryLongIdentifierNameThatNeedsWrapping()"
+    );
+  });
+
+  it("keeps inline images on the pretext canvas path", () => {
+    const section: SectionDocument = {
+      id: "section-inline-image",
+      href: "OPS/inline-image.xhtml",
+      anchors: {},
+      blocks: [
+        {
+          id: "text-inline-image",
+          kind: "text",
+          inlines: [
+            { kind: "text", text: "Before " },
+            {
+              kind: "image",
+              src: "OPS/images/icon.png",
+              alt: "icon",
+              width: 20,
+              height: 20
+            },
+            { kind: "text", text: " after" }
+          ]
+        }
+      ]
+    };
+
+    const engine = new LayoutEngine();
+    const layout = engine.layout(
+      {
+        section,
+        spineIndex: 0,
+        viewportWidth: 260,
+        viewportHeight: 600,
+        typography,
+        fontFamily: "serif"
+      },
+      "scroll"
+    );
+    const displayList = new DisplayListBuilder().buildSection({
+      section,
+      width: 260,
+      viewportHeight: 600,
+      blocks: layout.blocks,
+      theme,
+      typography,
+      resolveImageLoaded: () => true,
+      activeBlockId: undefined
+    });
+    const inlineImageOp = displayList.ops.find(
+      (op): op is ImageDrawOp => op.kind === "image" && op.blockId === "text-inline-image"
+    );
+
+    expect(layout.blocks[0]?.type).toBe("pretext");
+    expect(inlineImageOp).toBeTruthy();
+    expect(inlineImageOp?.rect.width).toBe(20);
+    expect(inlineImageOp?.rect.height).toBe(20);
   });
 });

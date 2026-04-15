@@ -22,6 +22,25 @@ describe("test fixtures", () => {
     expect(fixture.status).toBe("placeholder");
   });
 
+  it("reads the reflowable compatibility fixture metadata", () => {
+    const fixturePath = resolve(
+      ROOT,
+      "test-fixtures/books/reflowable-compat/fixture-info.json"
+    );
+    const raw = readFileSync(fixturePath, "utf8");
+    const fixture = JSON.parse(raw) as {
+      id: string;
+      title: string;
+      status: string;
+      samples: Array<{ id: string }>;
+    };
+
+    expect(fixture.id).toBe("reflowable-compat");
+    expect(fixture.title).toBe("Reflowable Compatibility Fixture Set");
+    expect(fixture.status).toBe("active");
+    expect(fixture.samples).toHaveLength(6);
+  });
+
   it("keeps the snapshot directory documented and available", () => {
     const snapshotReadmePath = resolve(ROOT, "test-fixtures/snapshots/README.md");
     const readme = readFileSync(snapshotReadmePath, "utf8");

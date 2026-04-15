@@ -33,6 +33,10 @@ import type {
   InteractionRegion,
   SectionDisplayList
 } from "../renderer/draw-ops";
+import {
+  extractBlockText as collectBlockText,
+  extractInlineText as collectInlineText
+} from "../utils/block-text";
 
 type PageBlockSlice =
   | {
@@ -896,60 +900,11 @@ export class EpubReader {
   }
 
   private extractBlockText(block: BlockNode): string {
-    switch (block.kind) {
-      case "heading":
-      case "text":
-        return this.extractInlineText(block.inlines);
-      case "quote":
-        return block.blocks
-          .map((child) => this.extractBlockText(child))
-          .join(" ");
-      case "code":
-        return block.text;
-      case "image":
-        return block.alt ?? "";
-      case "list":
-        return block.items
-          .flatMap((item) =>
-            item.blocks.map((child) => this.extractBlockText(child))
-          )
-          .join(" ");
-      case "table":
-        return block.rows
-          .flatMap((row) =>
-            row.cells.flatMap((cell) =>
-              cell.blocks.map((child) => this.extractBlockText(child))
-            )
-          )
-          .join(" ");
-      case "thematic-break":
-        return "";
-      default:
-        return "";
-    }
+    return collectBlockText(block);
   }
 
   private extractInlineText(inlines: InlineNode[]): string {
-    return inlines
-      .map((inline) => {
-        switch (inline.kind) {
-          case "text":
-            return inline.text;
-          case "emphasis":
-          case "strong":
-          case "link":
-            return this.extractInlineText(inline.children);
-          case "code":
-            return inline.text;
-          case "image":
-            return inline.alt ?? "";
-          case "line-break":
-            return "\n";
-          default:
-            return "";
-        }
-      })
-      .join("");
+    return inlines.map((inline) => collectInlineText(inline)).join("");
   }
 
   private resolveRenderableResourceUrl(path: string): string {

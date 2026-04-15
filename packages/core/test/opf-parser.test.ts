@@ -58,12 +58,14 @@ describe("parseOpfDocument", () => {
       {
         idref: "chapter-1",
         href: "OPS/text/chapter-1.xhtml",
-        linear: true
+        linear: true,
+        mediaType: "application/xhtml+xml"
       },
       {
         idref: "nav",
         href: "OPS/nav.xhtml",
         linear: false,
+        mediaType: "application/xhtml+xml",
         properties: "auxiliary"
       }
     ]);
@@ -92,7 +94,8 @@ describe("parseOpfDocument", () => {
       {
         idref: "valid",
         href: "OPS/chapter.xhtml",
-        linear: true
+        linear: true,
+        mediaType: "application/xhtml+xml"
       }
     ]);
   });
@@ -171,7 +174,8 @@ describe("BookParser", () => {
         {
           idref: "chapter-1",
           href: "OPS/chapter-1.xhtml",
-          linear: true
+          linear: true,
+          mediaType: "application/xhtml+xml"
         }
       ],
       toc: [
@@ -191,12 +195,14 @@ describe("BookParser", () => {
             {
               id: "heading-1",
               kind: "heading",
+              tagName: "h1",
               level: 1,
               inlines: [{ kind: "text", text: "Chapter 1" }]
             },
             {
               id: "text-2",
               kind: "text",
+              tagName: "p",
               inlines: [{ kind: "text", text: "Hello Alice" }]
             }
           ],
@@ -263,4 +269,37 @@ describe("BookParser", () => {
       }
     ]);
   });
+
+  it("rejects non-XHTML spine documents before chapter parsing", async () => {
+    const zipBytes = zipSync({
+      mimetype: Buffer.from("application/epub+zip"),
+      "META-INF/container.xml": Buffer.from(
+        `<?xml version="1.0"?>
+        <container>
+          <rootfiles>
+            <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml" />
+          </rootfiles>
+        </container>`
+      ),
+      "OPS/content.opf": Buffer.from(
+        `<?xml version="1.0"?>
+        <package>
+          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:title>Invalid Spine Book</dc:title>
+          </metadata>
+          <manifest>
+            <item id="style" href="styles.css" media-type="text/css" />
+          </manifest>
+          <spine>
+            <itemref idref="style" />
+          </spine>
+        </package>`
+      ),
+      "OPS/styles.css": Buffer.from("body { color: red; }")
+    })
+
+    await expect(new BookParser().parse({ data: zipBytes })).rejects.toThrow(
+      "Unsupported spine content media type: text/css (OPS/styles.css)"
+    )
+  })
 });

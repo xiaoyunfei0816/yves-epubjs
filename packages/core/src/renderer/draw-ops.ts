@@ -17,6 +17,7 @@ export type TextRunDrawOp = DrawOpBase & {
   width: number;
   font: string;
   color: string;
+  backgroundColor: string | undefined;
   highlightColor: string | undefined;
   underline: boolean | undefined;
   href: string | undefined;

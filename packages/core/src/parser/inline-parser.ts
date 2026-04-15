@@ -71,21 +71,50 @@ function parseInlineElement(
   sectionHref: string
 ): InlineNode[] {
   const node = source && typeof source === "object" ? (source as XmlNode) : { "#text": source };
+  const childInlines = flattenChildren(node, sectionHref);
 
   if (tagName === "br") {
     return [{ kind: "line-break" }];
   }
 
+  if (tagName === "span") {
+    return childInlines.length > 0 ? [{ kind: "span", children: childInlines }] : [];
+  }
+
   if (tagName === "strong" || tagName === "b") {
-    return [{ kind: "strong", children: flattenChildren(node, sectionHref) }];
+    return childInlines.length > 0 ? [{ kind: "strong", children: childInlines }] : [];
   }
 
   if (tagName === "em" || tagName === "i") {
-    return [{ kind: "emphasis", children: flattenChildren(node, sectionHref) }];
+    return childInlines.length > 0 ? [{ kind: "emphasis", children: childInlines }] : [];
+  }
+
+  if (tagName === "sub") {
+    return childInlines.length > 0 ? [{ kind: "sub", children: childInlines }] : [];
+  }
+
+  if (tagName === "sup") {
+    return childInlines.length > 0 ? [{ kind: "sup", children: childInlines }] : [];
+  }
+
+  if (tagName === "small") {
+    return childInlines.length > 0 ? [{ kind: "small", children: childInlines }] : [];
+  }
+
+  if (tagName === "mark") {
+    return childInlines.length > 0 ? [{ kind: "mark", children: childInlines }] : [];
+  }
+
+  if (tagName === "del") {
+    return childInlines.length > 0 ? [{ kind: "del", children: childInlines }] : [];
+  }
+
+  if (tagName === "ins") {
+    return childInlines.length > 0 ? [{ kind: "ins", children: childInlines }] : [];
   }
 
   if (tagName === "code") {
-    const text = flattenChildren(node, sectionHref)
+    const text = childInlines
       .map((inline) => ("text" in inline ? inline.text : ""))
       .join("")
       .trim();
@@ -100,7 +129,7 @@ function parseInlineElement(
     const linkNode: InlineNode = {
       kind: "link",
       href,
-      children: flattenChildren(node, sectionHref)
+      children: childInlines
     };
 
     if (typeof node["@_title"] === "string" && node["@_title"].trim()) {
@@ -131,11 +160,19 @@ function parseInlineElement(
     if (typeof node["@_title"] === "string" && node["@_title"].trim()) {
       imageNode.title = node["@_title"].trim();
     }
+    const width = Number(node["@_width"])
+    const height = Number(node["@_height"])
+    if (!Number.isNaN(width)) {
+      imageNode.width = width
+    }
+    if (!Number.isNaN(height)) {
+      imageNode.height = height
+    }
 
     return [imageNode];
   }
 
-  return flattenChildren(node, sectionHref);
+  return childInlines.length > 0 ? [{ kind: "span", children: childInlines }] : [];
 }
 
 export function parseInlineContent(

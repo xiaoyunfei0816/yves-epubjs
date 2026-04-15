@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { LayoutEngine } from "../src/layout/layout-engine";
 import type { Book, SectionDocument } from "../src/model/types";
 import { parseXhtmlDocument } from "../src/parser/xhtml-parser";
+import { DisplayListBuilder } from "../src/renderer/display-list-builder";
+import type { TextRunDrawOp } from "../src/renderer/draw-ops";
 import { EpubReader } from "../src/runtime/reader";
 
 const typography = {
@@ -69,6 +71,50 @@ describe("pretext layout integration", () => {
     });
   });
 
+  it("keeps paragraphs with line breaks and semantic inline nodes on the pretext path", () => {
+    const engine = new LayoutEngine()
+    const section: SectionDocument = {
+      id: "section-inline-semantics",
+      href: "OPS/inline-semantics.xhtml",
+      title: "Inline Semantics",
+      anchors: {},
+      blocks: [
+        {
+          id: "text-inline-semantics",
+          kind: "text",
+          inlines: [
+            { kind: "text", text: "Alpha " },
+            { kind: "mark", children: [{ kind: "text", text: "beta" }] },
+            { kind: "line-break" },
+            {
+              kind: "small",
+              children: [{ kind: "text", text: "gamma " }]
+            },
+            {
+              kind: "sup",
+              children: [{ kind: "text", text: "1" }]
+            }
+          ]
+        }
+      ]
+    }
+
+    const layout = engine.layout(
+      {
+        section,
+        spineIndex: 0,
+        viewportWidth: 220,
+        viewportHeight: 600,
+        typography,
+        fontFamily: "serif"
+      },
+      "scroll"
+    )
+
+    expect(layout.blocks[0]?.type).toBe("pretext")
+    expect(layout.blocks[0]?.type === "pretext" && layout.blocks[0].lines.length).toBeGreaterThanOrEqual(2)
+  })
+
   it("renders pretext-driven content with the canvas backend by default", async () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", {
@@ -110,6 +156,138 @@ describe("pretext layout integration", () => {
     expect(reader.getRenderMetrics().backend).toBe("canvas");
     expect(reader.getVisibleDrawBounds().length).toBeGreaterThan(1);
   });
+
+  it("emits mark highlighting and superscript baseline offsets in pretext draw ops", () => {
+    const section: SectionDocument = {
+      id: "section-pretext-ops",
+      href: "OPS/pretext-ops.xhtml",
+      title: "Pretext Ops",
+      anchors: {},
+      blocks: [
+        {
+          id: "text-pretext-ops",
+          kind: "text",
+          inlines: [
+            { kind: "text", text: "Alpha " },
+            { kind: "mark", children: [{ kind: "text", text: "beta" }] },
+            { kind: "text", text: " " },
+            { kind: "sup", children: [{ kind: "text", text: "1" }] }
+          ]
+        }
+      ]
+    }
+
+    const engine = new LayoutEngine()
+    const layout = engine.layout(
+      {
+        section,
+        spineIndex: 0,
+        viewportWidth: 280,
+        viewportHeight: 600,
+        typography,
+        fontFamily: "serif"
+      },
+      "scroll"
+    )
+
+    const displayList = new DisplayListBuilder().buildSection({
+      section,
+      width: 280,
+      viewportHeight: 600,
+      blocks: layout.blocks,
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography,
+      activeBlockId: undefined
+    })
+
+    const alphaOp = displayList.ops.find(
+      (op) => op.kind === "text" && op.blockId === "text-pretext-ops" && op.text.includes("Alpha")
+    )
+    const markOp = displayList.ops.find(
+      (op) => op.kind === "text" && op.blockId === "text-pretext-ops" && op.text === "beta"
+    )
+    const supOp = displayList.ops.find(
+      (op) => op.kind === "text" && op.blockId === "text-pretext-ops" && op.text === "1"
+    )
+
+    expect(alphaOp && "y" in alphaOp ? alphaOp.y : 0).toBeGreaterThan(0)
+    expect(markOp && "highlightColor" in markOp ? markOp.highlightColor : undefined).toBe(
+      "rgba(250, 204, 21, 0.22)"
+    )
+    expect(supOp && alphaOp && "y" in supOp && "y" in alphaOp ? supOp.y : 0).toBeLessThan(
+      alphaOp && "y" in alphaOp ? alphaOp.y : 0
+    )
+  })
+
+  it("renders fallback block styles for pretext text blocks", () => {
+    const section: SectionDocument = {
+      id: "section-pretext-style",
+      href: "OPS/pretext-style.xhtml",
+      title: "Styled Pretext",
+      anchors: {},
+      blocks: [
+        {
+          id: "text-pretext-style",
+          kind: "text",
+          style: {
+            color: "#884400",
+            backgroundColor: "rgba(136, 68, 0, 0.08)",
+            textAlign: "center",
+            paddingTop: 6,
+            paddingBottom: 4,
+            paddingLeft: 12,
+            paddingRight: 12
+          },
+          inlines: [{ kind: "text", text: "Centered fallback paragraph" }]
+        }
+      ]
+    }
+
+    const engine = new LayoutEngine()
+    const layout = engine.layout(
+      {
+        section,
+        spineIndex: 0,
+        viewportWidth: 280,
+        viewportHeight: 600,
+        typography,
+        fontFamily: "serif"
+      },
+      "scroll"
+    )
+
+    const displayList = new DisplayListBuilder().buildSection({
+      section,
+      width: 280,
+      viewportHeight: 600,
+      blocks: layout.blocks,
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography,
+      activeBlockId: undefined
+    })
+
+    const blockBackground = displayList.ops.find(
+      (op) =>
+        op.kind === "rect" &&
+        op.blockId === "text-pretext-style" &&
+        op.color === "rgba(136, 68, 0, 0.08)"
+    )
+    const textOps = displayList.ops.filter(
+      (op): op is TextRunDrawOp =>
+        op.kind === "text" && op.blockId === "text-pretext-style"
+    )
+
+    expect(blockBackground).toBeTruthy()
+    expect(textOps.length).toBeGreaterThan(0)
+    expect(textOps.every((op) => op.color === "#884400")).toBe(true)
+    expect(textOps[0]?.x ?? 0).toBeGreaterThan(20)
+  })
 
   it("renders paginated content to canvas", async () => {
     const container = document.createElement("div");

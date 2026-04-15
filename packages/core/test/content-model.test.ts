@@ -87,6 +87,106 @@ describe("content model", () => {
     });
   });
 
+  it("supports expanded semantic nodes for future reflowable compatibility work", () => {
+    const paragraph: BlockNode = {
+      id: "paragraph-semantic",
+      kind: "text",
+      tagName: "p",
+      className: "lead",
+      lang: "en",
+      inlines: [
+        { kind: "text", text: "A " },
+        {
+          kind: "mark",
+          children: [
+            { kind: "small", children: [{ kind: "text", text: "small note" }] }
+          ]
+        },
+        { kind: "text", text: " with " },
+        {
+          kind: "sup",
+          children: [{ kind: "text", text: "1" }]
+        }
+      ]
+    };
+
+    const figure: BlockNode = {
+      id: "figure-1",
+      kind: "figure",
+      tagName: "figure",
+      blocks: [
+        {
+          id: "image-1",
+          kind: "image",
+          src: "OPS/images/figure.png",
+          alt: "Figure"
+        }
+      ],
+      caption: [
+        {
+          id: "caption-1",
+          kind: "text",
+          inlines: [{ kind: "text", text: "Figure caption" }]
+        }
+      ]
+    };
+
+    const definitionList: BlockNode = {
+      id: "dl-1",
+      kind: "definition-list",
+      items: [
+        {
+          id: "dl-item-1",
+          term: [
+            {
+              id: "term-1",
+              kind: "text",
+              inlines: [{ kind: "text", text: "Term" }]
+            }
+          ],
+          descriptions: [
+            [
+              {
+                id: "desc-1",
+                kind: "text",
+                inlines: [{ kind: "text", text: "Definition" }]
+              }
+            ]
+          ]
+        }
+      ]
+    };
+
+    const section: SectionDocument = {
+      id: "section-expanded",
+      href: "OPS/chapter-2.xhtml",
+      blocks: [
+        paragraph,
+        figure,
+        definitionList,
+        {
+          id: "aside-1",
+          kind: "aside",
+          blocks: [paragraph]
+        },
+        {
+          id: "nav-1",
+          kind: "nav",
+          blocks: [paragraph]
+        }
+      ],
+      anchors: {}
+    };
+
+    expect(section.blocks[0]?.kind).toBe("text");
+    expect(section.blocks[1]?.kind).toBe("figure");
+    expect(section.blocks[2]?.kind).toBe("definition-list");
+    expect(section.blocks[3]?.kind).toBe("aside");
+    expect(section.blocks[4]?.kind).toBe("nav");
+    expect(serializeSection(section)).toContain("\"kind\": \"mark\"");
+    expect(serializeSection(section)).toContain("\"kind\": \"sup\"");
+  });
+
   it("supports complex blocks like lists, quotes, code, tables, and thematic breaks", () => {
     const table: TableBlock = {
       id: "table-1",

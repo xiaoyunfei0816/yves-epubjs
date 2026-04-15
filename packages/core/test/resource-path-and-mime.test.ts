@@ -32,6 +32,15 @@ describe("resource path utilities", () => {
       "Styles/main.css"
     );
   });
+
+  it("preserves fragment identifiers for same-document and cross-document links", () => {
+    expect(resolveResourcePath("OPS/text/chapter.xhtml", "#note-1")).toBe(
+      "OPS/text/chapter.xhtml#note-1"
+    );
+    expect(resolveResourcePath("OPS/text/chapter.xhtml", "notes.xhtml#note-2")).toBe(
+      "OPS/text/notes.xhtml#note-2"
+    );
+  });
 });
 
 describe("resource mime utilities", () => {

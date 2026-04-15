@@ -7,7 +7,7 @@ import { parseContainerXml } from "./container-parser";
 import { parseNavDocument } from "./nav-parser";
 import { parseNcxDocument } from "./ncx-parser";
 import { parseOpfDocument } from "./opf-parser";
-import { parseXhtmlDocument } from "./xhtml-parser";
+import { parseSpineContentDocument } from "./spine-content-parser";
 
 export type BookParserInput = {
   sourceName?: string;
@@ -46,7 +46,11 @@ export class BookParser {
     const sections = await Promise.all(
       opf.spine.map(async (spineItem, index) => {
         const sectionXml = await container.readText(spineItem.href);
-        const section = parseXhtmlDocument(sectionXml, spineItem.href);
+        const section = parseSpineContentDocument({
+          href: spineItem.href,
+          content: sectionXml,
+          ...(spineItem.mediaType ? { mediaType: spineItem.mediaType } : {})
+        });
         return {
           ...section,
           id: `section-${index + 1}`

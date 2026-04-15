@@ -1,441 +1,766 @@
-import { XMLParser } from "fast-xml-parser";
 import {
   normalizeResourcePath,
   resolveResourcePath
-} from "../container/resource-path";
-import { parseInlineContent } from "./inline-parser";
+} from "../container/resource-path"
 import type {
   BlockNode,
   ImageBlock,
+  InlineNode,
   ListItemBlock,
   SectionDocument,
   TableCell,
   TableRow
-} from "../model/types";
+} from "../model/types"
+import {
+  getHtmlChildElements,
+  getHtmlElementAttribute,
+  getHtmlNodeChildren,
+  getHtmlNodeTextContent,
+  isHtmlElementNode,
+  isHtmlTextNode,
+  type HtmlDomElement,
+  type HtmlDomNode
+} from "./html-dom-adapter"
+import { normalizePreformattedText } from "../utils/preformatted-text"
+import { resolveElementStyle, resolveElementTextStyle } from "./style-resolver"
+import { parseXhtmlDomDocument } from "./xhtml-dom-parser"
 
-type XmlNode = Record<string, unknown>;
-
-const xmlParser = new XMLParser({
-  attributeNamePrefix: "@_",
-  ignoreAttributes: false,
-  preserveOrder: false
-});
-
-function asArray<T>(value: T | T[] | undefined): T[] {
-  if (value === undefined) {
-    return [];
-  }
-
-  return Array.isArray(value) ? value : [value];
+function normalizeWhitespace(text: string): string {
+  return text.replace(/\s+/g, " ")
 }
 
-function readTextContent(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
+function createTextNode(text: string): InlineNode[] {
+  const normalized = normalizeWhitespace(text)
+  if (!normalized.trim()) {
+    return []
   }
 
-  if (typeof value === "number") {
-    return String(value);
+  return [{ kind: "text", text: normalized }]
+}
+
+function getInlineNodeMetadata(node: HtmlDomElement): {
+  tagName: string
+  className?: string
+  lang?: string
+  dir?: string
+  style?: ReturnType<typeof resolveElementTextStyle>
+} {
+  const metadata: {
+    tagName: string
+    className?: string
+    lang?: string
+    dir?: string
+    style?: ReturnType<typeof resolveElementTextStyle>
+  } = {
+    tagName: node.name
+  }
+  const className = getHtmlElementAttribute(node, "class")
+  const lang = getHtmlElementAttribute(node, "lang")
+  const dir = getHtmlElementAttribute(node, "dir")
+
+  if (className?.trim()) {
+    metadata.className = className.trim()
+  }
+  if (lang?.trim()) {
+    metadata.lang = lang.trim()
+  }
+  if (dir?.trim()) {
+    metadata.dir = dir.trim()
+  }
+  const style = resolveElementTextStyle({ element: node })
+  if (Object.keys(style).length > 0) {
+    metadata.style = style
   }
 
-  if (Array.isArray(value)) {
-    return value.map(readTextContent).join("");
+  return metadata
+}
+
+function getBlockNodeMetadata(node: HtmlDomElement): {
+  tagName: string
+  className?: string
+  lang?: string
+  dir?: string
+  style?: ReturnType<typeof resolveElementStyle>
+} {
+  const metadata: {
+    tagName: string
+    className?: string
+    lang?: string
+    dir?: string
+    style?: ReturnType<typeof resolveElementStyle>
+  } = {
+    tagName: node.name
+  }
+  const className = getHtmlElementAttribute(node, "class")
+  const lang = getHtmlElementAttribute(node, "lang")
+  const dir = getHtmlElementAttribute(node, "dir")
+
+  if (className?.trim()) {
+    metadata.className = className.trim()
+  }
+  if (lang?.trim()) {
+    metadata.lang = lang.trim()
+  }
+  if (dir?.trim()) {
+    metadata.dir = dir.trim()
+  }
+  const style = resolveElementStyle({ element: node })
+  if (Object.keys(style).length > 0) {
+    metadata.style = style
   }
 
-  if (value && typeof value === "object") {
-    return Object.entries(value as XmlNode)
-      .filter(([key]) => !key.startsWith("@_"))
-      .map(([, child]) => readTextContent(child))
-      .join("");
+  return metadata
+}
+
+function parseInlineNodes(
+  nodes: HtmlDomNode[],
+  sectionHref: string
+): InlineNode[] {
+  const inlines: InlineNode[] = []
+
+  for (const node of nodes) {
+    if (isHtmlTextNode(node)) {
+      inlines.push(...createTextNode(node.data))
+      continue
+    }
+
+    if (!isHtmlElementNode(node)) {
+      continue
+    }
+
+    const childNodes = getHtmlNodeChildren(node)
+    switch (node.name) {
+      case "br":
+        inlines.push({ kind: "line-break" })
+        break
+      case "span":
+      case "sub":
+      case "sup":
+      case "small":
+      case "mark":
+      case "del":
+      case "ins": {
+        const semanticChildren = parseInlineNodes(childNodes, sectionHref)
+        if (semanticChildren.length > 0) {
+          inlines.push({
+            kind: node.name,
+            children: semanticChildren,
+            ...getInlineNodeMetadata(node)
+          } as InlineNode)
+        }
+        break
+      }
+      case "strong":
+      case "b":
+        inlines.push({
+          kind: "strong",
+          children: parseInlineNodes(childNodes, sectionHref),
+          ...getInlineNodeMetadata(node)
+        })
+        break
+      case "em":
+      case "i":
+        inlines.push({
+          kind: "emphasis",
+          children: parseInlineNodes(childNodes, sectionHref),
+          ...getInlineNodeMetadata(node)
+        })
+        break
+      case "code": {
+        const text = parseInlineNodes(childNodes, sectionHref)
+          .map((inline) => ("text" in inline ? inline.text : ""))
+          .join("")
+          .trim()
+        if (text) {
+          inlines.push({ kind: "code", text })
+        }
+        break
+      }
+      case "a": {
+        const hrefAttribute = getHtmlElementAttribute(node, "href")
+        const linkNode: InlineNode = {
+          kind: "link",
+          href: hrefAttribute ? resolveResourcePath(sectionHref, hrefAttribute) : "",
+          children: parseInlineNodes(childNodes, sectionHref),
+          ...getInlineNodeMetadata(node)
+        }
+        const title = getHtmlElementAttribute(node, "title")
+        if (title?.trim()) {
+          linkNode.title = title.trim()
+        }
+        inlines.push(linkNode)
+        break
+      }
+      case "img": {
+        const src = getHtmlElementAttribute(node, "src")
+        if (!src) {
+          break
+        }
+
+        const imageNode: InlineNode = {
+          kind: "image",
+          src: resolveResourcePath(sectionHref, src)
+        }
+        const alt = getHtmlElementAttribute(node, "alt")
+        const title = getHtmlElementAttribute(node, "title")
+        if (alt?.trim()) {
+          imageNode.alt = alt.trim()
+        }
+        if (title?.trim()) {
+          imageNode.title = title.trim()
+        }
+        const width = getHtmlElementAttribute(node, "width")
+        const height = getHtmlElementAttribute(node, "height")
+        if (typeof width === "string") {
+          const parsedWidth = Number(width)
+          if (!Number.isNaN(parsedWidth)) {
+            imageNode.width = parsedWidth
+          }
+        }
+        if (typeof height === "string") {
+          const parsedHeight = Number(height)
+          if (!Number.isNaN(parsedHeight)) {
+            imageNode.height = parsedHeight
+          }
+        }
+        inlines.push(imageNode)
+        break
+      }
+      default:
+        {
+          const fallbackChildren = parseInlineNodes(childNodes, sectionHref)
+          if (fallbackChildren.length > 0) {
+            inlines.push({
+              kind: "span",
+              children: fallbackChildren,
+              ...getInlineNodeMetadata(node)
+            })
+          }
+        }
+        break
+    }
   }
 
-  return "";
+  return inlines
 }
 
 class XhtmlBlockParser {
-  private blockCounter = 0;
-  private listItemCounter = 0;
-  private rowCounter = 0;
-  private cellCounter = 0;
-  private pendingAnchors: string[] = [];
-  readonly anchors: Record<string, string> = {};
+  private blockCounter = 0
+  private listItemCounter = 0
+  private definitionItemCounter = 0
+  private rowCounter = 0
+  private cellCounter = 0
+  private pendingAnchors: string[] = []
+  readonly anchors: Record<string, string> = {}
 
   constructor(private readonly sectionHref: string) {}
 
   parseDocument(xml: string): SectionDocument {
-    const parsed = xmlParser.parse(xml) as XmlNode;
-    const htmlNode = (parsed.html as XmlNode | undefined) ?? parsed;
-    const bodyNode =
-      (htmlNode.body as XmlNode | undefined) ??
-      (Array.isArray(htmlNode.body) ? (htmlNode.body[0] as XmlNode | undefined) : undefined);
-    const lang =
-      (typeof htmlNode["@_xml:lang"] === "string" && htmlNode["@_xml:lang"]) ||
-      (typeof htmlNode["@_lang"] === "string" && htmlNode["@_lang"]) ||
-      undefined;
-    const title = this.extractDocumentTitle(htmlNode);
-    const blocks = bodyNode ? this.parseContainerNode(bodyNode) : [];
+    const domDocument = parseXhtmlDomDocument(xml)
+    const blocks = domDocument.bodyElement ? this.parseChildBlocks(domDocument.bodyElement) : []
 
     const section: SectionDocument = {
       id: this.createBlockId("section"),
       href: this.sectionHref,
       blocks,
       anchors: this.anchors
-    };
-
-    if (title) {
-      section.title = title;
-    }
-    if (lang) {
-      section.lang = lang;
     }
 
-    return section;
-  }
-
-  private extractDocumentTitle(htmlNode: XmlNode): string | undefined {
-    const headNode =
-      (htmlNode.head as XmlNode | undefined) ??
-      (Array.isArray(htmlNode.head) ? (htmlNode.head[0] as XmlNode | undefined) : undefined);
-
-    if (!headNode) {
-      return undefined;
+    if (domDocument.title) {
+      section.title = domDocument.title
+    }
+    if (domDocument.lang) {
+      section.lang = domDocument.lang
     }
 
-    const titleText = readTextContent(headNode.title).replace(/\s+/g, " ").trim();
-    return titleText || undefined;
+    return section
   }
 
   private createBlockId(prefix: string): string {
-    this.blockCounter += 1;
-    return `${prefix}-${this.blockCounter}`;
+    this.blockCounter += 1
+    return `${prefix}-${this.blockCounter}`
   }
 
   private createListItemId(): string {
-    this.listItemCounter += 1;
-    return `list-item-${this.listItemCounter}`;
+    this.listItemCounter += 1
+    return `list-item-${this.listItemCounter}`
+  }
+
+  private createDefinitionItemId(): string {
+    this.definitionItemCounter += 1
+    return `definition-item-${this.definitionItemCounter}`
   }
 
   private createRowId(): string {
-    this.rowCounter += 1;
-    return `table-row-${this.rowCounter}`;
+    this.rowCounter += 1
+    return `table-row-${this.rowCounter}`
   }
 
   private createCellId(): string {
-    this.cellCounter += 1;
-    return `table-cell-${this.cellCounter}`;
+    this.cellCounter += 1
+    return `table-cell-${this.cellCounter}`
   }
 
-  private collectAnchorIds(node: XmlNode): string[] {
-    const anchorIds = [node["@_id"], node["@_name"]];
+  private collectAnchorIds(node: HtmlDomElement): string[] {
+    const anchorIds = [
+      getHtmlElementAttribute(node, "id"),
+      getHtmlElementAttribute(node, "name")
+    ]
     return anchorIds.flatMap((value) =>
       typeof value === "string" && value.trim() ? [value.trim()] : []
-    );
+    )
   }
 
   private registerAnchorIds(anchorIds: string[], blockId: string): void {
     for (const anchorId of anchorIds) {
-      this.anchors[anchorId] = blockId;
+      this.anchors[anchorId] = blockId
     }
   }
 
-  private registerAnchor(node: XmlNode, blockId: string): void {
-    this.registerAnchorIds(this.collectAnchorIds(node), blockId);
+  private registerAnchor(node: HtmlDomElement, blockId: string): void {
+    this.registerAnchorIds(this.collectAnchorIds(node), blockId)
   }
 
-  private registerAnchorToFirstBlock(node: XmlNode, blocks: BlockNode[]): void {
-    const firstBlockId = blocks[0]?.id;
+  private registerAnchorToFirstBlock(node: HtmlDomElement, blocks: BlockNode[]): void {
+    const firstBlockId = blocks[0]?.id
     if (!firstBlockId) {
-      return;
+      return
     }
 
-    this.registerAnchor(node, firstBlockId);
+    this.registerAnchor(node, firstBlockId)
   }
 
-  private registerInlineAnchors(node: unknown, blockId: string): void {
-    if (!node || typeof node !== "object") {
-      return;
+  private registerInlineAnchors(node: HtmlDomNode, blockId: string): void {
+    if (!isHtmlElementNode(node)) {
+      return
     }
 
-    const xmlNode = node as XmlNode;
-    this.registerAnchor(xmlNode, blockId);
-
-    for (const [key, value] of Object.entries(xmlNode)) {
-      if (key.startsWith("@_")) {
-        continue;
-      }
-
-      for (const child of asArray(value)) {
-        if (child && typeof child === "object") {
-          this.registerInlineAnchors(child as XmlNode, blockId);
-        }
-      }
+    this.registerAnchor(node, blockId)
+    for (const child of getHtmlNodeChildren(node)) {
+      this.registerInlineAnchors(child, blockId)
     }
   }
 
-  private queuePendingAnchors(node: XmlNode): void {
-    this.pendingAnchors.push(...this.collectAnchorIds(node));
+  private queuePendingAnchors(node: HtmlDomElement): void {
+    this.pendingAnchors.push(...this.collectAnchorIds(node))
   }
 
   private flushPendingAnchors(blocks: BlockNode[]): void {
-    const firstBlockId = blocks[0]?.id;
+    const firstBlockId = blocks[0]?.id
     if (!firstBlockId || this.pendingAnchors.length === 0) {
-      return;
+      return
     }
 
-    this.registerAnchorIds(this.pendingAnchors, firstBlockId);
-    this.pendingAnchors = [];
+    this.registerAnchorIds(this.pendingAnchors, firstBlockId)
+    this.pendingAnchors = []
   }
 
-  private parseContainerNode(node: XmlNode): BlockNode[] {
-    const blocks: BlockNode[] = [];
+  private parseChildBlocks(node: HtmlDomElement): BlockNode[] {
+    const blocks: BlockNode[] = []
 
-    for (const [key, value] of Object.entries(node)) {
-      if (key.startsWith("@_")) {
-        continue;
+    for (const child of getHtmlNodeChildren(node)) {
+      if (!isHtmlElementNode(child)) {
+        continue
       }
 
-      const children = asArray(value);
-      for (const child of children) {
-        const normalizedNode =
-          child && typeof child === "object"
-            ? (child as XmlNode)
-            : { "#text": child };
-        const parsedBlocks = this.parseElement(key, normalizedNode);
-        if (parsedBlocks.length > 0) {
-          this.flushPendingAnchors(parsedBlocks);
-          blocks.push(...parsedBlocks);
-          continue;
-        }
+      const parsedBlocks = this.parseElement(child)
+      if (parsedBlocks.length > 0) {
+        this.flushPendingAnchors(parsedBlocks)
+        blocks.push(...parsedBlocks)
+        continue
+      }
 
-        if (
-          this.collectAnchorIds(normalizedNode).length > 0 &&
-          !readTextContent(normalizedNode).trim()
-        ) {
-          this.queuePendingAnchors(normalizedNode);
-        }
+      if (this.collectAnchorIds(child).length > 0 && !getHtmlNodeTextContent(child).trim()) {
+        this.queuePendingAnchors(child)
       }
     }
 
-    return blocks;
+    return blocks
   }
 
-  private parseElement(tagName: string, node: XmlNode): BlockNode[] {
-    if (tagName === "body" || tagName === "section" || tagName === "article" || tagName === "div" || tagName === "main") {
-      const blocks = this.parseContainerNode(node);
-      this.registerAnchorToFirstBlock(node, blocks);
-      return blocks;
+  private parseElement(node: HtmlDomElement): BlockNode[] {
+    if (
+      node.name === "body" ||
+      node.name === "section" ||
+      node.name === "article" ||
+      node.name === "div" ||
+      node.name === "main"
+    ) {
+      const blocks = this.parseChildBlocks(node)
+      this.registerAnchorToFirstBlock(node, blocks)
+      return blocks
     }
 
-    if (/^h[1-6]$/.test(tagName)) {
-      const blockId = this.createBlockId("heading");
-      this.registerInlineAnchors(node, blockId);
+    if (/^h[1-6]$/.test(node.name)) {
+      const blockId = this.createBlockId("heading")
+      this.registerInlineAnchors(node, blockId)
       return [
         {
           id: blockId,
           kind: "heading",
-          level: Number(tagName[1]) as 1 | 2 | 3 | 4 | 5 | 6,
-          inlines: parseInlineContent(node, this.sectionHref)
+          level: Number(node.name[1]) as 1 | 2 | 3 | 4 | 5 | 6,
+          inlines: parseInlineNodes(getHtmlNodeChildren(node), this.sectionHref),
+          ...getBlockNodeMetadata(node)
         }
-      ];
+      ]
     }
 
-    if (tagName === "p") {
-      const blockId = this.createBlockId("text");
-      this.registerInlineAnchors(node, blockId);
+    if (node.name === "p") {
+      const blockId = this.createBlockId("text")
+      this.registerInlineAnchors(node, blockId)
       return [
         {
           id: blockId,
           kind: "text",
-          inlines: parseInlineContent(node, this.sectionHref)
+          inlines: parseInlineNodes(getHtmlNodeChildren(node), this.sectionHref),
+          ...getBlockNodeMetadata(node)
         }
-      ];
+      ]
     }
 
-    if (tagName === "blockquote") {
-      const blockId = this.createBlockId("quote");
-      this.registerAnchor(node, blockId);
+    if (node.name === "blockquote") {
+      const blockId = this.createBlockId("quote")
+      this.registerAnchor(node, blockId)
       return [
         {
           id: blockId,
           kind: "quote",
-          blocks: this.parseContainerNode(node)
+          blocks: this.parseChildBlocks(node),
+          ...getBlockNodeMetadata(node)
         }
-      ];
+      ]
     }
 
-    if (tagName === "pre") {
-      const blockId = this.createBlockId("code");
-      this.registerInlineAnchors(node, blockId);
-      const codeNode =
-        (node.code as XmlNode | undefined) ??
-        (Array.isArray(node.code) ? (node.code[0] as XmlNode | undefined) : undefined);
+    if (node.name === "pre") {
+      const blockId = this.createBlockId("code")
+      this.registerInlineAnchors(node, blockId)
+      const codeNode = getHtmlChildElements(node).find((child) => child.name === "code")
       const language =
-        typeof codeNode?.["@_data-language"] === "string"
-          ? codeNode["@_data-language"]
-          : typeof codeNode?.["@_class"] === "string"
-            ? codeNode["@_class"]
-            : undefined;
-
+        getHtmlElementAttribute(codeNode ?? node, "data-language") ??
+        getHtmlElementAttribute(codeNode ?? node, "class")
       const codeBlock: BlockNode = {
         id: blockId,
         kind: "code",
-        text: readTextContent(codeNode ?? node).trim()
-      };
-
-      if (language) {
-        codeBlock.language = language;
+        text: normalizePreformattedText(getHtmlNodeTextContent(codeNode ?? node)),
+        ...getBlockNodeMetadata(node)
       }
 
-      return [codeBlock];
+      if (language?.trim()) {
+        codeBlock.language = language.trim()
+      }
+
+      return [codeBlock]
     }
 
-    if (tagName === "img") {
-      const imageBlock = this.parseImageBlock(node);
-      return imageBlock ? [imageBlock] : [];
+    if (node.name === "img") {
+      const imageBlock = this.parseImageBlock(node)
+      return imageBlock ? [imageBlock] : []
     }
 
-    if (tagName === "hr") {
-      const blockId = this.createBlockId("thematic-break");
-      this.registerAnchor(node, blockId);
+    if (node.name === "figure") {
+      const blockId = this.createBlockId("figure")
+      this.registerAnchor(node, blockId)
+      const contentBlocks = getHtmlChildElements(node)
+        .filter((child) => child.name !== "figcaption")
+        .flatMap((child) => this.parseElement(child))
+      const captionNode = getHtmlChildElements(node).find((child) => child.name === "figcaption")
       return [
         {
           id: blockId,
-          kind: "thematic-break"
+          kind: "figure",
+          blocks: contentBlocks,
+          ...getBlockNodeMetadata(node),
+          ...(captionNode
+            ? { caption: this.parseBlocksWithInlineFallback(captionNode) }
+            : {})
         }
-      ];
+      ]
     }
 
-    if (tagName === "ul" || tagName === "ol") {
-      const blockId = this.createBlockId("list");
-      this.registerAnchor(node, blockId);
-      const itemNodes = asArray(node.li as XmlNode | XmlNode[] | undefined);
+    if (node.name === "aside") {
+      const blockId = this.createBlockId("aside")
+      this.registerAnchor(node, blockId)
+      return [
+        {
+          id: blockId,
+          kind: "aside",
+          blocks: this.parseBlocksWithInlineFallback(node),
+          ...getBlockNodeMetadata(node)
+        }
+      ]
+    }
+
+    if (node.name === "nav") {
+      const blockId = this.createBlockId("nav")
+      this.registerAnchor(node, blockId)
+      return [
+        {
+          id: blockId,
+          kind: "nav",
+          blocks: this.parseBlocksWithInlineFallback(node),
+          ...getBlockNodeMetadata(node)
+        }
+      ]
+    }
+
+    if (node.name === "hr") {
+      const blockId = this.createBlockId("thematic-break")
+      this.registerAnchor(node, blockId)
+      return [
+        {
+          id: blockId,
+          kind: "thematic-break",
+          ...getBlockNodeMetadata(node)
+        }
+      ]
+    }
+
+    if (node.name === "ul" || node.name === "ol") {
+      const blockId = this.createBlockId("list")
+      this.registerAnchor(node, blockId)
+      const itemNodes = getHtmlChildElements(node).filter((child) => child.name === "li")
       const items: ListItemBlock[] = itemNodes.map((itemNode) => ({
         id: this.createListItemId(),
         blocks: this.parseListItem(itemNode)
-      }));
+      }))
 
       const listBlock: BlockNode = {
         id: blockId,
         kind: "list",
-        ordered: tagName === "ol",
-        items
-      };
+        ordered: node.name === "ol",
+        items,
+        ...getBlockNodeMetadata(node)
+      }
 
-      if (tagName === "ol" && typeof node["@_start"] === "string") {
-        const start = Number(node["@_start"]);
-        if (!Number.isNaN(start)) {
-          listBlock.start = start;
+      const start = getHtmlElementAttribute(node, "start")
+      if (node.name === "ol" && typeof start === "string") {
+        const startNumber = Number(start)
+        if (!Number.isNaN(startNumber)) {
+          listBlock.start = startNumber
         }
       }
 
-      return [listBlock];
+      return [listBlock]
     }
 
-    if (tagName === "table") {
-      const blockId = this.createBlockId("table");
-      this.registerAnchor(node, blockId);
+    if (node.name === "table") {
+      const blockId = this.createBlockId("table")
+      this.registerAnchor(node, blockId)
+      const captionNode = getHtmlChildElements(node).find((child) => child.name === "caption")
       return [
         {
           id: blockId,
           kind: "table",
-          rows: this.parseTableRows(node)
+          rows: this.parseTableRows(node),
+          ...getBlockNodeMetadata(node),
+          ...(captionNode
+            ? { caption: this.parseBlocksWithInlineFallback(captionNode) }
+            : {})
         }
-      ];
+      ]
     }
 
-    return [];
+    if (node.name === "dl") {
+      const blockId = this.createBlockId("definition-list")
+      this.registerAnchor(node, blockId)
+      return [
+        {
+          id: blockId,
+          kind: "definition-list",
+          items: this.parseDefinitionListItems(node),
+          ...getBlockNodeMetadata(node)
+        }
+      ]
+    }
+
+    if (node.name === "script" || node.name === "style") {
+      return []
+    }
+
+    const fallbackBlocks = this.applyFallbackBlockMetadata(
+      node,
+      this.parseBlocksWithInlineFallback(node)
+    )
+    this.registerAnchorToFirstBlock(node, fallbackBlocks)
+    return fallbackBlocks
   }
 
-  private parseImageBlock(node: XmlNode): ImageBlock | null {
-    const src = typeof node["@_src"] === "string" ? node["@_src"] : undefined;
-
-    if (!src) {
-      return null;
+  private applyFallbackBlockMetadata(node: HtmlDomElement, blocks: BlockNode[]): BlockNode[] {
+    if (blocks.length !== 1) {
+      return blocks
     }
 
-    const blockId = this.createBlockId("image");
-    this.registerAnchor(node, blockId);
+    const block = blocks[0]
+    if (!block || (block.kind !== "text" && block.kind !== "heading")) {
+      return blocks
+    }
+
+    const metadata = getBlockNodeMetadata(node)
+    const mergedStyle = {
+      ...(metadata.style ?? {}),
+      ...(block.style ?? {})
+    }
+
+    return [
+      {
+        ...metadata,
+        ...block,
+        ...(Object.keys(mergedStyle).length > 0 ? { style: mergedStyle } : {})
+      }
+    ]
+  }
+
+  private parseImageBlock(node: HtmlDomElement): ImageBlock | null {
+    const src = getHtmlElementAttribute(node, "src")
+    if (!src) {
+      return null
+    }
+
+    const blockId = this.createBlockId("image")
+    this.registerAnchor(node, blockId)
     const imageBlock: ImageBlock = {
       id: blockId,
       kind: "image",
-      src: resolveResourcePath(this.sectionHref, src)
-    };
-
-    if (typeof node["@_alt"] === "string" && node["@_alt"].trim()) {
-      imageBlock.alt = node["@_alt"].trim();
-    }
-    if (typeof node["@_title"] === "string" && node["@_title"].trim()) {
-      imageBlock.title = node["@_title"].trim();
-    }
-    if (typeof node["@_width"] === "string") {
-      const width = Number(node["@_width"]);
-      if (!Number.isNaN(width)) {
-        imageBlock.width = width;
-      }
-    }
-    if (typeof node["@_height"] === "string") {
-      const height = Number(node["@_height"]);
-      if (!Number.isNaN(height)) {
-        imageBlock.height = height;
-      }
+      src: resolveResourcePath(this.sectionHref, src),
+      ...getBlockNodeMetadata(node)
     }
 
-    return imageBlock;
+    const alt = getHtmlElementAttribute(node, "alt")
+    const title = getHtmlElementAttribute(node, "title")
+    const width = getHtmlElementAttribute(node, "width")
+    const height = getHtmlElementAttribute(node, "height")
+
+    if (alt?.trim()) {
+      imageBlock.alt = alt.trim()
+    }
+    if (title?.trim()) {
+      imageBlock.title = title.trim()
+    }
+    if (typeof width === "string") {
+      const parsedWidth = Number(width)
+      if (!Number.isNaN(parsedWidth)) {
+        imageBlock.width = parsedWidth
+      }
+    }
+    if (typeof height === "string") {
+      const parsedHeight = Number(height)
+      if (!Number.isNaN(parsedHeight)) {
+        imageBlock.height = parsedHeight
+      }
+    }
+
+    return imageBlock
   }
 
-  private parseListItem(node: XmlNode): BlockNode[] {
-    const blocks = this.parseContainerNode(node);
+  private parseListItem(node: HtmlDomElement): BlockNode[] {
+    const blocks = this.parseChildBlocks(node)
     if (blocks.length > 0) {
-      return blocks;
+      return blocks
     }
 
-    const parsedInlines = parseInlineContent(node, this.sectionHref);
+    const parsedInlines = parseInlineNodes(getHtmlNodeChildren(node), this.sectionHref)
     if (parsedInlines.length === 0) {
-      return [];
+      return []
     }
 
     return [
       {
         id: this.createBlockId("text"),
         kind: "text",
-        inlines: parsedInlines
+        inlines: parsedInlines,
+        ...getBlockNodeMetadata(node)
       }
-    ];
+    ]
   }
 
-  private parseTableRows(node: XmlNode): TableRow[] {
-    const rows: TableRow[] = [];
-    const rowContainers = [node.thead, node.tbody, node.tfoot, node];
+  private parseBlocksWithInlineFallback(node: HtmlDomElement): BlockNode[] {
+    const blocks = this.parseChildBlocks(node)
+    if (blocks.length > 0) {
+      return blocks
+    }
+
+    const parsedInlines = parseInlineNodes(getHtmlNodeChildren(node), this.sectionHref)
+    if (parsedInlines.length === 0) {
+      return []
+    }
+
+    return [
+      {
+        id: this.createBlockId("text"),
+        kind: "text",
+        inlines: parsedInlines,
+        ...getBlockNodeMetadata(node)
+      }
+    ]
+  }
+
+  private parseDefinitionListItems(node: HtmlDomElement) {
+    const items: Array<{
+      id: string
+      term: BlockNode[]
+      descriptions: BlockNode[][]
+    }> = []
+    let currentItem: (typeof items)[number] | null = null
+
+    for (const child of getHtmlChildElements(node)) {
+      if (child.name === "dt") {
+        currentItem = {
+          id: this.createDefinitionItemId(),
+          term: this.parseBlocksWithInlineFallback(child),
+          descriptions: []
+        }
+        items.push(currentItem)
+        continue
+      }
+
+      if (child.name === "dd" && currentItem) {
+        currentItem.descriptions.push(this.parseBlocksWithInlineFallback(child))
+      }
+    }
+
+    return items
+  }
+
+  private parseTableRows(node: HtmlDomElement): TableRow[] {
+    const rows: TableRow[] = []
+    const rowContainers = getHtmlChildElements(node).filter((child) =>
+      child.name === "thead" ||
+      child.name === "tbody" ||
+      child.name === "tfoot" ||
+      child.name === "tr"
+    )
 
     for (const container of rowContainers) {
-      for (const rowNode of asArray(container as XmlNode | XmlNode[] | undefined)) {
-        if (!rowNode || typeof rowNode !== "object") {
-          continue;
+      if (container.name === "tr") {
+        rows.push({
+          id: this.createRowId(),
+          cells: this.parseTableCells(container)
+        })
+        continue
+      }
+
+      for (const rowNode of getHtmlChildElements(container)) {
+        if (rowNode.name !== "tr") {
+          continue
         }
 
-        for (const trNode of asArray((rowNode as XmlNode).tr as XmlNode | XmlNode[] | undefined)) {
-          rows.push({
-            id: this.createRowId(),
-            cells: this.parseTableCells(trNode)
-          });
-        }
+        rows.push({
+          id: this.createRowId(),
+          cells: this.parseTableCells(rowNode)
+        })
       }
     }
 
-    return rows;
+    return rows
   }
 
-  private parseTableCells(node: XmlNode): TableCell[] {
-    const cellEntries: Array<[string, XmlNode]> = [];
+  private parseTableCells(node: HtmlDomElement): TableCell[] {
+    const cellNodes = getHtmlChildElements(node).filter((child) =>
+      child.name === "th" || child.name === "td"
+    )
 
-    for (const key of ["th", "td"] as const) {
-      for (const cellNode of asArray(node[key] as XmlNode | XmlNode[] | undefined)) {
-        cellEntries.push([key, cellNode]);
-      }
-    }
-
-    return cellEntries.map(([tagName, cellNode]) => {
-      const blocks = this.parseContainerNode(cellNode);
+    return cellNodes.map((cellNode) => {
+      const blocks = this.parseChildBlocks(cellNode)
       const cell: TableCell = {
         id: this.createCellId(),
         blocks:
@@ -445,29 +770,32 @@ class XhtmlBlockParser {
                 {
                   id: this.createBlockId("text"),
                   kind: "text",
-                  inlines: parseInlineContent(cellNode, this.sectionHref)
+                  inlines: parseInlineNodes(getHtmlNodeChildren(cellNode), this.sectionHref)
                 }
               ]
-      };
-
-      if (tagName === "th") {
-        cell.header = true;
-      }
-      if (typeof cellNode["@_colspan"] === "string") {
-        const colSpan = Number(cellNode["@_colspan"]);
-        if (!Number.isNaN(colSpan)) {
-          cell.colSpan = colSpan;
-        }
-      }
-      if (typeof cellNode["@_rowspan"] === "string") {
-        const rowSpan = Number(cellNode["@_rowspan"]);
-        if (!Number.isNaN(rowSpan)) {
-          cell.rowSpan = rowSpan;
-        }
       }
 
-      return cell;
-    });
+      if (cellNode.name === "th") {
+        cell.header = true
+      }
+
+      const colSpan = getHtmlElementAttribute(cellNode, "colspan")
+      const rowSpan = getHtmlElementAttribute(cellNode, "rowspan")
+      if (typeof colSpan === "string") {
+        const parsedColSpan = Number(colSpan)
+        if (!Number.isNaN(parsedColSpan)) {
+          cell.colSpan = parsedColSpan
+        }
+      }
+      if (typeof rowSpan === "string") {
+        const parsedRowSpan = Number(rowSpan)
+        if (!Number.isNaN(parsedRowSpan)) {
+          cell.rowSpan = parsedRowSpan
+        }
+      }
+
+      return cell
+    })
   }
 }
 
@@ -475,6 +803,6 @@ export function parseXhtmlDocument(
   xml: string,
   sectionHref: string
 ): SectionDocument {
-  const parser = new XhtmlBlockParser(normalizeResourcePath(sectionHref));
-  return parser.parseDocument(xml);
+  const parser = new XhtmlBlockParser(normalizeResourcePath(sectionHref))
+  return parser.parseDocument(xml)
 }

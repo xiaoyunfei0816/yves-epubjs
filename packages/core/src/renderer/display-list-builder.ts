@@ -1,7 +1,13 @@
 import type {
   BlockNode,
+  FigureBlock,
+  InlineNode,
+  ListBlock,
   Locator,
+  Rect,
   SectionDocument,
+  TableBlock,
+  TextAlign,
   Theme,
   TypographyOptions
 } from "../model/types";
@@ -16,6 +22,9 @@ import type {
   TextRunDrawOp
 } from "./draw-ops";
 import { resolveImageLayout } from "../utils/image-layout";
+import { wrapPreformattedText } from "../utils/preformatted-text";
+import { extractBlockText } from "../utils/block-text";
+import { approximateTextWidth, extractFontSize, wrapText } from "../utils/text-wrap";
 
 type BuilderOptions = {
   section: SectionDocument;
@@ -32,6 +41,16 @@ type BuilderOptions = {
 };
 
 const SIDE_PADDING = 8;
+
+type NativeBlockRenderStyle = {
+  color: string;
+  backgroundColor?: string;
+  textAlign: TextAlign;
+  paddingTop: number;
+  paddingBottom: number;
+  paddingLeft: number;
+  paddingRight: number;
+};
 
 export class DisplayListBuilder {
   buildSection(options: BuilderOptions): SectionDisplayList {
@@ -68,6 +87,7 @@ export class DisplayListBuilder {
         width: titleRect.width,
         font: `700 ${titleFontSize}px "Iowan Old Style", "Palatino Linotype", serif`,
         color: options.theme.color,
+        backgroundColor: undefined,
         highlightColor: undefined,
         underline: undefined,
         href: undefined
@@ -84,6 +104,8 @@ export class DisplayListBuilder {
             width: contentWidth,
             theme: options.theme,
             locator: options.locatorMap?.get(block.id),
+            resolveImageLoaded: options.resolveImageLoaded,
+            resolveImageUrl: options.resolveImageUrl,
             highlighted: options.highlightedBlockIds?.has(block.id) ?? false,
             active: options.activeBlockId === block.id
           })
@@ -125,6 +147,8 @@ export class DisplayListBuilder {
     width: number;
     theme: Theme;
     locator: Locator | undefined;
+    resolveImageLoaded: ((src: string) => boolean) | undefined;
+    resolveImageUrl: ((src: string) => string) | undefined;
     highlighted: boolean;
     active: boolean;
   }): {
@@ -140,6 +164,24 @@ export class DisplayListBuilder {
       width: input.width - SIDE_PADDING * 2,
       height: input.block.estimatedHeight
     };
+    const contentRect = {
+      x: blockRect.x + input.block.paddingLeft,
+      y: blockRect.y + input.block.paddingTop,
+      width: Math.max(40, blockRect.width - input.block.paddingLeft - input.block.paddingRight),
+      height: Math.max(0, blockRect.height - input.block.paddingTop - input.block.paddingBottom)
+    }
+    if (input.block.backgroundColor) {
+      ops.push({
+        kind: "rect",
+        sectionId: input.section.id,
+        sectionHref: input.section.href,
+        blockId: input.block.id,
+        locator: input.locator,
+        rect: blockRect,
+        color: input.block.backgroundColor,
+        radius: 10
+      } satisfies RectDrawOp)
+    }
     if (input.highlighted || input.active) {
       ops.push({
         kind: "rect",
@@ -172,19 +214,52 @@ export class DisplayListBuilder {
       const lineWidth = Math.max(0, line.width);
       const startX = this.resolveLineStartX(
         input.block.textAlign,
-        blockRect.x,
-        blockRect.width,
+        contentRect.x,
+        contentRect.width,
         lineWidth
       );
       let cursorX = startX;
-      const baselineY = input.top + lineIndex * input.block.lineHeight;
+      const baselineY = contentRect.y + lineIndex * input.block.lineHeight;
 
       for (const fragment of line.fragments) {
         cursorX += fragment.gapBefore;
-        const fragmentWidth = approximateTextWidth(fragment.text, fragment.font);
+        const fragmentWidth = fragment.image?.width ?? approximateTextWidth(fragment.text, fragment.font);
+        const baselineShift = fragment.baselineShift ?? 0
+        if (fragment.image) {
+          const imageRect = {
+            x: cursorX,
+            y: baselineY + Math.max(0, (input.block.lineHeight - fragment.image.height) * 0.5),
+            width: fragment.image.width,
+            height: fragment.image.height
+          }
+          const renderSrc = input.resolveImageUrl?.(fragment.image.src) ?? fragment.image.src
+          ops.push({
+            kind: "image",
+            sectionId: input.section.id,
+            sectionHref: input.section.href,
+            blockId: input.block.id,
+            locator: input.locator,
+            rect: imageRect,
+            src: renderSrc,
+            alt: fragment.image.alt,
+            loaded: Boolean(input.resolveImageLoaded?.(fragment.image.src)),
+            background: "transparent"
+          } satisfies ImageDrawOp)
+          interactions.push({
+            kind: "image",
+            rect: imageRect,
+            sectionId: input.section.id,
+            blockId: input.block.id,
+            src: renderSrc,
+            alt: fragment.image.alt,
+            locator: input.locator
+          })
+          cursorX += fragment.image.width;
+          continue
+        }
         const rect = {
           x: cursorX,
-          y: baselineY,
+          y: baselineY + baselineShift,
           width: fragmentWidth,
           height: input.block.lineHeight
         };
@@ -197,14 +272,17 @@ export class DisplayListBuilder {
         rect,
         text: fragment.text,
         x: cursorX,
-        y: baselineY,
+        y: baselineY + baselineShift,
         width: fragmentWidth,
         font: fragment.font,
-        color: fragment.href ? "#1b4b72" : input.theme.color,
+        color: fragment.href ? "#1b4b72" : (fragment.color ?? input.block.color ?? input.theme.color),
+        backgroundColor: fragment.backgroundColor,
         highlightColor: input.highlighted
           ? "rgba(250, 204, 21, 0.28)"
           : input.active
-              ? "rgba(245, 158, 11, 0.18)"
+            ? "rgba(245, 158, 11, 0.18)"
+            : fragment.mark
+              ? "rgba(250, 204, 21, 0.22)"
               : undefined,
           underline: Boolean(fragment.href),
           href: fragment.href
@@ -260,6 +338,8 @@ export class DisplayListBuilder {
       width,
       height: input.estimatedHeight
     };
+    const blockStyle = this.resolveNativeBlockRenderStyle(input.block, input.theme);
+    const contentRect = this.insetRect(rect, blockStyle);
     const ops: DrawOp[] = [];
     const interactions: InteractionRegion[] = [
       {
@@ -271,6 +351,19 @@ export class DisplayListBuilder {
         text: extractBlockText(input.block)
       }
     ];
+
+    if (blockStyle.backgroundColor) {
+      ops.push({
+        kind: "rect",
+        sectionId: input.section.id,
+        sectionHref: input.section.href,
+        blockId: input.block.id,
+        locator: input.locator,
+        rect,
+        color: blockStyle.backgroundColor,
+        radius: 12
+      } satisfies RectDrawOp);
+    }
 
     if (input.highlighted || input.active) {
       ops.push({
@@ -367,12 +460,13 @@ export class DisplayListBuilder {
             section: input.section,
             blockId: input.block.id,
             locator: input.locator,
-            x: x + 18,
-            top: input.top + 2,
-            width: Math.max(40, width - 18),
-            height: rect.height,
+            x: contentRect.x + 18,
+            top: contentRect.y + 2,
+            width: Math.max(40, contentRect.width - 18),
+            height: contentRect.height,
             font: `400 ${input.typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`,
-            color: input.theme.color,
+            color: blockStyle.color,
+            textAlign: blockStyle.textAlign,
             highlighted: input.highlighted,
             active: input.active
           })
@@ -386,28 +480,131 @@ export class DisplayListBuilder {
           blockId: input.block.id,
           locator: input.locator,
           rect,
-          color: "rgba(15, 23, 42, 0.06)",
+          color: blockStyle.backgroundColor ?? "rgba(15, 23, 42, 0.06)",
           radius: 12
         } satisfies RectDrawOp);
         ops.push(
-          ...this.buildWrappedTextOps({
+          ...this.buildPreformattedTextOps({
             text: input.block.text,
             section: input.section,
             blockId: input.block.id,
             locator: input.locator,
-            x: x + 12,
-            top: input.top + 12,
-            width: Math.max(40, width - 24),
-            height: rect.height - 24,
+            x: contentRect.x + 12,
+            top: contentRect.y + 12,
+            width: Math.max(40, contentRect.width - 24),
+            height: Math.max(0, contentRect.height - 24),
             font: `400 ${Math.max(13, input.typography.fontSize - 1)}px "SFMono-Regular", Consolas, monospace`,
-            color: input.theme.color,
+            color: blockStyle.color,
+            textAlign: blockStyle.textAlign,
+            highlighted: input.highlighted,
+            active: input.active
+          })
+        );
+        break;
+      case "aside":
+        ops.push({
+          kind: "rect",
+          sectionId: input.section.id,
+          sectionHref: input.section.href,
+          blockId: input.block.id,
+          locator: input.locator,
+          rect,
+          color: blockStyle.backgroundColor ?? "rgba(59, 123, 163, 0.08)",
+          radius: 12
+        } satisfies RectDrawOp)
+        ops.push({
+          kind: "rect",
+          sectionId: input.section.id,
+          sectionHref: input.section.href,
+          blockId: input.block.id,
+          locator: input.locator,
+          rect: {
+            x,
+            y: input.top + 6,
+            width: 4,
+            height: Math.max(16, rect.height - 12)
+          },
+          color: "rgba(59, 123, 163, 0.42)",
+          radius: 4
+        } satisfies RectDrawOp)
+        ops.push(
+          ...this.buildWrappedTextOps({
+            text: extractBlockText(input.block),
+            section: input.section,
+            blockId: input.block.id,
+            locator: input.locator,
+            x: contentRect.x + 16,
+            top: contentRect.y + 8,
+            width: Math.max(40, contentRect.width - 24),
+            height: Math.max(0, contentRect.height - 16),
+            font: `400 ${input.typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`,
+            color: blockStyle.color,
+            textAlign: blockStyle.textAlign,
             highlighted: input.highlighted,
             active: input.active
           })
         );
         break;
       case "list":
+        ops.push(
+          ...this.buildListBlockOps({
+            block: input.block,
+            section: input.section,
+            locator: input.locator,
+            x: contentRect.x,
+            top: contentRect.y + 4,
+            width: contentRect.width,
+            typography: input.typography,
+            theme: {
+              ...input.theme,
+              color: blockStyle.color
+            },
+            highlighted: input.highlighted,
+            active: input.active
+          })
+        );
+        break;
+      case "figure":
+        ops.push(
+          ...this.buildFigureBlockOps({
+            block: input.block,
+            section: input.section,
+            locator: input.locator,
+            x: contentRect.x,
+            top: contentRect.y + 6,
+            width: contentRect.width,
+            viewportHeight: input.viewportHeight,
+            typography: input.typography,
+            theme: {
+              ...input.theme,
+              color: blockStyle.color
+            },
+            resolveImageLoaded: input.resolveImageLoaded,
+            resolveImageUrl: input.resolveImageUrl,
+            highlighted: input.highlighted,
+            active: input.active
+          })
+        );
+        break;
       case "table":
+        ops.push(
+          ...this.buildTableBlockOps({
+            block: input.block,
+            section: input.section,
+            locator: input.locator,
+            x: contentRect.x,
+            top: contentRect.y + 4,
+            width: contentRect.width,
+            typography: input.typography,
+            theme: {
+              ...input.theme,
+              color: blockStyle.color
+            },
+            highlighted: input.highlighted,
+            active: input.active
+          })
+        );
+        break;
       case "heading":
       case "text":
       default:
@@ -417,12 +614,13 @@ export class DisplayListBuilder {
             section: input.section,
             blockId: input.block.id,
             locator: input.locator,
-            x,
-            top: input.top,
-            width,
-            height: rect.height,
+            x: contentRect.x,
+            top: contentRect.y,
+            width: contentRect.width,
+            height: contentRect.height,
             font: `400 ${input.typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`,
-            color: input.theme.color,
+            color: blockStyle.color,
+            textAlign: blockStyle.textAlign,
             highlighted: input.highlighted,
             active: input.active
           })
@@ -448,42 +646,481 @@ export class DisplayListBuilder {
     height: number;
     font: string;
     color: string;
+    textAlign: TextAlign;
     highlighted: boolean;
     active: boolean;
   }): TextRunDrawOp[] {
     const fontSize = extractFontSize(input.font);
     const lineHeight = Math.max(fontSize * 1.45, 18);
     const lines = wrapText(input.text || "", input.width, input.font);
-    return lines.map((line, index) => ({
-      kind: "text",
-      sectionId: input.section.id,
-      sectionHref: input.section.href,
-      blockId: input.blockId,
-      locator: input.locator,
-      rect: {
-        x: input.x,
+    return lines.map((line, index) => {
+      const lineWidth = approximateTextWidth(line, input.font)
+      const lineX = this.resolveTextLineStartX(
+        input.textAlign,
+        input.x,
+        input.width,
+        lineWidth
+      )
+      return {
+        kind: "text",
+        sectionId: input.section.id,
+        sectionHref: input.section.href,
+        blockId: input.blockId,
+        locator: input.locator,
+        rect: {
+          x: lineX,
+          y: input.top + index * lineHeight,
+          width: lineWidth,
+          height: lineHeight
+        },
+        text: line,
+        x: lineX,
         y: input.top + index * lineHeight,
-        width: approximateTextWidth(line, input.font),
-        height: lineHeight
-      },
-      text: line,
-      x: input.x,
-      y: input.top + index * lineHeight,
-      width: approximateTextWidth(line, input.font),
-      font: input.font,
-      color: input.color,
-      highlightColor: input.highlighted
-        ? "rgba(250, 204, 21, 0.28)"
-        : input.active
-          ? "rgba(245, 158, 11, 0.18)"
-          : undefined,
-      underline: undefined,
-      href: undefined
-    }));
+        width: lineWidth,
+        font: input.font,
+        color: input.color,
+        backgroundColor: undefined,
+        highlightColor: input.highlighted
+          ? "rgba(250, 204, 21, 0.28)"
+          : input.active
+            ? "rgba(245, 158, 11, 0.18)"
+            : undefined,
+        underline: undefined,
+        href: undefined
+      }
+    })
+  }
+
+  private buildPreformattedTextOps(input: {
+    text: string;
+    section: SectionDocument;
+    blockId: string;
+    locator: Locator | undefined;
+    x: number;
+    top: number;
+    width: number;
+    height: number;
+    font: string;
+    color: string;
+    textAlign: TextAlign;
+    highlighted: boolean;
+    active: boolean;
+  }): TextRunDrawOp[] {
+    const fontSize = extractFontSize(input.font)
+    const lineHeight = Math.max(fontSize * 1.45, 18)
+    const lines = wrapPreformattedText(input.text || "", input.width, input.font)
+    return lines.map((line, index) => {
+      const lineWidth = approximateTextWidth(line, input.font)
+      const lineX = this.resolveTextLineStartX(
+        input.textAlign,
+        input.x,
+        input.width,
+        lineWidth
+      )
+      return {
+        kind: "text",
+        sectionId: input.section.id,
+        sectionHref: input.section.href,
+        blockId: input.blockId,
+        locator: input.locator,
+        rect: {
+          x: lineX,
+          y: input.top + index * lineHeight,
+          width: lineWidth,
+          height: lineHeight
+        },
+        text: line,
+        x: lineX,
+        y: input.top + index * lineHeight,
+        width: lineWidth,
+        font: input.font,
+        color: input.color,
+        backgroundColor: undefined,
+        highlightColor: input.highlighted
+          ? "rgba(250, 204, 21, 0.28)"
+          : input.active
+            ? "rgba(245, 158, 11, 0.18)"
+            : undefined,
+        underline: undefined,
+        href: undefined
+      }
+    })
+  }
+
+  private buildListBlockOps(input: {
+    block: ListBlock;
+    section: SectionDocument;
+    locator: Locator | undefined;
+    x: number;
+    top: number;
+    width: number;
+    typography: TypographyOptions;
+    theme: Theme;
+    highlighted: boolean;
+    active: boolean;
+  }): TextRunDrawOp[] {
+    const ops: TextRunDrawOp[] = []
+    const font = `400 ${input.typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
+    const lineHeight = Math.max(input.typography.fontSize * 1.45, 18)
+    const renderList = (block: ListBlock, depth: number, top: number): number => {
+      let currentTop = top
+      block.items.forEach((item, index) => {
+        const marker = block.ordered ? `${(block.start ?? 1) + index}.` : "\u2022"
+        const markerX = input.x + depth * 18
+        const textX = markerX + 18
+        const textWidth = Math.max(40, input.width - (textX - input.x))
+        const textBlocks = item.blocks.filter((child) => child.kind !== "list")
+        const itemText = textBlocks.map(extractBlockText).filter(Boolean).join(" ")
+        const itemLines = wrapText(itemText || "", textWidth, font)
+
+        ops.push({
+          kind: "text",
+          sectionId: input.section.id,
+          sectionHref: input.section.href,
+          blockId: input.block.id,
+          locator: input.locator,
+          rect: {
+            x: markerX,
+            y: currentTop,
+          width: approximateTextWidth(marker, font),
+          height: lineHeight
+        },
+        text: marker,
+        x: markerX,
+        y: currentTop,
+        width: approximateTextWidth(marker, font),
+        font,
+        color: input.theme.color,
+        backgroundColor: undefined,
+        highlightColor: input.highlighted
+            ? "rgba(250, 204, 21, 0.28)"
+            : input.active
+              ? "rgba(245, 158, 11, 0.18)"
+              : undefined,
+          underline: undefined,
+          href: undefined
+        })
+
+        itemLines.forEach((line, lineIndex) => {
+          ops.push({
+            kind: "text",
+            sectionId: input.section.id,
+            sectionHref: input.section.href,
+            blockId: input.block.id,
+            locator: input.locator,
+            rect: {
+              x: textX,
+              y: currentTop + lineIndex * lineHeight,
+            width: approximateTextWidth(line, font),
+            height: lineHeight
+          },
+          text: line,
+          x: textX,
+          y: currentTop + lineIndex * lineHeight,
+          width: approximateTextWidth(line, font),
+          font,
+          color: input.theme.color,
+          backgroundColor: undefined,
+          highlightColor: input.highlighted
+              ? "rgba(250, 204, 21, 0.28)"
+              : input.active
+                ? "rgba(245, 158, 11, 0.18)"
+                : undefined,
+            underline: undefined,
+            href: undefined
+          })
+        })
+
+        currentTop += Math.max(lineHeight, itemLines.length * lineHeight) + 6
+        for (const child of item.blocks) {
+          if (child.kind === "list") {
+            currentTop = renderList(child, depth + 1, currentTop)
+          }
+        }
+      })
+
+      return currentTop
+    }
+
+    renderList(input.block, 0, input.top)
+    return ops
+  }
+
+  private buildFigureBlockOps(input: {
+    block: FigureBlock;
+    section: SectionDocument;
+    locator: Locator | undefined;
+    x: number;
+    top: number;
+    width: number;
+    viewportHeight: number;
+    typography: TypographyOptions;
+    theme: Theme;
+    resolveImageLoaded: ((src: string) => boolean) | undefined;
+    resolveImageUrl: ((src: string) => string) | undefined;
+    highlighted: boolean;
+    active: boolean;
+  }): DrawOp[] {
+    const ops: DrawOp[] = []
+    let currentTop = input.top
+
+    for (const child of input.block.blocks) {
+      if (child.kind === "image") {
+        const renderSrc = input.resolveImageUrl?.(child.src) ?? child.src
+        const imageLayout = resolveImageLayout({
+          availableWidth: input.width,
+          viewportHeight: input.viewportHeight,
+          ...(child.width ? { intrinsicWidth: child.width } : {}),
+          ...(child.height ? { intrinsicHeight: child.height } : {})
+        })
+        const imageRect = {
+          x: input.x + imageLayout.xOffset,
+          y: currentTop,
+          width: imageLayout.width,
+          height: imageLayout.height
+        }
+        ops.push({
+          kind: "image",
+          sectionId: input.section.id,
+          sectionHref: input.section.href,
+          blockId: input.block.id,
+          locator: input.locator,
+          rect: imageRect,
+          src: renderSrc,
+          alt: child.alt,
+          loaded: Boolean(input.resolveImageLoaded?.(child.src)),
+          background: "transparent"
+        })
+        currentTop += imageLayout.height + 10
+        continue
+      }
+
+      const text = extractBlockText(child)
+      if (!text) {
+        continue
+      }
+      const font = `400 ${input.typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
+      const lineHeight = Math.max(input.typography.fontSize * 1.45, 18)
+      const lines = wrapText(text, input.width, font)
+      lines.forEach((line, lineIndex) => {
+        ops.push({
+          kind: "text",
+          sectionId: input.section.id,
+          sectionHref: input.section.href,
+          blockId: input.block.id,
+          locator: input.locator,
+          rect: {
+            x: input.x,
+            y: currentTop + lineIndex * lineHeight,
+          width: approximateTextWidth(line, font),
+          height: lineHeight
+        },
+        text: line,
+        x: input.x,
+        y: currentTop + lineIndex * lineHeight,
+        width: approximateTextWidth(line, font),
+        font,
+        color: input.theme.color,
+        backgroundColor: undefined,
+        highlightColor: input.highlighted
+            ? "rgba(250, 204, 21, 0.28)"
+            : input.active
+              ? "rgba(245, 158, 11, 0.18)"
+              : undefined,
+          underline: undefined,
+          href: undefined
+        })
+      })
+      currentTop += lines.length * lineHeight + 8
+    }
+
+    if (input.block.caption?.length) {
+      const captionText = input.block.caption.map(extractBlockText).filter(Boolean).join(" ")
+      const captionFont = `italic 400 ${Math.max(14, input.typography.fontSize - 1)}px "Iowan Old Style", "Palatino Linotype", serif`
+      const captionLineHeight = Math.max(extractFontSize(captionFont) * 1.45, 18)
+      const captionLines = wrapText(captionText, Math.max(40, input.width - 24), captionFont)
+      captionLines.forEach((line, lineIndex) => {
+        ops.push({
+          kind: "text",
+          sectionId: input.section.id,
+          sectionHref: input.section.href,
+          blockId: input.block.id,
+          locator: input.locator,
+          rect: {
+            x: input.x + 12,
+            y: currentTop + lineIndex * captionLineHeight,
+            width: approximateTextWidth(line, captionFont),
+            height: captionLineHeight
+          },
+          text: line,
+          x: input.x + 12,
+          y: currentTop + lineIndex * captionLineHeight,
+          width: approximateTextWidth(line, captionFont),
+          font: captionFont,
+          color: input.theme.color,
+          backgroundColor: undefined,
+          highlightColor: input.highlighted
+            ? "rgba(250, 204, 21, 0.28)"
+            : input.active
+              ? "rgba(245, 158, 11, 0.18)"
+              : undefined,
+          underline: undefined,
+          href: undefined
+        })
+      })
+    }
+
+    return ops
+  }
+
+  private buildTableBlockOps(input: {
+    block: TableBlock;
+    section: SectionDocument;
+    locator: Locator | undefined;
+    x: number;
+    top: number;
+    width: number;
+    typography: TypographyOptions;
+    theme: Theme;
+    highlighted: boolean;
+    active: boolean;
+  }): DrawOp[] {
+    const ops: DrawOp[] = []
+    const captionFont = `italic 400 ${Math.max(14, input.typography.fontSize - 1)}px "Iowan Old Style", "Palatino Linotype", serif`
+    const cellFont = `400 ${input.typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
+    const headerFont = `700 ${input.typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
+    const lineHeight = Math.max(input.typography.fontSize * 1.45, 18)
+    const padding = 8
+    let currentTop = input.top
+
+    if (input.block.caption?.length) {
+      const captionText = input.block.caption.map(extractBlockText).filter(Boolean).join(" ")
+      const captionLines = wrapText(captionText, input.width, captionFont)
+      captionLines.forEach((line, lineIndex) => {
+        ops.push({
+          kind: "text",
+          sectionId: input.section.id,
+          sectionHref: input.section.href,
+          blockId: input.block.id,
+          locator: input.locator,
+          rect: {
+            x: input.x,
+            y: currentTop + lineIndex * lineHeight,
+            width: approximateTextWidth(line, captionFont),
+            height: lineHeight
+          },
+          text: line,
+          x: input.x,
+          y: currentTop + lineIndex * lineHeight,
+          width: approximateTextWidth(line, captionFont),
+          font: captionFont,
+          color: input.theme.color,
+          backgroundColor: undefined,
+          highlightColor: input.highlighted
+            ? "rgba(250, 204, 21, 0.28)"
+            : input.active
+              ? "rgba(245, 158, 11, 0.18)"
+              : undefined,
+          underline: undefined,
+          href: undefined
+        })
+      })
+      currentTop += captionLines.length * lineHeight + 8
+    }
+
+    const columnCount = Math.max(
+      1,
+      ...input.block.rows.map((row) =>
+        row.cells.reduce((total, cell) => total + (cell.colSpan ?? 1), 0)
+      )
+    )
+    const columnWidth = input.width / columnCount
+
+    for (const row of input.block.rows) {
+      const cellHeights = row.cells.map((cell) => {
+        const span = Math.max(1, cell.colSpan ?? 1)
+        const cellWidth = Math.max(32, columnWidth * span - padding * 2)
+        const font = cell.header ? headerFont : cellFont
+        const text = cell.blocks.map(extractBlockText).filter(Boolean).join(" ")
+        return wrapText(text || "", cellWidth, font).length * lineHeight + padding * 2
+      })
+      const rowHeight = Math.max(lineHeight + padding * 2, ...cellHeights)
+      let currentX = input.x
+
+      row.cells.forEach((cell) => {
+        const span = Math.max(1, cell.colSpan ?? 1)
+        const cellWidth = columnWidth * span
+        const font = cell.header ? headerFont : cellFont
+        const text = cell.blocks.map(extractBlockText).filter(Boolean).join(" ")
+        const lines = wrapText(text || "", Math.max(32, cellWidth - padding * 2), font)
+
+        ops.push({
+          kind: "rect",
+          sectionId: input.section.id,
+          sectionHref: input.section.href,
+          blockId: input.block.id,
+          locator: input.locator,
+          rect: {
+            x: currentX,
+            y: currentTop,
+            width: cellWidth,
+            height: rowHeight
+          },
+          color: cell.header ? "rgba(148, 163, 184, 0.10)" : "rgba(255, 255, 255, 0.001)",
+          strokeColor: "rgba(148, 163, 184, 0.7)",
+          strokeWidth: 1
+        })
+
+        lines.forEach((line, lineIndex) => {
+          ops.push({
+            kind: "text",
+            sectionId: input.section.id,
+            sectionHref: input.section.href,
+            blockId: input.block.id,
+            locator: input.locator,
+            rect: {
+              x: currentX + padding,
+              y: currentTop + padding + lineIndex * lineHeight,
+            width: approximateTextWidth(line, font),
+            height: lineHeight
+          },
+          text: line,
+          x: currentX + padding,
+          y: currentTop + padding + lineIndex * lineHeight,
+          width: approximateTextWidth(line, font),
+          font,
+          color: input.theme.color,
+          backgroundColor: undefined,
+          highlightColor: input.highlighted
+              ? "rgba(250, 204, 21, 0.28)"
+              : input.active
+                ? "rgba(245, 158, 11, 0.18)"
+                : undefined,
+            underline: undefined,
+            href: undefined
+          })
+        })
+
+        currentX += cellWidth
+      })
+
+      currentTop += rowHeight
+    }
+
+    return ops
   }
 
   private resolveLineStartX(
     textAlign: LayoutPretextBlock["textAlign"],
+    left: number,
+    width: number,
+    lineWidth: number
+  ): number {
+    return this.resolveTextLineStartX(textAlign, left, width, lineWidth);
+  }
+
+  private resolveTextLineStartX(
+    textAlign: TextAlign,
     left: number,
     width: number,
     lineWidth: number
@@ -497,88 +1134,37 @@ export class DisplayListBuilder {
     return left;
   }
 
+  private insetRect(rect: Rect, style: NativeBlockRenderStyle): Rect {
+    return {
+      x: rect.x + style.paddingLeft,
+      y: rect.y + style.paddingTop,
+      width: Math.max(40, rect.width - style.paddingLeft - style.paddingRight),
+      height: Math.max(0, rect.height - style.paddingTop - style.paddingBottom)
+    }
+  }
+
+  private resolveNativeBlockRenderStyle(
+    block: BlockNode,
+    theme: Theme
+  ): NativeBlockRenderStyle {
+    return {
+      color: block.style?.color ?? theme.color,
+      ...(block.style?.backgroundColor
+        ? { backgroundColor: block.style.backgroundColor }
+        : {}),
+      textAlign: block.style?.textAlign ?? "start",
+      paddingTop: block.style?.paddingTop ?? 0,
+      paddingBottom: block.style?.paddingBottom ?? 0,
+      paddingLeft: block.style?.paddingLeft ?? 0,
+      paddingRight: block.style?.paddingRight ?? 0
+    }
+  }
+
   private collectPretextText(block: LayoutPretextBlock): string {
     return block.lines
-      .map((line) => line.fragments.map((fragment) => fragment.text).join(""))
+      .map((line) =>
+        line.fragments.map((fragment) => fragment.image?.alt ?? fragment.text).join("")
+      )
       .join("\n");
-  }
-}
-
-function extractFontSize(font: string): number {
-  const match = font.match(/(\d+(?:\.\d+)?)px/);
-  return match ? Number.parseFloat(match[1]!) : 16;
-}
-
-export function approximateTextWidth(text: string, font: string): number {
-  const fontSize = extractFontSize(font);
-  const wideChars = Array.from(text).filter((char) => char.charCodeAt(0) > 255).length;
-  const asciiChars = Math.max(0, text.length - wideChars);
-  return wideChars * fontSize * 0.92 + asciiChars * fontSize * 0.56;
-}
-
-function wrapText(text: string, maxWidth: number, font: string): string[] {
-  if (!text) {
-    return [""];
-  }
-
-  const lines: string[] = [];
-  for (const paragraph of text.split("\n")) {
-    const words = paragraph.split(/(\s+)/).filter((part) => part.length > 0);
-    let current = "";
-    for (const word of words) {
-      const candidate = current ? `${current}${word}` : word;
-      if (approximateTextWidth(candidate, font) <= maxWidth || !current) {
-        current = candidate;
-        continue;
-      }
-      lines.push(current.trimEnd());
-      current = word.trimStart();
-    }
-    lines.push(current.trimEnd());
-  }
-
-  return lines.map((line) => line || "");
-}
-
-function extractBlockText(block: BlockNode): string {
-  switch (block.kind) {
-    case "heading":
-    case "text":
-      return block.inlines
-        .map((inline) => {
-          switch (inline.kind) {
-            case "text":
-              return inline.text;
-            case "code":
-              return inline.text;
-            case "emphasis":
-            case "strong":
-            case "link":
-              return inline.children.map((child) => child.kind === "text" ? child.text : "").join("");
-            case "line-break":
-              return "\n";
-            case "image":
-              return inline.alt ?? "";
-            default:
-              return "";
-          }
-        })
-        .join("");
-    case "quote":
-      return block.blocks.map(extractBlockText).join(" ");
-    case "code":
-      return block.text;
-    case "image":
-      return block.alt ?? "";
-    case "list":
-      return block.items.flatMap((item) => item.blocks.map(extractBlockText)).join(" ");
-    case "table":
-      return block.rows
-        .flatMap((row) => row.cells.flatMap((cell) => cell.blocks.map(extractBlockText)))
-        .join(" ");
-    case "thematic-break":
-      return "";
-    default:
-      return "";
   }
 }

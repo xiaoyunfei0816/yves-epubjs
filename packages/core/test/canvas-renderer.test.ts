@@ -366,6 +366,7 @@ describe("CanvasRenderer image painting", () => {
           width: 180,
           font: '700 36px "Iowan Old Style", "Palatino Linotype", serif',
           color: "#111827",
+          backgroundColor: undefined,
           highlightColor: undefined,
           underline: undefined,
           href: undefined
