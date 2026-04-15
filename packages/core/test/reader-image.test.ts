@@ -111,8 +111,8 @@ describe("EpubReader image resources", () => {
     await Promise.resolve();
 
     const hit = reader.hitTest({
-      x: 40,
-      y: 90
+      x: 160,
+      y: 120
     });
 
     expect(hit?.kind).toBe("image");

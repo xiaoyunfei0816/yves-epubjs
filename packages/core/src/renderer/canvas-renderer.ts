@@ -3,6 +3,7 @@ import type {
   DrawOp,
   ImageDrawOp,
   InteractionRegion,
+  LineDrawOp,
   RectDrawOp,
   SectionDisplayList,
   TextRunDrawOp
@@ -13,6 +14,17 @@ type RenderCanvasSection = {
   height: number;
   canvas: HTMLCanvasElement;
   interactions: InteractionRegion[];
+};
+
+type ScrollRenderWindow = {
+  top: number;
+  height: number;
+};
+
+type SlicedDisplayList = {
+  displayList: SectionDisplayList;
+  sourceOps: DrawOp[];
+  sourceInteractions: InteractionRegion[];
 };
 
 export type CanvasRenderResult = {
@@ -67,56 +79,117 @@ export class CanvasRenderer {
       sectionHref: string;
       height: number;
       displayList?: SectionDisplayList;
+      renderWindows?: ScrollRenderWindow[];
     }>,
     externalCanvas?: HTMLCanvasElement
   ): CanvasRenderResult {
-    container.innerHTML = "";
+    const existingWrappers = new Map<string, HTMLElement>();
+    container
+      .querySelectorAll<HTMLElement>("article[data-section-id]")
+      .forEach((wrapper) => {
+        const sectionId = wrapper.dataset.sectionId;
+        if (sectionId) {
+          existingWrappers.set(sectionId, wrapper);
+        }
+      });
     let totalCanvasHeight = 0;
     let drawOpCount = 0;
     const sections: RenderCanvasSection[] = [];
     const bounds: Rect[] = [];
 
     for (const sectionEntry of sectionsToRender) {
+      const wrapper =
+        existingWrappers.get(sectionEntry.sectionId) ?? document.createElement("article");
+      existingWrappers.delete(sectionEntry.sectionId);
+
       if (!sectionEntry.displayList) {
-        const wrapper = document.createElement("article");
         wrapper.className = "epub-section epub-section-virtual";
         wrapper.dataset.sectionId = sectionEntry.sectionId;
         wrapper.dataset.href = sectionEntry.sectionHref;
         wrapper.style.height = `${sectionEntry.height}px`;
+        wrapper.style.removeProperty("position");
+        wrapper.replaceChildren();
         container.appendChild(wrapper);
-        totalCanvasHeight += sectionEntry.height;
         continue;
       }
 
       const displayList = sectionEntry.displayList;
-      const wrapper = document.createElement("article");
       wrapper.className = "epub-section epub-section-canvas";
       wrapper.dataset.sectionId = displayList.sectionId;
       wrapper.dataset.href = displayList.sectionHref;
       wrapper.style.height = `${displayList.height}px`;
-      const canvas = externalCanvas && sectionsToRender.length === 1
-        ? externalCanvas
-        : document.createElement("canvas");
-      canvas.className = "epub-canvas epub-canvas-section";
-      canvas.style.display = "block";
-      canvas.style.margin = "0 auto";
-      this.prepareCanvas(canvas, displayList.width, displayList.height);
-      const renderToken = this.assignRenderToken(canvas);
-      this.paint(canvas, displayList, renderToken);
-      if (!externalCanvas || sectionsToRender.length > 1) {
-        wrapper.appendChild(canvas);
+      wrapper.style.position = "relative";
+      const renderWindows = (sectionEntry.renderWindows?.length
+        ? sectionEntry.renderWindows
+        : [{ top: 0, height: displayList.height }])
+        .map((window) => normalizeRenderWindow(window, displayList.height))
+        .filter((window) => window.height > 0);
+      if (renderWindows.length === 0) {
+        wrapper.replaceChildren();
+        container.appendChild(wrapper);
+        continue;
+      }
+
+      const existingCanvases = new Map<string, HTMLCanvasElement>();
+      wrapper
+        .querySelectorAll<HTMLCanvasElement>("canvas.epub-canvas-section")
+        .forEach((canvas) => {
+          const sliceIndex = canvas.dataset.sliceIndex;
+          if (sliceIndex) {
+            existingCanvases.set(sliceIndex, canvas);
+          }
+        });
+      const sectionInteractions: InteractionRegion[] = [];
+      let primaryCanvas: HTMLCanvasElement | null = null;
+      for (const [windowIndex, renderWindow] of renderWindows.entries()) {
+        const sliced = sliceDisplayList(displayList, renderWindow);
+        const slicedDisplayList = sliced.displayList;
+        const sliceIndex = `${windowIndex}`;
+        const canvas =
+          externalCanvas && sectionsToRender.length === 1 && renderWindows.length === 1
+            ? externalCanvas
+            : existingCanvases.get(sliceIndex) ?? document.createElement("canvas");
+        existingCanvases.delete(sliceIndex);
+        canvas.className = "epub-canvas epub-canvas-section";
+        canvas.dataset.sliceIndex = sliceIndex;
+        canvas.style.display = "block";
+        canvas.style.position = "absolute";
+        canvas.style.top = `${renderWindow.top}px`;
+        canvas.style.left = "50%";
+        canvas.style.transform = "translateX(-50%)";
+        this.prepareCanvas(canvas, slicedDisplayList.width, slicedDisplayList.height);
+        const renderToken = this.assignRenderToken(canvas);
+        this.paint(canvas, slicedDisplayList, renderToken);
+        if (!primaryCanvas) {
+          primaryCanvas = canvas;
+        }
+        if (!externalCanvas || sectionsToRender.length > 1 || renderWindows.length > 1) {
+          wrapper.appendChild(canvas);
+        }
+        sectionInteractions.push(...sliced.sourceInteractions);
+        totalCanvasHeight += slicedDisplayList.height;
+        drawOpCount += slicedDisplayList.ops.length;
+        bounds.push(...sliced.sourceOps.map((op) => op.rect));
+      }
+
+      for (const staleCanvas of existingCanvases.values()) {
+        if (staleCanvas.parentElement === wrapper) {
+          wrapper.removeChild(staleCanvas);
+        }
       }
       container.appendChild(wrapper);
-
       sections.push({
         sectionId: displayList.sectionId,
         height: displayList.height,
-        canvas,
-        interactions: displayList.interactions
+        canvas: primaryCanvas ?? document.createElement("canvas"),
+        interactions: sectionInteractions
       });
-      totalCanvasHeight += displayList.height;
-      drawOpCount += displayList.ops.length;
-      bounds.push(...displayList.ops.map((op) => op.rect));
+    }
+
+    for (const staleWrapper of existingWrappers.values()) {
+      if (staleWrapper.parentElement === container) {
+        container.removeChild(staleWrapper);
+      }
     }
 
     return {
@@ -241,11 +314,21 @@ export class CanvasRenderer {
       context.fillRect(op.rect.x, op.rect.y, op.rect.width, op.rect.height);
     }
     context.font = op.font;
-    context.textBaseline = "top";
+    const fontSize = extractFontSize(op.font);
+    const ascent = resolveTextAscent(context, op.text, fontSize);
+    const topInset = Math.min(
+      Math.max(fontSize * 0.08, 1),
+      Math.max(op.rect.height - ascent, 0)
+    );
+    const baselineY = op.y + topInset + ascent;
+    context.textBaseline = "alphabetic";
     context.fillStyle = op.color;
-    context.fillText(op.text, op.x, op.y);
+    context.fillText(op.text, op.x, baselineY);
     if (op.underline) {
-      const underlineY = op.y + op.rect.height - 3;
+      const underlineY = Math.min(
+        op.y + op.rect.height - 3,
+        baselineY + Math.max(fontSize * 0.08, 1)
+      );
       context.strokeStyle = op.color;
       context.lineWidth = 1;
       context.beginPath();
@@ -264,9 +347,11 @@ export class CanvasRenderer {
     renderToken: string
   ): void {
     context.save();
-    context.fillStyle = op.background;
-    roundRect(context, op.rect.x, op.rect.y, op.rect.width, op.rect.height, 14);
-    context.fill();
+    if (op.background && op.background !== "transparent") {
+      context.fillStyle = op.background;
+      roundRect(context, op.rect.x, op.rect.y, op.rect.width, op.rect.height, 14);
+      context.fill();
+    }
     const image = this.loadImage(op.src, () => {
       if (canvas.dataset.renderToken !== renderToken) {
         return;
@@ -378,4 +463,117 @@ function fitRectContain(
     width,
     height
   };
+}
+
+function normalizeRenderWindow(
+  renderWindow: ScrollRenderWindow,
+  maxHeight: number
+): ScrollRenderWindow {
+  const top = Math.max(0, Math.min(renderWindow.top, maxHeight));
+  const bottom = Math.max(top, Math.min(renderWindow.top + renderWindow.height, maxHeight));
+  return {
+    top,
+    height: Math.max(0, bottom - top)
+  };
+}
+
+function sliceDisplayList(
+  displayList: SectionDisplayList,
+  renderWindow: ScrollRenderWindow
+): SlicedDisplayList {
+  const sourceOps = displayList.ops.filter((op) => rectIntersectsWindow(op.rect, renderWindow));
+  const sourceInteractions = displayList.interactions.filter((interaction) =>
+    rectIntersectsWindow(interaction.rect, renderWindow)
+  );
+
+  return {
+    displayList: {
+      ...displayList,
+      height: renderWindow.height,
+      ops: sourceOps.map((op) => offsetDrawOp(op, -renderWindow.top)),
+      interactions: sourceInteractions.map((interaction) =>
+        offsetInteractionRegion(interaction, -renderWindow.top)
+      )
+    },
+    sourceOps,
+    sourceInteractions
+  };
+}
+
+function rectIntersectsWindow(rect: Rect, renderWindow: ScrollRenderWindow): boolean {
+  const windowBottom = renderWindow.top + renderWindow.height;
+  const rectBottom = rect.y + rect.height;
+  return rectBottom > renderWindow.top && rect.y < windowBottom;
+}
+
+function offsetDrawOp(op: DrawOp, deltaY: number): DrawOp {
+  const rect = {
+    ...op.rect,
+    y: op.rect.y + deltaY
+  };
+
+  if (op.kind === "line") {
+    return {
+      ...op,
+      rect,
+      y1: op.y1 + deltaY,
+      y2: op.y2 + deltaY
+    } satisfies LineDrawOp;
+  }
+
+  if (op.kind === "text") {
+    return {
+      ...op,
+      rect,
+      y: op.y + deltaY
+    } satisfies TextRunDrawOp;
+  }
+
+  if (op.kind === "image") {
+    return {
+      ...op,
+      rect
+    } satisfies ImageDrawOp;
+  }
+
+  return {
+    ...op,
+    rect
+  } satisfies RectDrawOp;
+}
+
+function offsetInteractionRegion<TInteraction extends InteractionRegion>(
+  interaction: TInteraction,
+  deltaY: number
+): TInteraction {
+  return {
+    ...interaction,
+    rect: {
+      ...interaction.rect,
+      y: interaction.rect.y + deltaY
+    }
+  };
+}
+
+function extractFontSize(font: string): number {
+  const match = font.match(/(\d+(?:\.\d+)?)px/);
+  return match ? Number.parseFloat(match[1]!) : 16;
+}
+
+function resolveTextAscent(
+  context: CanvasRenderingContext2D,
+  text: string,
+  fontSize: number
+): number {
+  if (typeof context.measureText === "function") {
+    const metrics = context.measureText(text);
+    if (
+      Number.isFinite(metrics.actualBoundingBoxAscent) &&
+      metrics.actualBoundingBoxAscent > 0
+    ) {
+      return metrics.actualBoundingBoxAscent;
+    }
+  }
+
+  return fontSize * 0.82;
 }

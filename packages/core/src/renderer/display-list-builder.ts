@@ -15,10 +15,12 @@ import type {
   SectionDisplayList,
   TextRunDrawOp
 } from "./draw-ops";
+import { resolveImageLayout } from "../utils/image-layout";
 
 type BuilderOptions = {
   section: SectionDocument;
   width: number;
+  viewportHeight: number;
   blocks: LayoutBlock[];
   theme: Theme;
   typography: TypographyOptions;
@@ -91,6 +93,7 @@ export class DisplayListBuilder {
             section: options.section,
             top: currentTop,
             width: contentWidth,
+            viewportHeight: options.viewportHeight,
             theme: options.theme,
             typography: options.typography,
             locator: options.locatorMap?.get(block.id),
@@ -236,6 +239,7 @@ export class DisplayListBuilder {
     section: SectionDocument;
     top: number;
     width: number;
+    viewportHeight: number;
     theme: Theme;
     typography: TypographyOptions;
     locator: Locator | undefined;
@@ -291,11 +295,17 @@ export class DisplayListBuilder {
     switch (input.block.kind) {
       case "image": {
         const renderSrc = input.resolveImageUrl?.(input.block.src) ?? input.block.src;
+        const imageLayout = resolveImageLayout({
+          availableWidth: width,
+          viewportHeight: input.viewportHeight,
+          ...(input.block.width ? { intrinsicWidth: input.block.width } : {}),
+          ...(input.block.height ? { intrinsicHeight: input.block.height } : {})
+        });
         const imageRect = {
-          x,
-          y: input.top + 8,
-          width,
-          height: Math.max(80, rect.height - 16)
+          x: x + imageLayout.xOffset,
+          y: input.top + imageLayout.yOffset,
+          width: imageLayout.width,
+          height: imageLayout.height
         };
         ops.push({
           kind: "image",
@@ -307,7 +317,7 @@ export class DisplayListBuilder {
           src: renderSrc,
           alt: input.block.alt,
           loaded: Boolean(input.resolveImageLoaded?.(input.block.src)),
-          background: "rgba(148, 163, 184, 0.18)"
+          background: "transparent"
         } satisfies ImageDrawOp);
         interactions.push({
           kind: "image",

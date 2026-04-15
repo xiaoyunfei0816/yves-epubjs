@@ -110,6 +110,7 @@ export class EpubReader {
   private lastVisibleBounds: VisibleDrawBounds = [];
   private lastInteractionRegions: InteractionRegion[] = [];
   private lastRenderedSectionIds: string[] = [];
+  private lastScrollRenderWindows = new Map<string, Array<{ top: number; height: number }>>();
   private highlightedBlockIds = new Set<string>();
   private lastRenderMetrics: RenderMetrics = {
     backend: "canvas",
@@ -121,6 +122,7 @@ export class EpubReader {
   private renderVersion = 0;
 
   private static readonly SCROLL_WINDOW_RADIUS = 1;
+  private static readonly SCROLL_SLICE_OVERSCAN_MULTIPLIER = 0.75;
 
   constructor(private readonly options: ReaderOptions = {}) {
     this.mode = options.mode ?? "scroll";
@@ -157,6 +159,7 @@ export class EpubReader {
     this.lastVisibleBounds = [];
     this.lastInteractionRegions = [];
     this.lastRenderedSectionIds = [];
+    this.lastScrollRenderWindows.clear();
     this.lastRenderMetrics = {
       backend: "canvas",
       visibleSectionCount: 0,
@@ -443,6 +446,7 @@ export class EpubReader {
     this.lastVisibleBounds = [];
     this.lastInteractionRegions = [];
     this.lastRenderedSectionIds = [];
+    this.lastScrollRenderWindows.clear();
     this.lastRenderMetrics = {
       backend: "canvas",
       visibleSectionCount: 0,
@@ -684,7 +688,12 @@ export class EpubReader {
       sectionHref: string;
       height: number;
       displayList?: SectionDisplayList;
+      renderWindows?: Array<{
+        top: number;
+        height: number;
+      }>;
     }> = [];
+    const measuredSectionHeights: number[] = [];
 
     for (let index = 0; index < this.book.sections.length; index += 1) {
       const section = this.book.sections[index];
@@ -693,10 +702,12 @@ export class EpubReader {
       }
 
       if (index < this.scrollWindowStart || index > this.scrollWindowEnd) {
+        const height = this.getSectionHeight(section.id);
+        measuredSectionHeights[index] = height;
         sectionsToRender.push({
           sectionId: section.id,
           sectionHref: section.href,
-          height: this.getSectionHeight(section.id)
+          height
         });
         continue;
       }
@@ -716,6 +727,7 @@ export class EpubReader {
       const displayList = this.displayListBuilder.buildSection({
         section,
         width: layout.width,
+        viewportHeight: this.options.container.clientHeight,
         blocks: layout.blocks,
         theme: this.theme,
         typography: this.typography,
@@ -729,12 +741,63 @@ export class EpubReader {
         this.getPageHeight(),
         displayList.height
       );
+      measuredSectionHeights[index] = displayList.height;
       sectionsToRender.push({
         sectionId: section.id,
         sectionHref: section.href,
         height: displayList.height,
         displayList
       });
+    }
+
+    const viewportTop = this.options.container.scrollTop;
+    const viewportBottom = viewportTop + this.options.container.clientHeight;
+    const overscan = this.options.container.clientHeight *
+      EpubReader.SCROLL_SLICE_OVERSCAN_MULTIPLIER;
+    let runningTop = 0;
+    sectionsToRender.forEach((entry, index) => {
+      const height = measuredSectionHeights[index] ?? entry.height;
+      entry.height = height;
+      if (entry.displayList) {
+        const currentRenderTop = Math.max(0, viewportTop - overscan - runningTop);
+        const currentRenderBottom = Math.min(
+          height,
+          viewportBottom + overscan - runningTop
+        );
+        if (currentRenderBottom > currentRenderTop) {
+          const currentWindow = {
+            top: currentRenderTop,
+            height: currentRenderBottom - currentRenderTop
+          };
+          const previousTop = Math.max(0, currentWindow.top - currentWindow.height);
+          const previousHeight = Math.max(0, currentWindow.top - previousTop);
+          const nextTop = Math.min(height, currentWindow.top + currentWindow.height);
+          const nextHeight = Math.max(
+            0,
+            Math.min(currentWindow.height, height - nextTop)
+          );
+          const previousWindow = {
+            top: previousTop,
+            height: previousHeight
+          };
+          const nextWindow = {
+            top: nextTop,
+            height: nextHeight
+          };
+          entry.renderWindows = dedupeScrollRenderWindows([
+            previousWindow,
+            currentWindow,
+            nextWindow
+          ]);
+        }
+      }
+      runningTop += height;
+    });
+    this.lastScrollRenderWindows.clear();
+    for (const entry of sectionsToRender) {
+      if (entry.displayList && entry.renderWindows) {
+        this.lastScrollRenderWindows.set(entry.sectionId, entry.renderWindows);
+      }
     }
 
     const result = this.canvasRenderer.renderScrollable(
@@ -794,6 +857,7 @@ export class EpubReader {
     return this.displayListBuilder.buildSection({
       section,
       width: this.getContentWidth(),
+      viewportHeight: this.options.container?.clientHeight ?? 720,
       blocks,
       theme: this.theme,
       typography: this.typography,
@@ -1034,6 +1098,8 @@ export class EpubReader {
         typeof window.requestAnimationFrame !== "function"
       ) {
         this.syncPositionFromScroll(emitEvent);
+        this.refreshScrollWindowIfNeeded();
+        this.refreshScrollSlicesIfNeeded();
         this.scheduleDeferredScrollRefresh();
         this.isProgrammaticScroll = false;
         return;
@@ -1046,6 +1112,10 @@ export class EpubReader {
       this.scrollSyncFrame = window.requestAnimationFrame(() => {
         this.scrollSyncFrame = null;
         this.syncPositionFromScroll(emitEvent);
+        const refreshedWindow = this.refreshScrollWindowIfNeeded();
+        if (!refreshedWindow) {
+          this.refreshScrollSlicesIfNeeded();
+        }
         this.scheduleDeferredScrollRefresh();
         this.isProgrammaticScroll = false;
       });
@@ -1489,6 +1559,15 @@ export class EpubReader {
       return false;
     }
 
+    if (
+      this.scrollWindowStart >= 0 &&
+      this.scrollWindowEnd >= 0 &&
+      this.currentSectionIndex >= this.scrollWindowStart &&
+      this.currentSectionIndex <= this.scrollWindowEnd
+    ) {
+      return false;
+    }
+
     const nextStart = Math.max(
       0,
       this.currentSectionIndex - EpubReader.SCROLL_WINDOW_RADIUS
@@ -1512,6 +1591,56 @@ export class EpubReader {
     this.restoreScrollAnchor(scrollAnchor);
     this.syncPositionFromScroll(false);
     return true;
+  }
+
+  private refreshScrollSlicesIfNeeded(): boolean {
+    if (
+      !this.options.container ||
+      !this.book ||
+      this.mode !== "scroll" ||
+      this.lastRenderedSectionIds.length === 0
+    ) {
+      return false;
+    }
+
+    const viewportTop = this.options.container.scrollTop;
+    const viewportBottom = viewportTop + this.options.container.clientHeight;
+    const refreshGuard = Math.max(
+      this.options.container.clientHeight * 0.2,
+      48
+    );
+
+    for (const sectionId of this.lastRenderedSectionIds) {
+      const window = this.lastScrollRenderWindows.get(sectionId);
+      if (!window || window.length === 0) {
+        this.renderScrollableCanvas(this.renderVersion);
+        return true;
+      }
+
+      const sectionTop = this.getSectionTop(sectionId);
+      const sectionHeight = this.getSectionHeight(sectionId);
+      const visibleTop = Math.max(viewportTop, sectionTop);
+      const visibleBottom = Math.min(viewportBottom, sectionTop + sectionHeight);
+      if (visibleBottom <= visibleTop) {
+        continue;
+      }
+
+      const localVisibleTop = visibleTop - sectionTop;
+      const localVisibleBottom = visibleBottom - sectionTop;
+      const coverageTop = Math.min(...window.map((entry) => entry.top));
+      const coverageBottom = Math.max(
+        ...window.map((entry) => entry.top + entry.height)
+      );
+      if (
+        localVisibleTop < coverageTop + refreshGuard ||
+        localVisibleBottom > coverageBottom - refreshGuard
+      ) {
+        this.renderScrollableCanvas(this.renderVersion);
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private scheduleDeferredScrollRefresh(): void {
@@ -1632,6 +1761,10 @@ export class EpubReader {
       sectionHref: string;
       height: number;
       displayList?: SectionDisplayList;
+      renderWindows?: Array<{
+        top: number;
+        height: number;
+      }>;
     }>
   ): VisibleDrawBounds {
     const bounds: VisibleDrawBounds = [];
@@ -1640,7 +1773,19 @@ export class EpubReader {
         continue;
       }
       const sectionTop = this.getSectionTop(section.sectionId);
+      const renderWindows = section.renderWindows?.length
+        ? section.renderWindows
+        : [{ top: 0, height: section.displayList.height }];
       for (const op of section.displayList.ops) {
+        const opBottom = op.rect.y + op.rect.height;
+        const intersectsWindow = renderWindows.some((window) => {
+          const renderTop = window.top;
+          const renderBottom = window.top + window.height;
+          return opBottom > renderTop && op.rect.y < renderBottom;
+        });
+        if (!intersectsWindow) {
+          continue;
+        }
         bounds.push({
           ...op.rect,
           y: op.rect.y + sectionTop
@@ -1759,4 +1904,25 @@ function splitHrefFragment(href: string): [string, string | null] {
 
 function normalizeBookHref(href: string): string {
   return href.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
+}
+
+function dedupeScrollRenderWindows(
+  windows: Array<{ top: number; height: number }>
+): Array<{ top: number; height: number }> {
+  const seen = new Set<string>();
+  const deduped: Array<{ top: number; height: number }> = [];
+
+  for (const window of windows) {
+    if (window.height <= 0) {
+      continue;
+    }
+    const key = `${window.top}:${window.height}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(window);
+  }
+
+  return deduped.sort((left, right) => left.top - right.top);
 }

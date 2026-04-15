@@ -37,6 +37,11 @@ describe("CanvasRenderer image painting", () => {
           strokeRect() {
             return undefined;
           },
+          measureText() {
+            return {
+              actualBoundingBoxAscent: 12
+            };
+          },
           fillText() {
             return undefined;
           },
@@ -123,7 +128,7 @@ describe("CanvasRenderer image painting", () => {
           src: "blob:cover-image",
           alt: "Cover",
           loaded: true,
-          background: "rgba(148, 163, 184, 0.18)"
+          background: "transparent"
         }
       ],
       interactions: []
@@ -165,6 +170,11 @@ describe("CanvasRenderer image painting", () => {
           },
           strokeRect() {
             return undefined;
+          },
+          measureText() {
+            return {
+              actualBoundingBoxAscent: 12
+            };
           },
           fillText() {
             return undefined;
@@ -245,7 +255,7 @@ describe("CanvasRenderer image painting", () => {
           src: "blob:cover-image",
           alt: "Cover",
           loaded: true,
-          background: "rgba(148, 163, 184, 0.18)"
+          background: "transparent"
         }
       ],
       interactions: []
@@ -261,5 +271,111 @@ describe("CanvasRenderer image painting", () => {
       60,
       120
     );
+  });
+
+  it("offsets text drawing away from the top edge to avoid clipping tall glyphs", () => {
+    const fillText = vi.fn();
+
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value() {
+        return {
+          fillStyle: "#000",
+          strokeStyle: "#000",
+          lineWidth: 1,
+          textBaseline: "alphabetic",
+          setTransform() {
+            return undefined;
+          },
+          clearRect() {
+            return undefined;
+          },
+          fillRect() {
+            return undefined;
+          },
+          strokeRect() {
+            return undefined;
+          },
+          measureText() {
+            return {
+              actualBoundingBoxAscent: 38
+            };
+          },
+          fillText,
+          drawImage() {
+            return undefined;
+          },
+          save() {
+            return undefined;
+          },
+          restore() {
+            return undefined;
+          },
+          beginPath() {
+            return undefined;
+          },
+          moveTo() {
+            return undefined;
+          },
+          lineTo() {
+            return undefined;
+          },
+          stroke() {
+            return undefined;
+          },
+          fill() {
+            return undefined;
+          },
+          closePath() {
+            return undefined;
+          },
+          arcTo() {
+            return undefined;
+          }
+        };
+      }
+    });
+
+    const container = document.createElement("div");
+    const renderer = new CanvasRenderer();
+    const displayList: SectionDisplayList = {
+      sectionId: "section-1",
+      sectionHref: "OPS/chapter-1.xhtml",
+      width: 280,
+      height: 120,
+      ops: [
+        {
+          kind: "text",
+          sectionId: "section-1",
+          sectionHref: "OPS/chapter-1.xhtml",
+          blockId: "heading-1",
+          locator: {
+            spineIndex: 0,
+            blockId: "heading-1",
+            progressInSection: 0
+          },
+          rect: {
+            x: 12,
+            y: 0,
+            width: 180,
+            height: 48
+          },
+          text: "中文版序",
+          x: 12,
+          y: 0,
+          width: 180,
+          font: '700 36px "Iowan Old Style", "Palatino Linotype", serif',
+          color: "#111827",
+          highlightColor: undefined,
+          underline: undefined,
+          href: undefined
+        }
+      ],
+      interactions: []
+    };
+
+    renderer.renderPaginated(container, displayList, 120);
+
+    expect(fillText).toHaveBeenCalledWith("中文版序", 12, 40.88);
   });
 });

@@ -18,6 +18,7 @@ import type {
   TextBlock,
   TypographyOptions
 } from "../model/types";
+import { resolveImageLayout } from "../utils/image-layout";
 
 export type LayoutInlineFragment = {
   text: string;
@@ -122,7 +123,7 @@ export class LayoutEngine {
         type: "native",
         id: block.id,
         block,
-        estimatedHeight: this.estimateNativeBlockHeight(block, input.typography)
+        estimatedHeight: this.estimateNativeBlockHeight(block, input)
       });
     }
 
@@ -392,17 +393,18 @@ export class LayoutEngine {
     return Math.max(lineHeight, lineCount * lineHeight + bottomGap);
   }
 
-  private estimateNativeBlockHeight(block: BlockNode, typography: TypographyOptions): number {
+  private estimateNativeBlockHeight(block: BlockNode, input: LayoutInput): number {
+    const typography = input.typography;
     const baseLineHeight = typography.fontSize * typography.lineHeight;
 
     switch (block.kind) {
       case "image": {
-        const naturalRatio =
-          block.width && block.height && block.width > 0 && block.height > 0
-            ? block.height / block.width
-            : 0.66;
-        const renderedWidth = Math.min(680, 42 * typography.fontSize);
-        return Math.min(720, renderedWidth * naturalRatio + 32);
+        return resolveImageLayout({
+          availableWidth: Math.max(1, Math.floor(input.viewportWidth) - 16),
+          viewportHeight: input.viewportHeight,
+          ...(block.width ? { intrinsicWidth: block.width } : {}),
+          ...(block.height ? { intrinsicHeight: block.height } : {})
+        }).blockHeight;
       }
       case "code": {
         const lineCount = Math.max(1, block.text.split("\n").length);

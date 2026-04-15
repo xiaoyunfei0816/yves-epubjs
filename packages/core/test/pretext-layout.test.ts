@@ -204,8 +204,8 @@ describe("pretext layout integration", () => {
     await reader.render();
 
     const hit = reader.hitTest({
-      x: 40,
-      y: 90
+      x: 160,
+      y: 120
     });
 
     expect(hit?.kind).toBe("image");
@@ -1250,6 +1250,365 @@ describe("pretext layout integration", () => {
     expect(container.querySelectorAll(".epub-section-virtual").length).toBeGreaterThan(0);
   });
 
+  it("renders long scroll sections into viewport-sized canvas slices and preloads adjacent slices", async () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 260
+    });
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 180
+    });
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 0
+    });
+    document.body.appendChild(container);
+
+    const reader = new EpubReader({
+      container,
+      mode: "scroll"
+    });
+
+    const repeatedText = Array.from({ length: 80 }, () => ({
+      kind: "text" as const,
+      text: "This is a long paragraph designed to keep the section much taller than the viewport. "
+    }));
+    const section: SectionDocument = {
+      ...createSection(),
+      blocks: [
+        {
+          id: "text-1",
+          kind: "text",
+          inlines: repeatedText
+        }
+      ]
+    };
+
+    const book: Book = {
+      metadata: { title: "Sliced Scroll Demo" },
+      manifest: [],
+      spine: [
+        {
+          idref: "item-1",
+          href: section.href,
+          linear: true
+        }
+      ],
+      toc: [],
+      sections: [section]
+    };
+
+    (reader as unknown as { book: Book }).book = book;
+    await reader.render();
+
+    const wrapper = container.querySelector<HTMLElement>('article[data-section-id="section-1"]');
+    const canvases = wrapper?.querySelectorAll<HTMLCanvasElement>("canvas.epub-canvas-section") ?? [];
+    const canvas = canvases[0];
+    const wrapperHeight = Number.parseFloat(wrapper?.style.height ?? "0");
+    const canvasHeight = Number.parseFloat(canvas?.style.height ?? "0");
+
+    expect(wrapperHeight).toBeGreaterThan(container.clientHeight * 2);
+    expect(canvases.length).toBeGreaterThan(1);
+    expect(canvasHeight).toBeGreaterThan(0);
+    expect(canvasHeight).toBeLessThan(wrapperHeight);
+    expect(reader.getRenderMetrics().totalCanvasHeight).toBeGreaterThan(canvasHeight);
+    expect(reader.getRenderMetrics().totalCanvasHeight).toBeLessThan(wrapperHeight);
+  });
+
+  it("refreshes the rendered slice while scrolling within the same long section", async () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 260
+    });
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 180
+    });
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 0
+    });
+    document.body.appendChild(container);
+
+    const reader = new EpubReader({
+      container,
+      mode: "scroll"
+    });
+
+    const repeatedText = Array.from({ length: 100 }, () => ({
+      kind: "text" as const,
+      text: "This is a long paragraph designed to keep the section much taller than the viewport. "
+    }));
+    const section: SectionDocument = {
+      ...createSection(),
+      blocks: [
+        {
+          id: "text-1",
+          kind: "text",
+          inlines: repeatedText
+        }
+      ]
+    };
+
+    const book: Book = {
+      metadata: { title: "Slice Refresh Demo" },
+      manifest: [],
+      spine: [
+        {
+          idref: "item-1",
+          href: section.href,
+          linear: true
+        }
+      ],
+      toc: [],
+      sections: [section]
+    };
+
+    const state = reader as unknown as {
+      book: Book;
+      syncPositionFromScroll(emitEvent: boolean): boolean;
+      refreshScrollSlicesIfNeeded(): boolean;
+    };
+    state.book = book;
+    await reader.render();
+
+    const beforeTops = Array.from(
+      container.querySelectorAll<HTMLCanvasElement>("canvas.epub-canvas-section")
+    ).map((canvas) => Number.parseFloat(canvas.style.top ?? "0"));
+    const beforeMaxTop = Math.max(...beforeTops);
+
+    container.scrollTop = 520;
+    state.syncPositionFromScroll(false);
+    const refreshed = state.refreshScrollSlicesIfNeeded();
+
+    const afterTops = Array.from(
+      container.querySelectorAll<HTMLCanvasElement>("canvas.epub-canvas-section")
+    ).map((canvas) => Number.parseFloat(canvas.style.top ?? "0"));
+    const afterMaxTop = Math.max(...afterTops);
+
+    expect(refreshed).toBe(true);
+    expect(afterMaxTop).toBeGreaterThan(beforeMaxTop);
+  });
+
+  it("reuses existing canvas elements when scroll slice windows refresh", async () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 260
+    });
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 180
+    });
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 0
+    });
+    document.body.appendChild(container);
+
+    const reader = new EpubReader({
+      container,
+      mode: "scroll"
+    });
+
+    const repeatedText = Array.from({ length: 100 }, () => ({
+      kind: "text" as const,
+      text: "This is a long paragraph designed to keep the section much taller than the viewport. "
+    }));
+    const section: SectionDocument = {
+      ...createSection(),
+      blocks: [
+        {
+          id: "text-1",
+          kind: "text",
+          inlines: repeatedText
+        }
+      ]
+    };
+
+    const book: Book = {
+      metadata: { title: "Slice Reuse Demo" },
+      manifest: [],
+      spine: [
+        {
+          idref: "item-1",
+          href: section.href,
+          linear: true
+        }
+      ],
+      toc: [],
+      sections: [section]
+    };
+
+    const state = reader as unknown as {
+      book: Book;
+      syncPositionFromScroll(emitEvent: boolean): boolean;
+      refreshScrollSlicesIfNeeded(): boolean;
+    };
+    state.book = book;
+    await reader.render();
+
+    const beforeCanvases = Array.from(
+      container.querySelectorAll<HTMLCanvasElement>("canvas.epub-canvas-section")
+    );
+    const beforeCanvasByIndex = new Map(
+      beforeCanvases.map((canvas) => [canvas.dataset.sliceIndex ?? "", canvas])
+    );
+
+    container.scrollTop = 520;
+    state.syncPositionFromScroll(false);
+    const refreshed = state.refreshScrollSlicesIfNeeded();
+
+    const afterCanvases = Array.from(
+      container.querySelectorAll<HTMLCanvasElement>("canvas.epub-canvas-section")
+    );
+    const reusedCount = afterCanvases.filter((canvas) => {
+      const sliceIndex = canvas.dataset.sliceIndex ?? "";
+      return beforeCanvasByIndex.get(sliceIndex) === canvas;
+    }).length;
+
+    expect(refreshed).toBe(true);
+    expect(reusedCount).toBeGreaterThanOrEqual(beforeCanvases.length);
+  });
+
+  it("does not force scrollTop back while refreshing a slice during upward scrolling", async () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 260
+    });
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 180
+    });
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 0
+    });
+    document.body.appendChild(container);
+
+    const reader = new EpubReader({
+      container,
+      mode: "scroll"
+    });
+
+    const repeatedText = Array.from({ length: 100 }, () => ({
+      kind: "text" as const,
+      text: "This is a long paragraph designed to keep the section much taller than the viewport. "
+    }));
+    const section: SectionDocument = {
+      ...createSection(),
+      blocks: [
+        {
+          id: "text-1",
+          kind: "text",
+          inlines: repeatedText
+        }
+      ]
+    };
+
+    const book: Book = {
+      metadata: { title: "Slice Upward Demo" },
+      manifest: [],
+      spine: [
+        {
+          idref: "item-1",
+          href: section.href,
+          linear: true
+        }
+      ],
+      toc: [],
+      sections: [section]
+    };
+
+    const state = reader as unknown as {
+      book: Book;
+      syncPositionFromScroll(emitEvent: boolean): boolean;
+      refreshScrollSlicesIfNeeded(): boolean;
+    };
+    state.book = book;
+    await reader.render();
+
+    container.scrollTop = 900;
+    state.syncPositionFromScroll(false);
+    state.refreshScrollSlicesIfNeeded();
+
+    container.scrollTop = 300;
+    state.syncPositionFromScroll(false);
+    const refreshed = state.refreshScrollSlicesIfNeeded();
+
+    expect(refreshed).toBe(true);
+    expect(container.scrollTop).toBe(300);
+  });
+
+  it("does not recentre the scroll window while the current section stays inside it", async () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 260
+    });
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 180
+    });
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 520
+    });
+    document.body.appendChild(container);
+
+    const reader = new EpubReader({
+      container,
+      mode: "scroll"
+    });
+
+    const sections: SectionDocument[] = Array.from({ length: 4 }, (_, index) => ({
+      ...createSection(),
+      id: `section-${index + 1}`,
+      href: `OPS/chapter-${index + 1}.xhtml`,
+      title: `Chapter ${index + 1}`
+    }));
+
+    const book: Book = {
+      metadata: { title: "Stable Window Demo" },
+      manifest: [],
+      spine: sections.map((section, index) => ({
+        idref: `item-${index + 1}`,
+        href: section.href,
+        linear: true
+      })),
+      toc: [],
+      sections
+    };
+
+    const state = reader as unknown as {
+      book: Book;
+      currentSectionIndex: number;
+      scrollWindowStart: number;
+      scrollWindowEnd: number;
+      refreshScrollWindowIfNeeded(): boolean;
+    };
+    state.book = book;
+    state.currentSectionIndex = 1;
+    state.scrollWindowStart = 0;
+    state.scrollWindowEnd = 2;
+
+    const refreshed = state.refreshScrollWindowIfNeeded();
+
+    expect(refreshed).toBe(false);
+    expect(state.scrollWindowStart).toBe(0);
+    expect(state.scrollWindowEnd).toBe(2);
+    expect(container.scrollTop).toBe(520);
+  });
+
   it("keeps the viewport anchored when the scroll window shifts across later chapters", async () => {
     const originalOffsetTop = Object.getOwnPropertyDescriptor(
       HTMLElement.prototype,
@@ -1345,6 +1704,8 @@ describe("pretext layout integration", () => {
         book: Book;
         locator: { spineIndex: number; progressInSection: number };
         currentSectionIndex: number;
+        scrollWindowStart: number;
+        scrollWindowEnd: number;
         renderScrollableCanvas: (renderVersion: number) => void;
         syncPositionFromScroll: (emitEvent: boolean) => boolean;
         refreshScrollWindowIfNeeded: () => boolean;
@@ -1359,7 +1720,13 @@ describe("pretext layout integration", () => {
       await reader.render();
 
       container.scrollTop = 1700;
-      state.syncPositionFromScroll(false);
+      state.currentSectionIndex = 4;
+      state.locator = {
+        spineIndex: 4,
+        progressInSection: 0
+      };
+      state.scrollWindowStart = 1;
+      state.scrollWindowEnd = 3;
 
       const originalRenderScrollableCanvas = state.renderScrollableCanvas.bind(reader);
       state.renderScrollableCanvas = (renderVersion: number) => {
