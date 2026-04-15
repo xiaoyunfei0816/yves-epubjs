@@ -12,3 +12,6 @@ export * from "./parser/opf-parser";
 export * from "./parser/inline-parser";
 export * from "./parser/xhtml-parser";
 export * from "./layout/layout-engine";
+export * from "./renderer/draw-ops";
+export * from "./renderer/display-list-builder";
+export * from "./renderer/canvas-renderer";

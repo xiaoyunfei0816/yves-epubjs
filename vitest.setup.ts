@@ -30,6 +30,55 @@ if (typeof HTMLCanvasElement !== "undefined") {
 
       return {
         font: "16px serif",
+        fillStyle: "#000",
+        strokeStyle: "#000",
+        lineWidth: 1,
+        textBaseline: "alphabetic",
+        setTransform() {
+          return undefined;
+        },
+        clearRect() {
+          return undefined;
+        },
+        fillRect() {
+          return undefined;
+        },
+        strokeRect() {
+          return undefined;
+        },
+        fillText() {
+          return undefined;
+        },
+        drawImage() {
+          return undefined;
+        },
+        save() {
+          return undefined;
+        },
+        restore() {
+          return undefined;
+        },
+        beginPath() {
+          return undefined;
+        },
+        moveTo() {
+          return undefined;
+        },
+        lineTo() {
+          return undefined;
+        },
+        stroke() {
+          return undefined;
+        },
+        fill() {
+          return undefined;
+        },
+        closePath() {
+          return undefined;
+        },
+        arcTo() {
+          return undefined;
+        },
         measureText(text: string) {
           return {
             width: estimateTextWidth(text, this.font)

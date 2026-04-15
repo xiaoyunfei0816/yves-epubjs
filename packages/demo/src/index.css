@@ -577,8 +577,20 @@ select {
 }
 
 .reader-root .epub-section {
-  max-width: 42rem;
+  max-width: none;
   margin: 0 auto;
+}
+
+.reader-root .epub-section-canvas,
+.reader-root .epub-section-paginated-canvas {
+  display: flex;
+  justify-content: center;
+}
+
+.reader-root .epub-canvas {
+  max-width: 100%;
+  border-radius: 18px;
+  background: transparent;
 }
 
 .reader-root .epub-section-paginated {
@@ -603,49 +615,6 @@ select {
 .reader-root .epub-section td,
 .reader-root .epub-section th {
   line-height: 1.8;
-}
-
-.reader-root .epub-pretext-block {
-  margin: 0 0 0.95rem;
-}
-
-.reader-root .epub-pretext-block.epub-pretext-heading {
-  margin: 1.4rem 0 0.8rem;
-  line-height: 1.1;
-}
-
-.reader-root .epub-pretext-block.level-1 {
-  font-size: 2rem;
-}
-
-.reader-root .epub-pretext-block.level-2 {
-  font-size: 1.7rem;
-}
-
-.reader-root .epub-pretext-block.level-3 {
-  font-size: 1.45rem;
-}
-
-.reader-root .epub-pretext-block.level-4 {
-  font-size: 1.25rem;
-}
-
-.reader-root .epub-pretext-block.level-5 {
-  font-size: 1.1rem;
-}
-
-.reader-root .epub-pretext-line {
-  display: flex;
-  flex-wrap: nowrap;
-}
-
-.reader-root .epub-pretext-fragment {
-  white-space: pre-wrap;
-}
-
-.reader-root .epub-pretext-link {
-  color: #1b4b72;
-  text-decoration: underline;
 }
 
 .reader-root blockquote {

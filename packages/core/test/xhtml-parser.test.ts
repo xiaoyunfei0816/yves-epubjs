@@ -157,9 +157,9 @@ describe("parseXhtmlDocument", () => {
     const xml = `<?xml version="1.0"?>
       <html>
         <body>
-          <section>
+          <section id="chapter-2">
             <div>
-              <h2>Wrapped heading</h2>
+              <h2><a id="heading-anchor"></a>Wrapped heading</h2>
               <aside>Ignored aside</aside>
               <p>Wrapped paragraph</p>
             </div>
@@ -172,5 +172,28 @@ describe("parseXhtmlDocument", () => {
     expect(section.blocks).toHaveLength(2);
     expect(section.blocks[0]).toMatchObject({ kind: "heading", level: 2 });
     expect(section.blocks[1]).toMatchObject({ kind: "text" });
+    expect(section.anchors["chapter-2"]).toBe("heading-1");
+    expect(section.anchors["heading-anchor"]).toBe("heading-1");
+  });
+
+  it("binds standalone anchor markers to the next rendered block", () => {
+    const xml = `<?xml version="1.0"?>
+      <html>
+        <body>
+          <a id="chapter-4"></a>
+          <a name="chapter-4-name"></a>
+          <span id="chapter-4-span"></span>
+          <h2>Chapter 4</h2>
+          <p>Later paragraph</p>
+        </body>
+      </html>`;
+
+    const section = parseXhtmlDocument(xml, "OPS/combined.xhtml");
+
+    expect(section.blocks).toHaveLength(2);
+    expect(section.blocks[0]).toMatchObject({ kind: "heading", level: 2 });
+    expect(section.anchors["chapter-4"]).toBe("heading-1");
+    expect(section.anchors["chapter-4-name"]).toBe("heading-1");
+    expect(section.anchors["chapter-4-span"]).toBe("heading-1");
   });
 });

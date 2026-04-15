@@ -210,6 +210,56 @@ export type SearchResult = {
   href: string;
 };
 
+export type Point = {
+  x: number;
+  y: number;
+};
+
+export type Rect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type HitTestResult =
+  | {
+      kind: "link";
+      rect: Rect;
+      sectionId: string;
+      blockId: string;
+      href: string;
+      locator: Locator | undefined;
+      text: string | undefined;
+    }
+  | {
+      kind: "image";
+      rect: Rect;
+      sectionId: string;
+      blockId: string;
+      src: string;
+      alt: string | undefined;
+      locator: Locator | undefined;
+    }
+  | {
+      kind: "block";
+      rect: Rect;
+      sectionId: string;
+      blockId: string;
+      locator: Locator | undefined;
+      text: string | undefined;
+    };
+
+export type VisibleDrawBounds = Rect[];
+
+export type RenderMetrics = {
+  backend: "canvas";
+  visibleSectionCount: number;
+  visibleDrawOpCount: number;
+  highlightedDrawOpCount: number;
+  totalCanvasHeight: number;
+};
+
 export type ReaderEventMap = {
   opened: { book: Book };
   rendered: { mode: ReadingMode };
@@ -223,6 +273,7 @@ export type ReaderEvent = keyof ReaderEventMap;
 
 export type ReaderOptions = {
   container?: HTMLElement;
+  canvas?: HTMLCanvasElement;
   mode?: ReadingMode;
   theme?: Partial<Theme>;
   typography?: Partial<TypographyOptions>;

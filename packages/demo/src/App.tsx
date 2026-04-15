@@ -60,9 +60,7 @@ export function App(): JSX.Element {
       return;
     }
 
-    const reader = new EpubReader({
-      container
-    });
+    const reader = new EpubReader({ container });
     readerRef.current = reader;
 
     const syncSnapshot = (): void => {
@@ -85,7 +83,7 @@ export function App(): JSX.Element {
       setSnapshot({
         metaText: `${book.metadata.title} · ${section?.title ?? section?.href ?? "Section"} · ${
           locator.spineIndex + 1
-        } / ${book.sections.length} · Page ${pagination.currentPage} / ${pagination.totalPages}`,
+        } / ${book.sections.length} · Page ${pagination.currentPage} / ${pagination.totalPages} · canvas`,
         pagination,
         toc: book.toc
       });
@@ -113,24 +111,18 @@ export function App(): JSX.Element {
     });
 
     const handleReaderClick = (event: MouseEvent): void => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) {
-        return;
-      }
-
-      const image = target.closest<HTMLImageElement>(".epub-image");
-      if (!image) {
-        return;
-      }
-
-      const src = image.dataset.fullsizeSrc || image.getAttribute("src");
-      if (!src) {
+      const rect = container.getBoundingClientRect();
+      const hit = reader.hitTest({
+        x: event.clientX - rect.left + container.scrollLeft,
+        y: event.clientY - rect.top
+      });
+      if (!hit || hit.kind !== "image") {
         return;
       }
 
       setLightbox({
-        src,
-        alt: image.getAttribute("alt") ?? ""
+        src: hit.src,
+        alt: hit.alt ?? ""
       });
     };
 

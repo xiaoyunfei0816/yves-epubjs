@@ -57,6 +57,7 @@ class XhtmlBlockParser {
   private listItemCounter = 0;
   private rowCounter = 0;
   private cellCounter = 0;
+  private pendingAnchors: string[] = [];
   readonly anchors: Record<string, string> = {};
 
   constructor(private readonly sectionHref: string) {}
@@ -124,10 +125,65 @@ class XhtmlBlockParser {
     return `table-cell-${this.cellCounter}`;
   }
 
-  private registerAnchor(node: XmlNode, blockId: string): void {
-    if (typeof node["@_id"] === "string" && node["@_id"].trim()) {
-      this.anchors[node["@_id"].trim()] = blockId;
+  private collectAnchorIds(node: XmlNode): string[] {
+    const anchorIds = [node["@_id"], node["@_name"]];
+    return anchorIds.flatMap((value) =>
+      typeof value === "string" && value.trim() ? [value.trim()] : []
+    );
+  }
+
+  private registerAnchorIds(anchorIds: string[], blockId: string): void {
+    for (const anchorId of anchorIds) {
+      this.anchors[anchorId] = blockId;
     }
+  }
+
+  private registerAnchor(node: XmlNode, blockId: string): void {
+    this.registerAnchorIds(this.collectAnchorIds(node), blockId);
+  }
+
+  private registerAnchorToFirstBlock(node: XmlNode, blocks: BlockNode[]): void {
+    const firstBlockId = blocks[0]?.id;
+    if (!firstBlockId) {
+      return;
+    }
+
+    this.registerAnchor(node, firstBlockId);
+  }
+
+  private registerInlineAnchors(node: unknown, blockId: string): void {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+
+    const xmlNode = node as XmlNode;
+    this.registerAnchor(xmlNode, blockId);
+
+    for (const [key, value] of Object.entries(xmlNode)) {
+      if (key.startsWith("@_")) {
+        continue;
+      }
+
+      for (const child of asArray(value)) {
+        if (child && typeof child === "object") {
+          this.registerInlineAnchors(child as XmlNode, blockId);
+        }
+      }
+    }
+  }
+
+  private queuePendingAnchors(node: XmlNode): void {
+    this.pendingAnchors.push(...this.collectAnchorIds(node));
+  }
+
+  private flushPendingAnchors(blocks: BlockNode[]): void {
+    const firstBlockId = blocks[0]?.id;
+    if (!firstBlockId || this.pendingAnchors.length === 0) {
+      return;
+    }
+
+    this.registerAnchorIds(this.pendingAnchors, firstBlockId);
+    this.pendingAnchors = [];
   }
 
   private parseContainerNode(node: XmlNode): BlockNode[] {
@@ -144,8 +200,19 @@ class XhtmlBlockParser {
           child && typeof child === "object"
             ? (child as XmlNode)
             : { "#text": child };
+        const parsedBlocks = this.parseElement(key, normalizedNode);
+        if (parsedBlocks.length > 0) {
+          this.flushPendingAnchors(parsedBlocks);
+          blocks.push(...parsedBlocks);
+          continue;
+        }
 
-        blocks.push(...this.parseElement(key, normalizedNode));
+        if (
+          this.collectAnchorIds(normalizedNode).length > 0 &&
+          !readTextContent(normalizedNode).trim()
+        ) {
+          this.queuePendingAnchors(normalizedNode);
+        }
       }
     }
 
@@ -154,12 +221,14 @@ class XhtmlBlockParser {
 
   private parseElement(tagName: string, node: XmlNode): BlockNode[] {
     if (tagName === "body" || tagName === "section" || tagName === "article" || tagName === "div" || tagName === "main") {
-      return this.parseContainerNode(node);
+      const blocks = this.parseContainerNode(node);
+      this.registerAnchorToFirstBlock(node, blocks);
+      return blocks;
     }
 
     if (/^h[1-6]$/.test(tagName)) {
       const blockId = this.createBlockId("heading");
-      this.registerAnchor(node, blockId);
+      this.registerInlineAnchors(node, blockId);
       return [
         {
           id: blockId,
@@ -172,7 +241,7 @@ class XhtmlBlockParser {
 
     if (tagName === "p") {
       const blockId = this.createBlockId("text");
-      this.registerAnchor(node, blockId);
+      this.registerInlineAnchors(node, blockId);
       return [
         {
           id: blockId,
@@ -196,7 +265,7 @@ class XhtmlBlockParser {
 
     if (tagName === "pre") {
       const blockId = this.createBlockId("code");
-      this.registerAnchor(node, blockId);
+      this.registerInlineAnchors(node, blockId);
       const codeNode =
         (node.code as XmlNode | undefined) ??
         (Array.isArray(node.code) ? (node.code[0] as XmlNode | undefined) : undefined);
