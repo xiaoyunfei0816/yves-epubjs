@@ -93,6 +93,8 @@ describe("EpubReader chapter render routing", () => {
       mode: "canvas",
       score: 0,
       reasons: [],
+      alignmentTarget: "dom-baseline",
+      styleProfile: "shared",
       sectionId: "section-1",
       sectionHref: "OPS/simple.xhtml"
     });
@@ -101,6 +103,8 @@ describe("EpubReader chapter render routing", () => {
         mode: "canvas",
         score: 0,
         reasons: [],
+        alignmentTarget: "dom-baseline",
+        styleProfile: "shared",
         sectionId: "section-1",
         sectionHref: "OPS/simple.xhtml",
         isCurrent: true
@@ -109,6 +113,8 @@ describe("EpubReader chapter render routing", () => {
         mode: "dom",
         score: 20,
         reasons: ["high-risk-tag:table"],
+        alignmentTarget: "dom-baseline",
+        styleProfile: "shared",
         sectionId: "section-2",
         sectionHref: "OPS/complex.xhtml",
         isCurrent: false
@@ -128,6 +134,8 @@ describe("EpubReader chapter render routing", () => {
       mode: "dom",
       score: 20,
       reasons: ["high-risk-tag:table"],
+      alignmentTarget: "dom-baseline",
+      styleProfile: "shared",
       sectionId: "section-2",
       sectionHref: "OPS/complex.xhtml"
     });
@@ -136,6 +144,8 @@ describe("EpubReader chapter render routing", () => {
         mode: "canvas",
         score: 0,
         reasons: [],
+        alignmentTarget: "dom-baseline",
+        styleProfile: "shared",
         sectionId: "section-1",
         sectionHref: "OPS/simple.xhtml",
         isCurrent: false
@@ -144,6 +154,8 @@ describe("EpubReader chapter render routing", () => {
         mode: "dom",
         score: 20,
         reasons: ["high-risk-tag:table"],
+        alignmentTarget: "dom-baseline",
+        styleProfile: "shared",
         sectionId: "section-2",
         sectionHref: "OPS/complex.xhtml",
         isCurrent: true

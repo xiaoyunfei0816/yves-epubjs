@@ -21,10 +21,11 @@ import type {
   TextBlock,
   TypographyOptions
 } from "../model/types";
+import { buildReadingStyleProfile } from "../renderer/reading-style-profile";
 import { resolveImageLayout } from "../utils/image-layout";
 import { countWrappedPreformattedLines } from "../utils/preformatted-text";
 import { extractBlockText } from "../utils/block-text";
-import { estimateWrappedTextHeight } from "../utils/text-wrap";
+import { estimateWrappedTextHeight, extractFontSize } from "../utils/text-wrap";
 
 export type LayoutInlineFragment = {
   text: string;
@@ -48,6 +49,7 @@ export type LayoutInlineFragment = {
 
 export type LayoutTextLine = {
   width: number;
+  height: number;
   fragments: LayoutInlineFragment[];
 };
 
@@ -94,6 +96,7 @@ export type LayoutInput = {
 };
 
 type InlineStyleState = {
+  fontFamily?: string;
   fontStyle?: "normal" | "italic";
   fontWeight?: string;
   href?: string;
@@ -119,16 +122,11 @@ type CompiledBlock = {
   textAlign: TextAlign;
 };
 
-const HEADING_SCALE: Record<HeadingBlock["level"], number> = {
-  1: 2,
-  2: 1.7,
-  3: 1.45,
-  4: 1.25,
-  5: 1.1,
-  6: 1
-};
-
 const DEFAULT_FONT_FAMILY = '"Iowan Old Style", "Palatino Linotype", serif';
+const DEFAULT_ALIGNMENT_THEME = {
+  color: "#1f2328",
+  background: "#fffdf7"
+} as const;
 
 export class LayoutEngine {
   private readonly compiledBlocks = new Map<string, CompiledBlock>();
@@ -180,23 +178,88 @@ export class LayoutEngine {
     if (!compiled) {
       return null;
     }
+    const styleProfile = buildReadingStyleProfile({
+      theme: DEFAULT_ALIGNMENT_THEME,
+      typography: input.typography
+    });
 
     const paddingTop = block.style?.paddingTop ?? 0
     const paddingBottom = block.style?.paddingBottom ?? 0
     const paddingLeft = block.style?.paddingLeft ?? 0
     const paddingRight = block.style?.paddingRight ?? 0
     const contentWidth = Math.max(40, width - paddingLeft - paddingRight)
+
+    if (block.kind === "text") {
+      const coverImage = this.getCoverImageInline(block, input.section)
+      if (coverImage) {
+        const imageLayout = resolveImageLayout({
+          availableWidth: contentWidth,
+          viewportHeight: input.viewportHeight,
+          ...(coverImage.width ? { intrinsicWidth: coverImage.width } : {}),
+          ...(coverImage.height ? { intrinsicHeight: coverImage.height } : {}),
+          fillWidth: true
+        })
+        const font = this.buildFont(
+          input.fontFamily,
+          block.style?.fontSize ?? input.typography.fontSize,
+          {
+            ...(block.style?.fontFamily ? { fontFamily: block.style.fontFamily } : {}),
+            ...(block.style?.fontStyle ? { fontStyle: block.style.fontStyle } : {}),
+            ...(block.style?.fontWeight ? { fontWeight: block.style.fontWeight } : {})
+          }
+        )
+        const marginBottom = block.style?.marginBottom ?? styleProfile.text.marginBottom
+        const line: LayoutTextLine = {
+          width: imageLayout.width,
+          height: imageLayout.height,
+          fragments: [
+            this.createSourceFragment(
+              "",
+              {
+                font,
+                image: {
+                  src: coverImage.src,
+                  ...(coverImage.alt ? { alt: coverImage.alt } : {}),
+                  ...(coverImage.title ? { title: coverImage.title } : {}),
+                  width: imageLayout.width,
+                  height: imageLayout.height
+                }
+              },
+              0
+            )
+          ]
+        }
+
+        return {
+          type: "pretext",
+          id: block.id,
+          kind: block.kind,
+          lineHeight: imageLayout.height,
+          textAlign: "center",
+          ...(block.style?.color ? { color: block.style.color } : {}),
+          ...(block.style?.backgroundColor ? { backgroundColor: block.style.backgroundColor } : {}),
+          paddingTop,
+          paddingBottom,
+          paddingLeft,
+          paddingRight,
+          lines: [line],
+          estimatedHeight: imageLayout.blockHeight + marginBottom + paddingTop + paddingBottom
+        }
+      }
+    }
+
     const lines: LayoutTextLine[] = [];
     for (const segment of compiled.segments) {
       const lineCountBefore = lines.length
       walkRichInlineLineRanges(segment.prepared, contentWidth, (range: RichInlineLineRange) => {
         const materialized = materializeRichInlineLineRange(segment.prepared, range);
-        lines.push(this.materializeLine(segment.sources, materialized));
+        lines.push(this.materializeLine(segment.sources, materialized, compiled.lineHeight));
       });
 
       if (lines.length === lineCountBefore) {
         lines.push({
           width: 0,
+          height: compiled.lineHeight,
           fragments: []
         })
       }
@@ -205,11 +268,13 @@ export class LayoutEngine {
     if (lines.length === 0) {
       lines.push({
         width: 0,
+        height: compiled.lineHeight,
         fragments: []
       });
     }
 
     if (block.kind === "heading") {
+      const marginBottom = block.style?.marginBottom ?? styleProfile.heading.marginBottom
       return {
         type: "pretext",
         id: block.id,
@@ -225,12 +290,13 @@ export class LayoutEngine {
         paddingRight,
         lines,
         estimatedHeight:
-          this.estimatePretextHeight(lines.length, compiled.lineHeight, block.kind) +
+          this.estimatePretextHeight(lines, marginBottom) +
           paddingTop +
           paddingBottom
       };
     }
 
+    const marginBottom = block.style?.marginBottom ?? styleProfile.text.marginBottom
     return {
       type: "pretext",
       id: block.id,
@@ -245,7 +311,7 @@ export class LayoutEngine {
       paddingRight,
       lines,
       estimatedHeight:
-        this.estimatePretextHeight(lines.length, compiled.lineHeight, block.kind) +
+        this.estimatePretextHeight(lines, marginBottom) +
         paddingTop +
         paddingBottom
     };
@@ -253,10 +319,21 @@ export class LayoutEngine {
 
   private materializeLine(
     sources: RichInlineSource[],
-    line: RichInlineLine
+    line: RichInlineLine,
+    defaultLineHeight: number
   ): LayoutTextLine {
+    const height = line.fragments.reduce((maxHeight, fragment) => {
+      const options = sourceToFragmentOptions(sources[fragment.itemIndex])
+      if (options.image) {
+        return Math.max(maxHeight, options.image.height)
+      }
+
+      return Math.max(maxHeight, extractFontSize(options.font) * 1.45)
+    }, defaultLineHeight)
+
     return {
       width: line.width,
+      height,
       fragments: line.fragments.map((fragment) => {
         const options = sourceToFragmentOptions(sources[fragment.itemIndex])
         return this.createSourceFragment(
@@ -279,15 +356,19 @@ export class LayoutEngine {
       return cached;
     }
 
+    const styleProfile = buildReadingStyleProfile({
+      theme: DEFAULT_ALIGNMENT_THEME,
+      typography: input.typography
+    });
     const baseFontSize =
       block.kind === "heading"
-        ? (block.style?.fontSize ?? input.typography.fontSize * HEADING_SCALE[block.level])
+        ? (block.style?.fontSize ?? input.typography.fontSize * styleProfile.heading.scale[block.level])
         : (block.style?.fontSize ?? input.typography.fontSize);
     const lineHeight =
       block.style?.lineHeight ??
       (block.kind === "heading"
-        ? Math.max(baseFontSize * 1.25, input.typography.fontSize * input.typography.lineHeight)
-        : input.typography.fontSize * input.typography.lineHeight);
+        ? Math.max(baseFontSize * 1.25, styleProfile.text.lineHeight)
+        : styleProfile.text.lineHeight);
 
     const segments = this.compileInlineSegments(
       block.inlines,
@@ -296,6 +377,7 @@ export class LayoutEngine {
         fontSize: baseFontSize
       },
       {
+        ...(block.style?.fontFamily ? { fontFamily: block.style.fontFamily } : {}),
         ...(block.style?.fontStyle ? { fontStyle: block.style.fontStyle } : {}),
         ...(block.style?.fontWeight ? { fontWeight: block.style.fontWeight } : {}),
         ...(block.style?.color ? { color: block.style.color } : {}),
@@ -432,6 +514,7 @@ export class LayoutEngine {
                 ? { fontScale: (state.fontScale ?? 1) * 0.83 }
                 : {}),
               ...(inline.kind === "mark" ? { mark: true } : {}),
+              ...(inline.style?.fontFamily ? { fontFamily: inline.style.fontFamily } : {}),
               ...(inline.style?.fontStyle ? { fontStyle: inline.style.fontStyle } : {}),
               ...(inline.style?.fontWeight ? { fontWeight: inline.style.fontWeight } : {}),
               ...(inline.style?.color ? { color: inline.style.color } : {}),
@@ -455,6 +538,7 @@ export class LayoutEngine {
             typography,
             {
               ...state,
+              ...(inline.style?.fontFamily ? { fontFamily: inline.style.fontFamily } : {}),
               fontWeight: inline.style?.fontWeight ?? "700",
               ...(inline.style?.color ? { color: inline.style.color } : {}),
               ...(inline.style?.backgroundColor
@@ -554,7 +638,7 @@ export class LayoutEngine {
   private buildFont(fontFamily: string, fontSize: number, state: InlineStyleState): string {
     const style = state.fontStyle ?? "normal";
     const weight = state.fontWeight ?? "400";
-    return `${style} ${weight} ${fontSize}px ${fontFamily}`;
+    return `${style} ${weight} ${fontSize}px ${state.fontFamily ?? fontFamily}`;
   }
 
   private getBlockCacheKey(block: TextBlock | HeadingBlock, input: LayoutInput): string {
@@ -567,6 +651,7 @@ export class LayoutEngine {
       input.typography.lineHeight,
       block.style?.fontSize ?? "",
       block.style?.lineHeight ?? "",
+      block.style?.fontFamily ?? "",
       block.style?.fontStyle ?? "",
       block.style?.fontWeight ?? "",
       block.style?.textAlign ?? "",
@@ -608,47 +693,54 @@ export class LayoutEngine {
     return false;
   }
 
-  private estimatePretextHeight(
-    lineCount: number,
-    lineHeight: number,
-    kind: "text" | "heading"
-  ): number {
-    const bottomGap = kind === "heading" ? lineHeight * 0.45 : lineHeight * 0.55;
-    return Math.max(lineHeight, lineCount * lineHeight + bottomGap);
+  private estimatePretextHeight(lines: LayoutTextLine[], marginBottom: number): number {
+    const contentHeight = lines.reduce((total, line) => total + line.height, 0)
+    const minimumHeight = lines.reduce(
+      (maxHeight, line) => Math.max(maxHeight, line.height),
+      0
+    )
+
+    return Math.max(minimumHeight, contentHeight + marginBottom);
   }
 
   private estimateNativeBlockHeight(block: BlockNode, input: LayoutInput): number {
     const typography = input.typography;
-    const baseLineHeight = typography.fontSize * typography.lineHeight;
+    const styleProfile = buildReadingStyleProfile({
+      theme: DEFAULT_ALIGNMENT_THEME,
+      typography
+    });
+    const baseLineHeight = styleProfile.text.lineHeight;
+    const contentWidth = Math.max(
+      40,
+      Math.floor(input.viewportWidth) - styleProfile.section.sidePadding * 2
+    );
 
     switch (block.kind) {
       case "image": {
         return resolveImageLayout({
-          availableWidth: Math.max(1, Math.floor(input.viewportWidth) - 16),
+          availableWidth: Math.max(1, contentWidth),
           viewportHeight: input.viewportHeight,
           ...(block.width ? { intrinsicWidth: block.width } : {}),
-          ...(block.height ? { intrinsicHeight: block.height } : {})
+          ...(block.height ? { intrinsicHeight: block.height } : {}),
+          fillWidth: this.isCoverImageBlock(input.section, block)
         }).blockHeight;
       }
       case "code": {
-        const codeFontSize = Math.max(13, typography.fontSize - 1)
-        const codeFont = `400 ${codeFontSize}px "SFMono-Regular", Consolas, monospace"`
+        const codeFont = `400 ${styleProfile.code.fontSize}px ${styleProfile.code.fontFamily}`
         const codeWidth = Math.max(
           40,
-          Math.floor(input.viewportWidth) -
-            16 -
-            24 -
+          contentWidth -
+            styleProfile.code.blockPaddingX * 2 -
             (block.style?.paddingLeft ?? 0) -
             (block.style?.paddingRight ?? 0)
         )
-        const codeLineHeight = Math.max(codeFontSize * 1.45, 18)
         const lineCount = Math.max(
           1,
           countWrappedPreformattedLines(block.text, codeWidth, codeFont)
         )
         return (
-          lineCount * codeLineHeight +
-          24 +
+          lineCount * styleProfile.code.lineHeight +
+          styleProfile.code.blockPaddingY * 2 +
           (block.style?.paddingTop ?? 0) +
           (block.style?.paddingBottom ?? 0)
         );
@@ -658,40 +750,65 @@ export class LayoutEngine {
           baseLineHeight * 2,
           estimateWrappedTextHeight(
             extractBlockText(block),
-            Math.max(40, Math.floor(input.viewportWidth) - 16 - 18),
+            Math.max(
+              40,
+              contentWidth -
+                styleProfile.quote.accentGap -
+                styleProfile.quote.accentWidth
+            ),
             `400 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`,
             baseLineHeight
-          ) + 24
+          ) + styleProfile.text.marginBottom
         );
       case "list":
-        return Math.max(baseLineHeight * 2, estimateListBlockHeight(block, input.viewportWidth, typography));
+        return Math.max(
+          baseLineHeight * 2,
+          estimateListBlockHeight(block, input.viewportWidth, typography, styleProfile)
+        );
       case "table":
-        return Math.max(baseLineHeight * 3, estimateTableBlockHeight(block, input.viewportWidth, typography));
+        return Math.max(
+          baseLineHeight * 3,
+          estimateTableBlockHeight(block, input.viewportWidth, typography, styleProfile)
+        );
       case "figure":
-        return Math.max(baseLineHeight * 3, estimateFigureBlockHeight(block, input.viewportWidth, input.viewportHeight, typography));
+        return Math.max(
+          baseLineHeight * 3,
+          estimateFigureBlockHeight(
+            block,
+            input.viewportWidth,
+            input.viewportHeight,
+            typography,
+            styleProfile
+          )
+        );
       case "aside":
       case "nav":
         return Math.max(
           baseLineHeight * 2,
           estimateWrappedTextHeight(
             extractBlockText(block),
-            Math.max(40, Math.floor(input.viewportWidth) - 16),
+            Math.max(
+              40,
+              contentWidth -
+                styleProfile.aside.accentGap -
+                styleProfile.aside.accentWidth
+            ),
             `400 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`,
             baseLineHeight
-          ) + 20
+          ) + styleProfile.text.marginBottom
         );
       case "definition-list":
         return Math.max(
           baseLineHeight * 2,
           estimateWrappedTextHeight(
             extractBlockText(block),
-            Math.max(40, Math.floor(input.viewportWidth) - 16),
+            contentWidth,
             `400 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`,
             baseLineHeight
-          ) + 20
+          ) + styleProfile.text.marginBottom
         );
       case "thematic-break":
-        return 28;
+        return styleProfile.thematicBreak.blockHeight;
       case "heading":
       case "text":
       default:
@@ -736,6 +853,26 @@ export class LayoutEngine {
         : {})
     };
   }
+
+  private getCoverImageInline(
+    block: TextBlock,
+    section: SectionDocument
+  ): Extract<InlineNode, { kind: "image" }> | undefined {
+    if (section.presentationRole !== "cover" || section.blocks.length !== 1) {
+      return undefined
+    }
+
+    if (block.inlines.length !== 1) {
+      return undefined
+    }
+
+    const [inline] = block.inlines
+    return inline?.kind === "image" ? inline : undefined
+  }
+
+  private isCoverImageBlock(section: SectionDocument, block: BlockNode): block is Extract<BlockNode, { kind: "image" }> {
+    return section.presentationRole === "cover" && section.blocks.length === 1 && block.kind === "image"
+  }
 }
 
 function sourceToFragmentOptions(source: RichInlineSource | undefined): {
@@ -779,18 +916,27 @@ function sourceToFragmentOptions(source: RichInlineSource | undefined): {
 function estimateListBlockHeight(
   block: ListBlock,
   viewportWidth: number,
-  typography: TypographyOptions
+  typography: TypographyOptions,
+  styleProfile: ReturnType<typeof buildReadingStyleProfile>
 ): number {
   const font = `400 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
   const lineHeight = Math.max(typography.fontSize * 1.45, 18)
-  const contentWidth = Math.max(40, Math.floor(viewportWidth) - 16)
+  const contentWidth = Math.max(
+    40,
+    Math.floor(viewportWidth) - styleProfile.section.sidePadding * 2
+  )
   const estimateRecursive = (list: ListBlock, depth: number): number => {
     let total = 0
     for (const item of list.items) {
       const textBlocks = item.blocks.filter((child) => child.kind !== "list")
       const itemText = textBlocks.map(extractBlockText).filter(Boolean).join(" ")
-      const textWidth = Math.max(40, contentWidth - depth * 18 - 18)
-      total += estimateWrappedTextHeight(itemText || " ", textWidth, font, lineHeight) + 6
+      const textWidth = Math.max(
+        40,
+        contentWidth - depth * styleProfile.list.indent - styleProfile.list.markerGap
+      )
+      total +=
+        estimateWrappedTextHeight(itemText || " ", textWidth, font, lineHeight) +
+        styleProfile.list.itemGap
       for (const child of item.blocks) {
         if (child.kind === "list") {
           total += estimateRecursive(child, depth + 1)
@@ -800,21 +946,25 @@ function estimateListBlockHeight(
     return total
   }
 
-  return estimateRecursive(block, 0) + 8
+  return estimateRecursive(block, 0) + styleProfile.text.marginBottom
 }
 
 function estimateTableBlockHeight(
   block: TableBlock,
   viewportWidth: number,
-  typography: TypographyOptions
+  typography: TypographyOptions,
+  styleProfile: ReturnType<typeof buildReadingStyleProfile>
 ): number {
-  const contentWidth = Math.max(40, Math.floor(viewportWidth) - 16)
+  const contentWidth = Math.max(
+    40,
+    Math.floor(viewportWidth) - styleProfile.section.sidePadding * 2
+  )
   const captionFont = `italic 400 ${Math.max(14, typography.fontSize - 1)}px "Iowan Old Style", "Palatino Linotype", serif`
   const cellFont = `400 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
   const headerFont = `700 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
   const lineHeight = Math.max(typography.fontSize * 1.45, 18)
-  const padding = 8
-  let total = 8
+  const padding = styleProfile.table.cellPadding
+  let total = styleProfile.text.marginBottom
 
   if (block.caption?.length) {
     total += estimateWrappedTextHeight(
@@ -822,7 +972,7 @@ function estimateTableBlockHeight(
       contentWidth,
       captionFont,
       lineHeight
-    ) + 8
+    ) + styleProfile.text.marginBottom
   }
 
   const columnCount = Math.max(
@@ -844,20 +994,24 @@ function estimateTableBlockHeight(
     total += rowHeight
   }
 
-  return total + 8
+  return total + styleProfile.text.marginBottom
 }
 
 function estimateFigureBlockHeight(
   block: FigureBlock,
   viewportWidth: number,
   viewportHeight: number,
-  typography: TypographyOptions
+  typography: TypographyOptions,
+  styleProfile: ReturnType<typeof buildReadingStyleProfile>
 ): number {
-  const contentWidth = Math.max(40, Math.floor(viewportWidth) - 16)
+  const contentWidth = Math.max(
+    40,
+    Math.floor(viewportWidth) - styleProfile.section.sidePadding * 2
+  )
   const bodyFont = `400 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
   const captionFont = `italic 400 ${Math.max(14, typography.fontSize - 1)}px "Iowan Old Style", "Palatino Linotype", serif`
   const lineHeight = Math.max(typography.fontSize * 1.45, 18)
-  let total = 12
+  let total = styleProfile.text.marginBottom
 
   for (const child of block.blocks) {
     if (child.kind === "image") {

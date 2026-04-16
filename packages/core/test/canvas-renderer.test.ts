@@ -379,4 +379,27 @@ describe("CanvasRenderer image painting", () => {
 
     expect(fillText).toHaveBeenCalledWith("中文版序", 12, 40.88);
   });
+
+  it("removes non-section placeholder nodes before scroll rendering", () => {
+    const container = document.createElement("div");
+    container.innerHTML =
+      '<article class="placeholder-page">Waiting</article><div class="stale-node"></div>';
+
+    const renderer = new CanvasRenderer();
+    const result = renderer.renderScrollable(
+      container,
+      [
+        {
+          sectionId: "section-1",
+          sectionHref: "OPS/chapter-1.xhtml",
+          height: 420
+        }
+      ]
+    );
+
+    expect(container.querySelector(".placeholder-page")).toBeNull();
+    expect(container.querySelector(".stale-node")).toBeNull();
+    expect(container.querySelector('article[data-section-id="section-1"]')).toBeTruthy();
+    expect(result.totalCanvasHeight).toBe(0);
+  });
 });

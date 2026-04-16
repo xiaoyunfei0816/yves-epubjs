@@ -21,6 +21,10 @@ import type {
   SectionDisplayList,
   TextRunDrawOp
 } from "./draw-ops";
+import {
+  buildReadingStyleProfile,
+  type ReadingStyleProfile
+} from "./reading-style-profile";
 import { resolveImageLayout } from "../utils/image-layout";
 import { wrapPreformattedText } from "../utils/preformatted-text";
 import { extractBlockText } from "../utils/block-text";
@@ -40,8 +44,6 @@ type BuilderOptions = {
   activeBlockId: string | undefined;
 };
 
-const SIDE_PADDING = 8;
-
 type NativeBlockRenderStyle = {
   color: string;
   backgroundColor?: string;
@@ -54,46 +56,14 @@ type NativeBlockRenderStyle = {
 
 export class DisplayListBuilder {
   buildSection(options: BuilderOptions): SectionDisplayList {
+    const styleProfile = buildReadingStyleProfile({
+      theme: options.theme,
+      typography: options.typography
+    });
     let currentTop = 0;
     const ops: DrawOp[] = [];
     const interactions: InteractionRegion[] = [];
     const contentWidth = Math.max(120, options.width);
-
-    if (options.section.title) {
-      const titleTop = currentTop;
-      const titleFontSize = Math.max(
-        options.typography.fontSize * 1.5,
-        options.typography.fontSize + 10
-      );
-      const titleRect = {
-        x: SIDE_PADDING,
-        y: titleTop,
-        width: contentWidth - SIDE_PADDING * 2,
-        height: titleFontSize * 1.3
-      };
-      ops.push({
-        kind: "text",
-        sectionId: options.section.id,
-        sectionHref: options.section.href,
-        blockId: `${options.section.id}::title`,
-        locator: {
-          spineIndex: options.locatorMap?.values().next().value?.spineIndex ?? 0,
-          progressInSection: 0
-        },
-        rect: titleRect,
-        text: options.section.title,
-        x: titleRect.x,
-        y: titleTop,
-        width: titleRect.width,
-        font: `700 ${titleFontSize}px "Iowan Old Style", "Palatino Linotype", serif`,
-        color: options.theme.color,
-        backgroundColor: undefined,
-        highlightColor: undefined,
-        underline: undefined,
-        href: undefined
-      } satisfies TextRunDrawOp);
-      currentTop += titleRect.height + options.typography.fontSize * 0.8;
-    }
 
     for (const block of options.blocks) {
       const built = block.type === "pretext"
@@ -103,6 +73,7 @@ export class DisplayListBuilder {
             top: currentTop,
             width: contentWidth,
             theme: options.theme,
+            styleProfile,
             locator: options.locatorMap?.get(block.id),
             resolveImageLoaded: options.resolveImageLoaded,
             resolveImageUrl: options.resolveImageUrl,
@@ -118,6 +89,7 @@ export class DisplayListBuilder {
             viewportHeight: options.viewportHeight,
             theme: options.theme,
             typography: options.typography,
+            styleProfile,
             locator: options.locatorMap?.get(block.id),
             resolveImageLoaded: options.resolveImageLoaded,
             resolveImageUrl: options.resolveImageUrl,
@@ -134,7 +106,10 @@ export class DisplayListBuilder {
       sectionId: options.section.id,
       sectionHref: options.section.href,
       width: contentWidth,
-      height: Math.max(currentTop, options.typography.fontSize * 2),
+      height: Math.max(
+        currentTop + styleProfile.section.bottomPadding,
+        options.typography.fontSize * 2 + styleProfile.section.bottomPadding
+      ),
       ops,
       interactions
     };
@@ -146,6 +121,7 @@ export class DisplayListBuilder {
     top: number;
     width: number;
     theme: Theme;
+    styleProfile: ReadingStyleProfile;
     locator: Locator | undefined;
     resolveImageLoaded: ((src: string) => boolean) | undefined;
     resolveImageUrl: ((src: string) => string) | undefined;
@@ -158,10 +134,11 @@ export class DisplayListBuilder {
   } {
     const ops: DrawOp[] = [];
     const interactions: InteractionRegion[] = [];
+    const sidePadding = input.styleProfile.section.sidePadding;
     const blockRect = {
-      x: SIDE_PADDING,
+      x: sidePadding,
       y: input.top,
-      width: input.width - SIDE_PADDING * 2,
+      width: input.width - sidePadding * 2,
       height: input.block.estimatedHeight
     };
     const contentRect = {
@@ -210,7 +187,8 @@ export class DisplayListBuilder {
       text: this.collectPretextText(input.block)
     });
 
-    input.block.lines.forEach((line, lineIndex) => {
+    let lineTop = contentRect.y
+    input.block.lines.forEach((line) => {
       const lineWidth = Math.max(0, line.width);
       const startX = this.resolveLineStartX(
         input.block.textAlign,
@@ -219,7 +197,7 @@ export class DisplayListBuilder {
         lineWidth
       );
       let cursorX = startX;
-      const baselineY = contentRect.y + lineIndex * input.block.lineHeight;
+      const lineHeight = line.height
 
       for (const fragment of line.fragments) {
         cursorX += fragment.gapBefore;
@@ -228,7 +206,7 @@ export class DisplayListBuilder {
         if (fragment.image) {
           const imageRect = {
             x: cursorX,
-            y: baselineY + Math.max(0, (input.block.lineHeight - fragment.image.height) * 0.5),
+            y: lineTop + Math.max(0, (lineHeight - fragment.image.height) * 0.5),
             width: fragment.image.width,
             height: fragment.image.height
           }
@@ -259,9 +237,9 @@ export class DisplayListBuilder {
         }
         const rect = {
           x: cursorX,
-          y: baselineY + baselineShift,
+          y: lineTop + baselineShift,
           width: fragmentWidth,
-          height: input.block.lineHeight
+          height: lineHeight
         };
         ops.push({
           kind: "text",
@@ -272,17 +250,19 @@ export class DisplayListBuilder {
         rect,
         text: fragment.text,
         x: cursorX,
-        y: baselineY + baselineShift,
+        y: lineTop + baselineShift,
         width: fragmentWidth,
         font: fragment.font,
-        color: fragment.href ? "#1b4b72" : (fragment.color ?? input.block.color ?? input.theme.color),
+        color: fragment.href
+          ? input.styleProfile.link.color
+          : (fragment.color ?? input.block.color ?? input.theme.color),
         backgroundColor: fragment.backgroundColor,
         highlightColor: input.highlighted
-          ? "rgba(250, 204, 21, 0.28)"
+          ? input.styleProfile.highlight.search
           : input.active
-            ? "rgba(245, 158, 11, 0.18)"
+            ? input.styleProfile.highlight.active
             : fragment.mark
-              ? "rgba(250, 204, 21, 0.22)"
+              ? input.styleProfile.highlight.mark
               : undefined,
           underline: Boolean(fragment.href),
           href: fragment.href
@@ -302,6 +282,8 @@ export class DisplayListBuilder {
 
         cursorX += fragmentWidth;
       }
+
+      lineTop += lineHeight
     });
 
     return {
@@ -320,6 +302,7 @@ export class DisplayListBuilder {
     viewportHeight: number;
     theme: Theme;
     typography: TypographyOptions;
+    styleProfile: ReadingStyleProfile;
     locator: Locator | undefined;
     resolveImageLoaded: ((src: string) => boolean) | undefined;
     resolveImageUrl: ((src: string) => string) | undefined;
@@ -330,15 +313,19 @@ export class DisplayListBuilder {
     interactions: InteractionRegion[];
     height: number;
   } {
-    const x = SIDE_PADDING;
-    const width = input.width - SIDE_PADDING * 2;
+    const x = input.styleProfile.section.sidePadding;
+    const width = input.width - input.styleProfile.section.sidePadding * 2;
     const rect = {
       x,
       y: input.top,
       width,
       height: input.estimatedHeight
     };
-    const blockStyle = this.resolveNativeBlockRenderStyle(input.block, input.theme);
+    const blockStyle = this.resolveNativeBlockRenderStyle(
+      input.block,
+      input.theme,
+      input.styleProfile
+    );
     const contentRect = this.insetRect(rect, blockStyle);
     const ops: DrawOp[] = [];
     const interactions: InteractionRegion[] = [
@@ -379,8 +366,8 @@ export class DisplayListBuilder {
           height: rect.height
         },
         color: input.active
-          ? "rgba(245, 158, 11, 0.14)"
-          : "rgba(250, 204, 21, 0.08)",
+          ? input.styleProfile.highlight.active
+          : input.styleProfile.highlight.mark,
         radius: 12
       } satisfies RectDrawOp);
     }
@@ -392,7 +379,8 @@ export class DisplayListBuilder {
           availableWidth: width,
           viewportHeight: input.viewportHeight,
           ...(input.block.width ? { intrinsicWidth: input.block.width } : {}),
-          ...(input.block.height ? { intrinsicHeight: input.block.height } : {})
+          ...(input.block.height ? { intrinsicHeight: input.block.height } : {}),
+          fillWidth: this.isCoverImageBlock(input.section, input.block)
         });
         const imageRect = {
           x: x + imageLayout.xOffset,
@@ -431,8 +419,8 @@ export class DisplayListBuilder {
           blockId: input.block.id,
           locator: input.locator,
           rect,
-          color: "rgba(148, 163, 184, 0.8)",
-          lineWidth: 1.5,
+          color: input.styleProfile.thematicBreak.color,
+          lineWidth: input.styleProfile.thematicBreak.lineWidth,
           x1: x,
           y1: input.top + rect.height * 0.5,
           x2: x + width,
@@ -449,10 +437,10 @@ export class DisplayListBuilder {
           rect: {
             x,
             y: input.top + 4,
-            width: 4,
+            width: input.styleProfile.quote.accentWidth,
             height: rect.height - 8
           },
-          color: "rgba(59, 123, 163, 0.32)"
+          color: input.styleProfile.quote.accentColor
         } satisfies RectDrawOp);
         ops.push(
           ...this.buildWrappedTextOps({
@@ -460,15 +448,16 @@ export class DisplayListBuilder {
             section: input.section,
             blockId: input.block.id,
             locator: input.locator,
-            x: contentRect.x + 18,
-            top: contentRect.y + 2,
-            width: Math.max(40, contentRect.width - 18),
+            x: contentRect.x + input.styleProfile.quote.accentGap,
+            top: contentRect.y + input.styleProfile.quote.contentInsetY,
+            width: Math.max(40, contentRect.width - input.styleProfile.quote.accentGap),
             height: contentRect.height,
             font: `400 ${input.typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`,
             color: blockStyle.color,
             textAlign: blockStyle.textAlign,
             highlighted: input.highlighted,
-            active: input.active
+            active: input.active,
+            styleProfile: input.styleProfile
           })
         );
         break;
@@ -480,8 +469,8 @@ export class DisplayListBuilder {
           blockId: input.block.id,
           locator: input.locator,
           rect,
-          color: blockStyle.backgroundColor ?? "rgba(15, 23, 42, 0.06)",
-          radius: 12
+          color: blockStyle.backgroundColor ?? input.styleProfile.code.blockBackground,
+          radius: input.styleProfile.code.blockRadius
         } satisfies RectDrawOp);
         ops.push(
           ...this.buildPreformattedTextOps({
@@ -489,15 +478,16 @@ export class DisplayListBuilder {
             section: input.section,
             blockId: input.block.id,
             locator: input.locator,
-            x: contentRect.x + 12,
-            top: contentRect.y + 12,
-            width: Math.max(40, contentRect.width - 24),
-            height: Math.max(0, contentRect.height - 24),
-            font: `400 ${Math.max(13, input.typography.fontSize - 1)}px "SFMono-Regular", Consolas, monospace`,
+            x: contentRect.x + input.styleProfile.code.blockPaddingX,
+            top: contentRect.y + input.styleProfile.code.blockPaddingY,
+            width: Math.max(40, contentRect.width - input.styleProfile.code.blockPaddingX * 2),
+            height: Math.max(0, contentRect.height - input.styleProfile.code.blockPaddingY * 2),
+            font: `400 ${input.styleProfile.code.fontSize}px ${input.styleProfile.code.fontFamily}`,
             color: blockStyle.color,
             textAlign: blockStyle.textAlign,
             highlighted: input.highlighted,
-            active: input.active
+            active: input.active,
+            styleProfile: input.styleProfile
           })
         );
         break;
@@ -521,10 +511,10 @@ export class DisplayListBuilder {
           rect: {
             x,
             y: input.top + 6,
-            width: 4,
+            width: input.styleProfile.aside.accentWidth,
             height: Math.max(16, rect.height - 12)
           },
-          color: "rgba(59, 123, 163, 0.42)",
+          color: input.styleProfile.aside.accentColor,
           radius: 4
         } satisfies RectDrawOp)
         ops.push(
@@ -533,15 +523,16 @@ export class DisplayListBuilder {
             section: input.section,
             blockId: input.block.id,
             locator: input.locator,
-            x: contentRect.x + 16,
-            top: contentRect.y + 8,
-            width: Math.max(40, contentRect.width - 24),
-            height: Math.max(0, contentRect.height - 16),
+            x: contentRect.x + input.styleProfile.aside.accentGap,
+            top: contentRect.y + input.styleProfile.aside.contentInsetY,
+            width: Math.max(40, contentRect.width - input.styleProfile.aside.accentGap),
+            height: Math.max(0, contentRect.height - input.styleProfile.aside.contentInsetY * 2),
             font: `400 ${input.typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`,
             color: blockStyle.color,
             textAlign: blockStyle.textAlign,
             highlighted: input.highlighted,
-            active: input.active
+            active: input.active,
+            styleProfile: input.styleProfile
           })
         );
         break;
@@ -560,7 +551,8 @@ export class DisplayListBuilder {
               color: blockStyle.color
             },
             highlighted: input.highlighted,
-            active: input.active
+            active: input.active,
+            styleProfile: input.styleProfile
           })
         );
         break;
@@ -582,7 +574,8 @@ export class DisplayListBuilder {
             resolveImageLoaded: input.resolveImageLoaded,
             resolveImageUrl: input.resolveImageUrl,
             highlighted: input.highlighted,
-            active: input.active
+            active: input.active,
+            styleProfile: input.styleProfile
           })
         );
         break;
@@ -601,7 +594,8 @@ export class DisplayListBuilder {
               color: blockStyle.color
             },
             highlighted: input.highlighted,
-            active: input.active
+            active: input.active,
+            styleProfile: input.styleProfile
           })
         );
         break;
@@ -622,7 +616,8 @@ export class DisplayListBuilder {
             color: blockStyle.color,
             textAlign: blockStyle.textAlign,
             highlighted: input.highlighted,
-            active: input.active
+            active: input.active,
+            styleProfile: input.styleProfile
           })
         );
         break;
@@ -649,6 +644,7 @@ export class DisplayListBuilder {
     textAlign: TextAlign;
     highlighted: boolean;
     active: boolean;
+    styleProfile: ReadingStyleProfile;
   }): TextRunDrawOp[] {
     const fontSize = extractFontSize(input.font);
     const lineHeight = Math.max(fontSize * 1.45, 18);
@@ -681,9 +677,9 @@ export class DisplayListBuilder {
         color: input.color,
         backgroundColor: undefined,
         highlightColor: input.highlighted
-          ? "rgba(250, 204, 21, 0.28)"
+          ? input.styleProfile.highlight.search
           : input.active
-            ? "rgba(245, 158, 11, 0.18)"
+            ? input.styleProfile.highlight.active
             : undefined,
         underline: undefined,
         href: undefined
@@ -705,6 +701,7 @@ export class DisplayListBuilder {
     textAlign: TextAlign;
     highlighted: boolean;
     active: boolean;
+    styleProfile: ReadingStyleProfile;
   }): TextRunDrawOp[] {
     const fontSize = extractFontSize(input.font)
     const lineHeight = Math.max(fontSize * 1.45, 18)
@@ -737,9 +734,9 @@ export class DisplayListBuilder {
         color: input.color,
         backgroundColor: undefined,
         highlightColor: input.highlighted
-          ? "rgba(250, 204, 21, 0.28)"
+          ? input.styleProfile.highlight.search
           : input.active
-            ? "rgba(245, 158, 11, 0.18)"
+            ? input.styleProfile.highlight.active
             : undefined,
         underline: undefined,
         href: undefined
@@ -758,6 +755,7 @@ export class DisplayListBuilder {
     theme: Theme;
     highlighted: boolean;
     active: boolean;
+    styleProfile: ReadingStyleProfile;
   }): TextRunDrawOp[] {
     const ops: TextRunDrawOp[] = []
     const font = `400 ${input.typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
@@ -766,8 +764,8 @@ export class DisplayListBuilder {
       let currentTop = top
       block.items.forEach((item, index) => {
         const marker = block.ordered ? `${(block.start ?? 1) + index}.` : "\u2022"
-        const markerX = input.x + depth * 18
-        const textX = markerX + 18
+        const markerX = input.x + depth * input.styleProfile.list.indent
+        const textX = markerX + input.styleProfile.list.markerGap
         const textWidth = Math.max(40, input.width - (textX - input.x))
         const textBlocks = item.blocks.filter((child) => child.kind !== "list")
         const itemText = textBlocks.map(extractBlockText).filter(Boolean).join(" ")
@@ -793,9 +791,9 @@ export class DisplayListBuilder {
         color: input.theme.color,
         backgroundColor: undefined,
         highlightColor: input.highlighted
-            ? "rgba(250, 204, 21, 0.28)"
+            ? input.styleProfile.highlight.search
             : input.active
-              ? "rgba(245, 158, 11, 0.18)"
+              ? input.styleProfile.highlight.active
               : undefined,
           underline: undefined,
           href: undefined
@@ -822,16 +820,18 @@ export class DisplayListBuilder {
           color: input.theme.color,
           backgroundColor: undefined,
           highlightColor: input.highlighted
-              ? "rgba(250, 204, 21, 0.28)"
+              ? input.styleProfile.highlight.search
               : input.active
-                ? "rgba(245, 158, 11, 0.18)"
+                ? input.styleProfile.highlight.active
                 : undefined,
             underline: undefined,
             href: undefined
           })
         })
 
-        currentTop += Math.max(lineHeight, itemLines.length * lineHeight) + 6
+        currentTop +=
+          Math.max(lineHeight, itemLines.length * lineHeight) +
+          input.styleProfile.list.itemGap
         for (const child of item.blocks) {
           if (child.kind === "list") {
             currentTop = renderList(child, depth + 1, currentTop)
@@ -844,6 +844,13 @@ export class DisplayListBuilder {
 
     renderList(input.block, 0, input.top)
     return ops
+  }
+
+  private isCoverImageBlock(
+    section: SectionDocument,
+    block: BlockNode
+  ): block is Extract<BlockNode, { kind: "image" }> {
+    return section.presentationRole === "cover" && section.blocks.length === 1 && block.kind === "image"
   }
 
   private buildFigureBlockOps(input: {
@@ -860,6 +867,7 @@ export class DisplayListBuilder {
     resolveImageUrl: ((src: string) => string) | undefined;
     highlighted: boolean;
     active: boolean;
+    styleProfile: ReadingStyleProfile;
   }): DrawOp[] {
     const ops: DrawOp[] = []
     let currentTop = input.top
@@ -891,7 +899,7 @@ export class DisplayListBuilder {
           loaded: Boolean(input.resolveImageLoaded?.(child.src)),
           background: "transparent"
         })
-        currentTop += imageLayout.height + 10
+        currentTop += imageLayout.height + input.styleProfile.text.marginBottom
         continue
       }
 
@@ -923,22 +931,26 @@ export class DisplayListBuilder {
         color: input.theme.color,
         backgroundColor: undefined,
         highlightColor: input.highlighted
-            ? "rgba(250, 204, 21, 0.28)"
+            ? input.styleProfile.highlight.search
             : input.active
-              ? "rgba(245, 158, 11, 0.18)"
+              ? input.styleProfile.highlight.active
               : undefined,
           underline: undefined,
           href: undefined
         })
       })
-      currentTop += lines.length * lineHeight + 8
+      currentTop += lines.length * lineHeight + input.styleProfile.text.marginBottom
     }
 
     if (input.block.caption?.length) {
       const captionText = input.block.caption.map(extractBlockText).filter(Boolean).join(" ")
       const captionFont = `italic 400 ${Math.max(14, input.typography.fontSize - 1)}px "Iowan Old Style", "Palatino Linotype", serif`
       const captionLineHeight = Math.max(extractFontSize(captionFont) * 1.45, 18)
-      const captionLines = wrapText(captionText, Math.max(40, input.width - 24), captionFont)
+      const captionLines = wrapText(
+        captionText,
+        Math.max(40, input.width - input.styleProfile.code.blockPaddingX * 2),
+        captionFont
+      )
       captionLines.forEach((line, lineIndex) => {
         ops.push({
           kind: "text",
@@ -947,22 +959,22 @@ export class DisplayListBuilder {
           blockId: input.block.id,
           locator: input.locator,
           rect: {
-            x: input.x + 12,
+            x: input.x + input.styleProfile.code.blockPaddingX,
             y: currentTop + lineIndex * captionLineHeight,
             width: approximateTextWidth(line, captionFont),
             height: captionLineHeight
           },
           text: line,
-          x: input.x + 12,
+          x: input.x + input.styleProfile.code.blockPaddingX,
           y: currentTop + lineIndex * captionLineHeight,
           width: approximateTextWidth(line, captionFont),
           font: captionFont,
           color: input.theme.color,
           backgroundColor: undefined,
           highlightColor: input.highlighted
-            ? "rgba(250, 204, 21, 0.28)"
+            ? input.styleProfile.highlight.search
             : input.active
-              ? "rgba(245, 158, 11, 0.18)"
+              ? input.styleProfile.highlight.active
               : undefined,
           underline: undefined,
           href: undefined
@@ -984,13 +996,14 @@ export class DisplayListBuilder {
     theme: Theme;
     highlighted: boolean;
     active: boolean;
+    styleProfile: ReadingStyleProfile;
   }): DrawOp[] {
     const ops: DrawOp[] = []
     const captionFont = `italic 400 ${Math.max(14, input.typography.fontSize - 1)}px "Iowan Old Style", "Palatino Linotype", serif`
     const cellFont = `400 ${input.typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
     const headerFont = `700 ${input.typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
     const lineHeight = Math.max(input.typography.fontSize * 1.45, 18)
-    const padding = 8
+    const padding = input.styleProfile.table.cellPadding
     let currentTop = input.top
 
     if (input.block.caption?.length) {
@@ -1017,15 +1030,15 @@ export class DisplayListBuilder {
           color: input.theme.color,
           backgroundColor: undefined,
           highlightColor: input.highlighted
-            ? "rgba(250, 204, 21, 0.28)"
+            ? input.styleProfile.highlight.search
             : input.active
-              ? "rgba(245, 158, 11, 0.18)"
+              ? input.styleProfile.highlight.active
               : undefined,
           underline: undefined,
           href: undefined
         })
       })
-      currentTop += captionLines.length * lineHeight + 8
+      currentTop += captionLines.length * lineHeight + input.styleProfile.text.marginBottom
     }
 
     const columnCount = Math.max(
@@ -1067,8 +1080,8 @@ export class DisplayListBuilder {
             height: rowHeight
           },
           color: cell.header ? "rgba(148, 163, 184, 0.10)" : "rgba(255, 255, 255, 0.001)",
-          strokeColor: "rgba(148, 163, 184, 0.7)",
-          strokeWidth: 1
+          strokeColor: input.styleProfile.table.borderColor,
+          strokeWidth: input.styleProfile.table.borderWidth
         })
 
         lines.forEach((line, lineIndex) => {
@@ -1092,9 +1105,9 @@ export class DisplayListBuilder {
           color: input.theme.color,
           backgroundColor: undefined,
           highlightColor: input.highlighted
-              ? "rgba(250, 204, 21, 0.28)"
+              ? input.styleProfile.highlight.search
               : input.active
-                ? "rgba(245, 158, 11, 0.18)"
+                ? input.styleProfile.highlight.active
                 : undefined,
             underline: undefined,
             href: undefined
@@ -1145,12 +1158,15 @@ export class DisplayListBuilder {
 
   private resolveNativeBlockRenderStyle(
     block: BlockNode,
-    theme: Theme
+    theme: Theme,
+    styleProfile: ReadingStyleProfile
   ): NativeBlockRenderStyle {
     return {
       color: block.style?.color ?? theme.color,
       ...(block.style?.backgroundColor
         ? { backgroundColor: block.style.backgroundColor }
+        : block.kind === "aside" || block.kind === "nav"
+          ? { backgroundColor: styleProfile.aside.background }
         : {}),
       textAlign: block.style?.textAlign ?? "start",
       paddingTop: block.style?.paddingTop ?? 0,

@@ -134,6 +134,13 @@ export function parseOpfDocument(
   });
 
   const manifestById = new Map(manifest.map((item) => [item.id, item]));
+  const coverImageHref =
+    manifest.find((item) => item.properties?.split(/\s+/).includes("cover-image"))?.href ??
+    resolveLegacyCoverImageHref(metadataNode, manifestById)
+
+  if (coverImageHref) {
+    metadata.coverImageHref = coverImageHref
+  }
 
   const spine = spineNodes.flatMap((item) => {
     const idref = typeof item["@_idref"] === "string" ? item["@_idref"] : undefined;
@@ -166,4 +173,34 @@ export function parseOpfDocument(
     manifest,
     spine
   };
+}
+
+function resolveLegacyCoverImageHref(
+  metadataNode: XmlNode | undefined,
+  manifestById: Map<string, ManifestItem>
+): string | undefined {
+  if (!metadataNode) {
+    return undefined
+  }
+
+  const metaEntries = asArray(metadataNode.meta)
+  for (const entry of metaEntries) {
+    if (!entry || typeof entry !== "object") {
+      continue
+    }
+
+    const metaEntry = entry as XmlNode
+
+    const name =
+      typeof metaEntry["@_name"] === "string" ? metaEntry["@_name"].trim().toLowerCase() : ""
+    const content =
+      typeof metaEntry["@_content"] === "string" ? metaEntry["@_content"].trim() : ""
+    if (name !== "cover" || !content) {
+      continue
+    }
+
+    return manifestById.get(content)?.href
+  }
+
+  return undefined
 }

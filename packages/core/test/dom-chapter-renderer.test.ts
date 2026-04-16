@@ -63,8 +63,11 @@ describe("DomChapterRenderer", () => {
     expect(css).toContain("font-size: 18px;");
     expect(css).toContain("line-height: 1.6;");
     expect(css).toContain("font-family: \"Iowan Old Style\", serif;");
+    expect(css).toContain("--reader-side-padding: 8px;");
+    expect(css).toContain("--reader-link-color: #1b4b72;");
     expect(css).toContain(".epub-dom-section table {");
     expect(css).toContain(".epub-dom-section a {");
+    expect(css).toContain("padding-left: var(--reader-quote-accent-gap);");
   });
 
   it("rewrites resolved attribute values while serializing dom chapters", () => {
@@ -103,4 +106,68 @@ describe("DomChapterRenderer", () => {
     expect(markup).toContain('src="blob:OPS/images/cover.jpg"');
     expect(markup).toContain('alt="Cover"');
   });
+
+  it("adds cover styling hooks for cover sections", () => {
+    const renderer = new DomChapterRenderer()
+
+    const markup = renderer.createMarkup({
+      sectionId: "section-cover",
+      sectionHref: "OPS/cover.xhtml",
+      presentationRole: "cover",
+      presentationImageSrc: "blob:cover-image",
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography: {
+        fontSize: 18,
+        lineHeight: 1.6,
+        paragraphSpacing: 12
+      },
+      fontFamily: '"Iowan Old Style", serif',
+      nodes: [
+        {
+          kind: "element",
+          tagName: "img",
+          attributes: {
+            src: "OPS/images/cover.jpg",
+            alt: "Cover"
+          },
+          children: []
+        }
+      ]
+    })
+
+    expect(markup).toContain("epub-dom-section epub-dom-section-cover epub-dom-cover")
+    expect(markup).toContain('class="epub-dom-presentation-image"')
+    expect(markup).toContain('src="blob:cover-image"')
+    expect(markup).toContain(".epub-dom-section-cover img {")
+    expect(markup).toContain("width: 100%;")
+  })
+
+  it("renders standalone image pages as centered presentation images", () => {
+    const renderer = new DomChapterRenderer()
+
+    const markup = renderer.createMarkup({
+      sectionId: "section-image-page",
+      sectionHref: "OPS/title.xhtml",
+      presentationRole: "image-page",
+      presentationImageSrc: "blob:title-image",
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography: {
+        fontSize: 18,
+        lineHeight: 1.6,
+        paragraphSpacing: 12
+      },
+      fontFamily: '"Iowan Old Style", serif',
+      nodes: []
+    })
+
+    expect(markup).toContain("epub-dom-section-image-page epub-dom-image-page")
+    expect(markup).toContain('src="blob:title-image"')
+    expect(markup).toContain(".epub-dom-section-image-page img {")
+  })
 });

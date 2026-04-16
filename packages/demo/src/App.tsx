@@ -168,11 +168,15 @@ export function App(): JSX.Element {
       ...current,
       metaText: "Opening EPUB..."
     }));
-    await reader.open(file);
     await reader.setTheme(THEMES[themeKey]);
     await reader.setTypography({ fontSize });
     await reader.setMode(mode);
+    await reader.open(file);
     await reader.render();
+    await reader.goToLocation({
+      spineIndex: 0,
+      progressInSection: 0
+    });
   }
 
   async function goToPage(page: number): Promise<void> {
@@ -478,6 +482,14 @@ export function App(): JSX.Element {
                     <strong>
                       {snapshot.diagnostics?.reasons.length
                         ? snapshot.diagnostics.reasons.join(", ")
+                        : "none"}
+                    </strong>
+                    <span>Alignment</span>
+                    <strong>
+                      {snapshot.diagnostics
+                        ? `${snapshot.diagnostics.alignmentTarget ?? "none"} / ${
+                            snapshot.diagnostics.styleProfile ?? "none"
+                          }`
                         : "none"}
                     </strong>
                   </div>

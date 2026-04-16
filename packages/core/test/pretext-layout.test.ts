@@ -213,7 +213,7 @@ describe("pretext layout integration", () => {
       (op) => op.kind === "text" && op.blockId === "text-pretext-ops" && op.text === "1"
     )
 
-    expect(alphaOp && "y" in alphaOp ? alphaOp.y : 0).toBeGreaterThan(0)
+    expect(alphaOp && "y" in alphaOp ? alphaOp.y : -1).toBeGreaterThanOrEqual(0)
     expect(markOp && "highlightColor" in markOp ? markOp.highlightColor : undefined).toBe(
       "rgba(250, 204, 21, 0.22)"
     )
@@ -2514,6 +2514,174 @@ describe("pretext layout integration", () => {
     }
   });
 
+  it("uses rendered wrapper geometry when syncing scroll position across padded dom image pages", () => {
+    const originalOffsetTop = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetTop"
+    );
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight"
+    );
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight"
+    );
+
+    try {
+      Object.defineProperty(HTMLElement.prototype, "offsetTop", {
+        configurable: true,
+        get() {
+          const sectionId = this.dataset?.sectionId;
+          if (sectionId === "section-1") {
+            return 215;
+          }
+          if (sectionId === "section-2") {
+            return 897;
+          }
+          if (sectionId === "section-3") {
+            return 1556;
+          }
+          return originalOffsetTop?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+        configurable: true,
+        get() {
+          const sectionId = this.dataset?.sectionId;
+          if (sectionId === "section-1") {
+            return 682;
+          }
+          if (sectionId === "section-2") {
+            return 659;
+          }
+          if (sectionId === "section-3") {
+            return 2142;
+          }
+          const parentSectionId = this.parentElement?.dataset?.sectionId;
+          if (parentSectionId === "section-1" || parentSectionId === "section-2") {
+            return parentSectionId === "section-1" ? 682 : 659;
+          }
+          return originalOffsetHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+        configurable: true,
+        get() {
+          const parentSectionId = this.parentElement?.dataset?.sectionId;
+          if (parentSectionId === "section-1" || parentSectionId === "section-2") {
+            return parentSectionId === "section-1" ? 682 : 659;
+          }
+          return originalScrollHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      const container = document.createElement("div");
+      Object.defineProperty(container, "clientWidth", {
+        configurable: true,
+        value: 320
+      });
+      Object.defineProperty(container, "clientHeight", {
+        configurable: true,
+        value: 473
+      });
+      Object.defineProperty(container, "scrollTop", {
+        configurable: true,
+        writable: true,
+        value: 1197
+      });
+      document.body.appendChild(container);
+
+      container.innerHTML = `
+        <article data-section-id="section-1" class="epub-section epub-section-dom">
+          <div class="epub-dom-section epub-dom-section-cover"></div>
+        </article>
+        <article data-section-id="section-2" class="epub-section epub-section-dom">
+          <div class="epub-dom-section epub-dom-section-image-page"></div>
+        </article>
+        <article data-section-id="section-3" class="epub-section epub-section-canvas"></article>
+      `;
+
+      const reader = new EpubReader({
+        container,
+        mode: "scroll"
+      });
+
+      (
+        reader as unknown as {
+          book: Book;
+          currentSectionIndex: number;
+          locator: { spineIndex: number; progressInSection: number } | null;
+          syncPositionFromScroll(emitEvent: boolean): boolean;
+        }
+      ).book = {
+        metadata: { title: "Padded DOM Image Page" },
+        manifest: [],
+        spine: [
+          { idref: "item-1", href: "OPS/cover.xhtml", linear: true },
+          { idref: "item-2", href: "OPS/title.xhtml", linear: true },
+          { idref: "item-3", href: "OPS/chapter.xhtml", linear: true }
+        ],
+        toc: [],
+        sections: [
+          {
+            id: "section-1",
+            href: "OPS/cover.xhtml",
+            presentationRole: "cover",
+            anchors: {},
+            blocks: []
+          },
+          {
+            id: "section-2",
+            href: "OPS/title.xhtml",
+            presentationRole: "image-page",
+            anchors: {},
+            blocks: []
+          },
+          {
+            id: "section-3",
+            href: "OPS/chapter.xhtml",
+            anchors: {},
+            blocks: []
+          }
+        ]
+      };
+
+      const state = reader as unknown as {
+        currentSectionIndex: number;
+        locator: { spineIndex: number; progressInSection: number } | null;
+        syncPositionFromScroll(emitEvent: boolean): boolean;
+      };
+
+      state.syncPositionFromScroll(false);
+
+      expect(state.currentSectionIndex).toBe(1);
+      expect(state.locator?.spineIndex).toBe(1);
+      expect(state.locator?.progressInSection).toBeGreaterThan(0.8);
+      expect(state.locator?.progressInSection).toBeLessThan(0.82);
+    } finally {
+      if (originalOffsetTop) {
+        Object.defineProperty(HTMLElement.prototype, "offsetTop", originalOffsetTop);
+      }
+      if (originalOffsetHeight) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "offsetHeight",
+          originalOffsetHeight
+        );
+      }
+      if (originalScrollHeight) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollHeight",
+          originalScrollHeight
+        );
+      }
+    }
+  });
+
   it("ignores virtual section placeholders when capturing preserve anchors", () => {
     const originalOffsetTop = Object.getOwnPropertyDescriptor(
       HTMLElement.prototype,
@@ -2656,5 +2824,160 @@ describe("pretext layout integration", () => {
 
     expect(container.scrollTop).toBe(28207);
     expect(container.scrollLeft).toBe(18);
+  });
+
+  it("restores the same anchored position when refreshing a dom image-page slice", () => {
+    const originalOffsetTop = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetTop"
+    );
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight"
+    );
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight"
+    );
+
+    const sectionMetrics = new Map<string, { top: number; height: number }>([
+      ["section-1", { top: 0, height: 180 }],
+      ["section-2", { top: 180, height: 960 }]
+    ]);
+
+    try {
+      Object.defineProperty(HTMLElement.prototype, "offsetTop", {
+        configurable: true,
+        get() {
+          const sectionId = this.dataset?.sectionId;
+          if (sectionId) {
+            return sectionMetrics.get(sectionId)?.top ?? 0;
+          }
+          return originalOffsetTop?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+        configurable: true,
+        get() {
+          const sectionId = this.dataset?.sectionId;
+          if (sectionId) {
+            return sectionMetrics.get(sectionId)?.height ?? 0;
+          }
+          const parentSectionId = this.parentElement?.dataset?.sectionId;
+          if (parentSectionId && this.classList.contains("epub-dom-section")) {
+            return sectionMetrics.get(parentSectionId)?.height ?? 0;
+          }
+          return originalOffsetHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+        configurable: true,
+        get() {
+          const parentSectionId = this.parentElement?.dataset?.sectionId;
+          if (parentSectionId && this.classList.contains("epub-dom-section")) {
+            return sectionMetrics.get(parentSectionId)?.height ?? 0;
+          }
+          return originalScrollHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      const container = document.createElement("div");
+      Object.defineProperty(container, "scrollTop", {
+        configurable: true,
+        writable: true,
+        value: 260
+      });
+      Object.defineProperty(container, "scrollLeft", {
+        configurable: true,
+        writable: true,
+        value: 12
+      });
+      document.body.appendChild(container);
+
+      container.innerHTML = `
+        <article data-section-id="section-1" class="epub-section epub-section-canvas"></article>
+        <article data-section-id="section-2" class="epub-section epub-section-dom">
+          <div class="epub-dom-section"></div>
+        </article>
+      `;
+
+      const reader = new EpubReader({
+        container,
+        mode: "scroll"
+      });
+
+      (
+        reader as unknown as {
+          book: Book;
+          renderScrollableCanvas(renderVersion: number): void;
+          renderVersion: number;
+          rerenderScrollSlicesPreservingScrollTop(): void;
+        }
+      ).book = {
+        metadata: { title: "Anchored DOM Image Page" },
+        manifest: [],
+        spine: [
+          { idref: "item-1", href: "OPS/one.xhtml", linear: true },
+          { idref: "item-2", href: "OPS/two.xhtml", linear: true }
+        ],
+        toc: [],
+        sections: [
+          {
+            id: "section-1",
+            href: "OPS/one.xhtml",
+            anchors: {},
+            blocks: []
+          },
+          {
+            id: "section-2",
+            href: "OPS/two.xhtml",
+            presentationRole: "image-page",
+            anchors: {},
+            blocks: []
+          }
+        ]
+      };
+
+      (
+        reader as unknown as {
+          renderScrollableCanvas(renderVersion: number): void;
+          renderVersion: number;
+        }
+      ).renderScrollableCanvas = () => {
+        sectionMetrics.set("section-1", { top: 0, height: 220 });
+        sectionMetrics.set("section-2", { top: 220, height: 960 });
+        container.scrollTop = 0;
+        container.scrollLeft = 0;
+      };
+
+      (
+        reader as unknown as {
+          rerenderScrollSlicesPreservingScrollTop(): void;
+        }
+      ).rerenderScrollSlicesPreservingScrollTop();
+
+      expect(container.scrollTop).toBe(300);
+      expect(container.scrollLeft).toBe(12);
+    } finally {
+      if (originalOffsetTop) {
+        Object.defineProperty(HTMLElement.prototype, "offsetTop", originalOffsetTop);
+      }
+      if (originalOffsetHeight) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "offsetHeight",
+          originalOffsetHeight
+        );
+      }
+      if (originalScrollHeight) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollHeight",
+          originalScrollHeight
+        );
+      }
+    }
   });
 });

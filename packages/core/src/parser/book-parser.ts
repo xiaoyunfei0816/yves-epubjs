@@ -8,6 +8,7 @@ import { parseNavDocument } from "./nav-parser";
 import { parseNcxDocument } from "./ncx-parser";
 import { parseOpfDocument } from "./opf-parser";
 import { parseSpineContentDocument } from "./spine-content-parser";
+import type { BlockNode, InlineNode } from "../model/types";
 
 export type BookParserInput = {
   sourceName?: string;
@@ -74,6 +75,28 @@ export class BookParser {
         };
       });
 
+    const coverSectionIndex = resolveCoverSectionIndex(sections, opf.metadata.coverImageHref)
+    if (typeof coverSectionIndex === "number") {
+      const section = sections[coverSectionIndex]
+      if (section) {
+        sections[coverSectionIndex] = {
+          ...section,
+          presentationRole: "cover"
+        }
+      }
+    }
+
+    sections.forEach((section, index) => {
+      if (section.presentationRole || !isSingleImageSection(section.blocks)) {
+        return
+      }
+
+      sections[index] = {
+        ...section,
+        presentationRole: "image-page"
+      }
+    })
+
     return {
       book: {
         metadata: opf.metadata,
@@ -91,4 +114,100 @@ export class BookParser {
     const result = await this.parseDetailed(input);
     return result.book;
   }
+}
+
+function resolveCoverSectionIndex(
+  sections: Book["sections"],
+  coverImageHref: string | undefined
+): number | undefined {
+  if (coverImageHref) {
+    const matchedIndex = sections.findIndex((section) =>
+      sectionContainsImageHref(section.blocks, coverImageHref)
+    )
+    if (matchedIndex >= 0) {
+      return matchedIndex
+    }
+  }
+
+  const fallbackIndex = sections.findIndex((section) => isSingleImageSection(section.blocks))
+  return fallbackIndex >= 0 ? fallbackIndex : undefined
+}
+
+function isSingleImageSection(blocks: BlockNode[]): boolean {
+  if (blocks.length !== 1) {
+    return false
+  }
+
+  const [block] = blocks
+  if (!block) {
+    return false
+  }
+
+  if (block.kind === "image") {
+    return true
+  }
+
+  return block.kind === "text" && getSingleImageInline(block.inlines) !== undefined
+}
+
+function sectionContainsImageHref(blocks: BlockNode[], href: string): boolean {
+  return blocks.some((block) => blockContainsImageHref(block, href))
+}
+
+function blockContainsImageHref(block: BlockNode, href: string): boolean {
+  switch (block.kind) {
+    case "image":
+      return block.src === href
+    case "text":
+    case "heading":
+      return block.inlines.some((inline) => inlineContainsImageHref(inline, href))
+    case "quote":
+    case "figure":
+    case "aside":
+    case "nav":
+      return block.blocks.some((child) => blockContainsImageHref(child, href))
+    case "list":
+      return block.items.some((item) => item.blocks.some((child) => blockContainsImageHref(child, href)))
+    case "table":
+      return block.rows.some((row) =>
+        row.cells.some((cell) => cell.blocks.some((child) => blockContainsImageHref(child, href)))
+      )
+    case "definition-list":
+      return block.items.some((item) =>
+        item.term.some((child) => blockContainsImageHref(child, href)) ||
+        item.descriptions.some((description) =>
+          description.some((child) => blockContainsImageHref(child, href))
+        )
+      )
+    default:
+      return false
+  }
+}
+
+function inlineContainsImageHref(inline: InlineNode, href: string): boolean {
+  switch (inline.kind) {
+    case "image":
+      return inline.src === href
+    case "span":
+    case "emphasis":
+    case "strong":
+    case "sub":
+    case "sup":
+    case "small":
+    case "mark":
+    case "del":
+    case "ins":
+    case "link":
+      return inline.children.some((child) => inlineContainsImageHref(child, href))
+    default:
+      return false
+  }
+}
+
+function getSingleImageInline(inlines: InlineNode[]): InlineNode | undefined {
+  if (inlines.length !== 1) {
+    return undefined
+  }
+
+  return inlines[0]?.kind === "image" ? inlines[0] : undefined
 }

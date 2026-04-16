@@ -58,6 +58,20 @@ describe("image layout strategy", () => {
     expect(layout.width).toBeLessThan(480 * 0.9);
   });
 
+  it("allows cover images to fill the available width", () => {
+    const layout = resolveImageLayout({
+      availableWidth: 480,
+      viewportHeight: 720,
+      intrinsicWidth: 600,
+      intrinsicHeight: 900,
+      fillWidth: true
+    })
+
+    expect(layout.width).toBe(480)
+    expect(layout.xOffset).toBe(0)
+    expect(layout.height).toBe(720)
+  })
+
   it("uses the same geometry for block height estimation and canvas image rects", () => {
     const section: SectionDocument = {
       id: "section-image",
@@ -107,7 +121,7 @@ describe("image layout strategy", () => {
       width: 120,
       height: 90
     });
-    expect(displayList.height).toBe(106);
+    expect(displayList.height).toBe(130);
   });
 
   it("keeps code block indentation and wraps long lines consistently", () => {
@@ -214,4 +228,64 @@ describe("image layout strategy", () => {
     expect(inlineImageOp?.rect.width).toBe(20);
     expect(inlineImageOp?.rect.height).toBe(20);
   });
+
+  it("reserves full block height for centered legacy image paragraphs", () => {
+    const section: SectionDocument = {
+      id: "section-legacy-image-paragraph",
+      href: "OPS/text00000.xhtml",
+      presentationRole: "cover",
+      anchors: {},
+      blocks: [
+        {
+          id: "legacy-image-paragraph",
+          kind: "text",
+          style: {
+            textAlign: "center"
+          },
+          inlines: [
+            {
+              kind: "image",
+              src: "OPS/Image00122.jpg",
+              alt: "STAR",
+              width: 644,
+              height: 219
+            }
+          ]
+        }
+      ]
+    }
+
+    const engine = new LayoutEngine()
+    const layout = engine.layout(
+      {
+        section,
+        spineIndex: 0,
+        viewportWidth: 720,
+        viewportHeight: 800,
+        typography,
+        fontFamily: "serif"
+      },
+      "scroll"
+    )
+    const displayList = new DisplayListBuilder().buildSection({
+      section,
+      width: 720,
+      viewportHeight: 800,
+      blocks: layout.blocks,
+      theme,
+      typography,
+      resolveImageLoaded: () => true,
+      activeBlockId: undefined
+    })
+
+    const imageOp = displayList.ops.find(
+      (op): op is ImageDrawOp =>
+        op.kind === "image" && op.blockId === "legacy-image-paragraph"
+    )
+    expect(layout.blocks[0]?.type).toBe("pretext")
+    expect(imageOp?.rect.width ?? 0).toBeGreaterThanOrEqual(704)
+    expect(layout.blocks[0]?.estimatedHeight ?? 0).toBeGreaterThanOrEqual(260)
+    expect(imageOp).toBeTruthy()
+    expect(imageOp?.rect.x ?? 99).toBeLessThanOrEqual(8)
+  })
 });

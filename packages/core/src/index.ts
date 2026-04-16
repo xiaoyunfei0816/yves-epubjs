@@ -31,3 +31,4 @@ export * from "./renderer/display-list-builder";
 export * from "./renderer/canvas-renderer";
 export * from "./renderer/dom-chapter-renderer";
 export * from "./renderer/dom-chapter-style";
+export * from "./renderer/reading-style-profile";

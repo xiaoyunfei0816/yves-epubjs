@@ -84,6 +84,15 @@ export class CanvasRenderer {
     }>,
     externalCanvas?: HTMLCanvasElement
   ): CanvasRenderResult {
+    Array.from(container.children).forEach((child) => {
+      if (
+        child instanceof HTMLElement &&
+        !child.matches("article[data-section-id]")
+      ) {
+        container.removeChild(child);
+      }
+    });
+
     const existingWrappers = new Map<string, HTMLElement>();
     container
       .querySelectorAll<HTMLElement>("article[data-section-id]")

@@ -233,7 +233,7 @@ describe("structured native block layout", () => {
 
     const cellRects = displayList.ops.filter(
       (op): op is RectDrawOp =>
-        op.kind === "rect" && op.blockId === "table-1" && op.strokeColor === "rgba(148, 163, 184, 0.7)"
+        op.kind === "rect" && op.blockId === "table-1" && op.strokeColor === "rgba(148, 163, 184, 0.35)"
     )
 
     expect(layout.blocks[0]?.estimatedHeight).toBeGreaterThan(100)

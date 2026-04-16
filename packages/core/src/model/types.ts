@@ -13,6 +13,7 @@ export type BookMetadata = {
   identifier?: string;
   creator?: string;
   publisher?: string;
+  coverImageHref?: string;
 };
 
 export type ManifestItem = {
@@ -257,6 +258,7 @@ export type SectionDocument = {
   href: string;
   title?: string;
   lang?: string;
+  presentationRole?: "cover" | "image-page";
   blocks: BlockNode[];
   anchors: Record<string, string>;
 };
@@ -351,6 +353,8 @@ export type RenderDiagnostics = {
   reasons: string[];
   sectionId?: string;
   sectionHref?: string;
+  alignmentTarget?: "dom-baseline";
+  styleProfile?: "shared";
 };
 
 export type VisibleSectionDiagnostics = RenderDiagnostics & {

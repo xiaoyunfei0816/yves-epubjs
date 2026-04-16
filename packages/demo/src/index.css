@@ -576,6 +576,7 @@ select {
   border: 1px solid rgba(32, 52, 76, 0.08);
   background: #fffef9;
   overflow: auto;
+  overflow-anchor: none;
 }
 
 .reader-root[data-mode="paginated"] {
@@ -750,9 +751,9 @@ select {
 }
 
 .reader-root blockquote {
-  margin: 1rem 0;
-  padding-left: 1rem;
-  border-left: 4px solid rgba(37, 99, 235, 0.2);
+  margin: var(--reader-paragraph-spacing, 12px) 0;
+  padding-left: var(--reader-quote-accent-gap, 16px);
+  border-left: var(--reader-quote-accent-width, 4px) solid var(--reader-quote-accent-color, rgba(37, 99, 235, 0.2));
 }
 
 .reader-root pre {
@@ -771,7 +772,7 @@ select {
 .reader-root .code-fragment {
   border-radius: 0.4rem;
   background: var(--reader-inline-code-bg, rgba(15, 23, 42, 0.06));
-  padding: 0.08rem 0.28rem;
+  padding: 1px 5px;
 }
 
 .reader-root pre code {
@@ -786,8 +787,8 @@ select {
 
 .reader-root th,
 .reader-root td {
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  padding: 0.65rem;
+  border: 1px solid var(--reader-table-border-color, rgba(148, 163, 184, 0.35));
+  padding: var(--reader-table-cell-padding, 10px);
   text-align: left;
 }
 

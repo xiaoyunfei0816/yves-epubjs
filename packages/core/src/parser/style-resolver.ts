@@ -8,6 +8,7 @@ import { collectMatchedCssRules } from "./style-rule-matcher"
 type ResolvedStyle = Partial<BlockStyle>
 
 const ALLOWED_PROPERTIES = new Set([
+  "font-family",
   "font-size",
   "font-weight",
   "font-style",
@@ -35,6 +36,8 @@ export function resolveElementStyle(input: {
 }): ResolvedStyle {
   const resolved: ResolvedStyle = { ...(input.defaultStyle ?? {}) }
   const stylesheets = input.stylesheets ?? []
+
+  applyDeclarationEntries(resolved, collectLegacyPresentationalDeclarations(input.element))
 
   for (const matchedRule of collectMatchedCssRules(input.element, stylesheets)) {
     applyDeclarations(resolved, getCssRuleDeclarations(matchedRule.rule))
@@ -115,6 +118,11 @@ function applySingleDeclaration(
   value: string
 ): void {
   switch (property) {
+    case "font-family":
+      if (value.trim()) {
+        target.fontFamily = value.trim()
+      }
+      break
     case "font-size": {
       const fontSize = parseNumericValue(value)
       if (fontSize !== undefined) {
@@ -245,4 +253,58 @@ function parseNumericValue(value: string): number | undefined {
 
   const parsed = Number(matched[1])
   return Number.isNaN(parsed) ? undefined : parsed
+}
+
+function collectLegacyPresentationalDeclarations(
+  element: HtmlDomElement
+): Array<{ property: string; value: string }> {
+  const declarations: Array<{ property: string; value: string }> = []
+  const align = getHtmlElementAttribute(element, "align")?.trim().toLowerCase()
+  if (align) {
+    declarations.push({ property: "text-align", value: align })
+  }
+
+  if (element.name === "font") {
+    const size = getHtmlElementAttribute(element, "size")?.trim()
+    const color = getHtmlElementAttribute(element, "color")?.trim()
+    const face = getHtmlElementAttribute(element, "face")?.trim()
+
+    if (size) {
+      const fontSize = normalizeLegacyFontSize(size)
+      if (fontSize !== undefined) {
+        declarations.push({ property: "font-size", value: `${fontSize}px` })
+      }
+    }
+    if (color) {
+      declarations.push({ property: "color", value: color })
+    }
+    if (face) {
+      declarations.push({ property: "font-family", value: face })
+    }
+  }
+
+  return declarations
+}
+
+function normalizeLegacyFontSize(value: string): number | undefined {
+  const normalized = value.trim()
+  if (!normalized) {
+    return undefined
+  }
+
+  const namedSizes: Record<string, number> = {
+    "1": 10,
+    "2": 13,
+    "3": 16,
+    "4": 18,
+    "5": 24,
+    "6": 32,
+    "7": 48
+  }
+
+  if (normalized in namedSizes) {
+    return namedSizes[normalized]
+  }
+
+  return parseNumericValue(normalized)
 }

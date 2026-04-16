@@ -3,6 +3,7 @@ type ImageLayoutInput = {
   viewportHeight: number;
   intrinsicWidth?: number;
   intrinsicHeight?: number;
+  fillWidth?: boolean;
 };
 
 type ImageLayout = {
@@ -37,25 +38,30 @@ export function resolveImageLayout(input: ImageLayoutInput): ImageLayout {
       ? intrinsicHeight / intrinsicWidth
       : DEFAULT_IMAGE_HEIGHT_RATIO;
 
-  let widthRatio = NORMAL_IMAGE_WIDTH_RATIO;
-  if (aspectRatio && aspectRatio >= 1.4) {
-    widthRatio = WIDE_IMAGE_WIDTH_RATIO;
-  } else if (aspectRatio && aspectRatio <= 0.85) {
-    widthRatio = PORTRAIT_IMAGE_WIDTH_RATIO;
-  }
+  let width: number
+  if (input.fillWidth) {
+    width = availableWidth
+  } else {
+    let widthRatio = NORMAL_IMAGE_WIDTH_RATIO;
+    if (aspectRatio && aspectRatio >= 1.4) {
+      widthRatio = WIDE_IMAGE_WIDTH_RATIO;
+    } else if (aspectRatio && aspectRatio <= 0.85) {
+      widthRatio = PORTRAIT_IMAGE_WIDTH_RATIO;
+    }
 
-  const widthCapByLayout = Math.min(availableWidth, availableWidth * widthRatio);
-  const widthCapByIntrinsic = intrinsicWidth ?? Number.POSITIVE_INFINITY;
-  const rawWidth = Math.min(widthCapByLayout, widthCapByIntrinsic);
-  const width = intrinsicWidth
-    ? Math.max(1, rawWidth)
-    : Math.min(availableWidth, Math.max(MIN_IMAGE_WIDTH_WHEN_UNKNOWN, rawWidth));
+    const widthCapByLayout = Math.min(availableWidth, availableWidth * widthRatio);
+    const widthCapByIntrinsic = intrinsicWidth ?? Number.POSITIVE_INFINITY;
+    const rawWidth = Math.min(widthCapByLayout, widthCapByIntrinsic);
+    width = intrinsicWidth
+      ? Math.max(1, rawWidth)
+      : Math.min(availableWidth, Math.max(MIN_IMAGE_WIDTH_WHEN_UNKNOWN, rawWidth));
+  }
   const uncappedHeight = width * heightRatio;
   const maxHeight = Math.min(MAX_IMAGE_HEIGHT_PX, viewportHeight * MAX_IMAGE_HEIGHT_RATIO);
 
   let renderedWidth = width;
   let renderedHeight = uncappedHeight;
-  if (renderedHeight > maxHeight) {
+  if (!input.fillWidth && renderedHeight > maxHeight) {
     const scale = maxHeight / renderedHeight;
     renderedWidth *= scale;
     renderedHeight = maxHeight;

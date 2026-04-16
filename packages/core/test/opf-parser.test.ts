@@ -99,6 +99,40 @@ describe("parseOpfDocument", () => {
       }
     ]);
   });
+
+  it("extracts cover image metadata from epub3 properties and epub2 meta cover ids", () => {
+    const epub3 = parseOpfDocument(
+      `<?xml version="1.0"?>
+      <package>
+        <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+          <dc:title>With Cover</dc:title>
+        </metadata>
+        <manifest>
+          <item id="cover-image" href="images/cover.jpg" media-type="image/jpeg" properties="cover-image" />
+        </manifest>
+        <spine />
+      </package>`,
+      "OPS/content.opf"
+    )
+
+    const epub2 = parseOpfDocument(
+      `<?xml version="1.0"?>
+      <package>
+        <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+          <dc:title>With Cover</dc:title>
+          <meta name="cover" content="cover-item" />
+        </metadata>
+        <manifest>
+          <item id="cover-item" href="images/legacy-cover.png" media-type="image/png" />
+        </manifest>
+        <spine />
+      </package>`,
+      "OPS/content.opf"
+    )
+
+    expect(epub3.metadata.coverImageHref).toBe("OPS/images/cover.jpg")
+    expect(epub2.metadata.coverImageHref).toBe("OPS/images/legacy-cover.png")
+  })
 });
 
 describe("BookParser", () => {
@@ -211,6 +245,104 @@ describe("BookParser", () => {
       ]
     });
   });
+
+  it("marks the cover section when the section contains the declared cover image", async () => {
+    const zipBytes = zipSync({
+      mimetype: Buffer.from("application/epub+zip"),
+      "META-INF/container.xml": Buffer.from(
+        `<?xml version="1.0"?>
+        <container>
+          <rootfiles>
+            <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml" />
+          </rootfiles>
+        </container>`
+      ),
+      "OPS/content.opf": Buffer.from(
+        `<?xml version="1.0"?>
+        <package>
+          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:title>Fixture Book</dc:title>
+          </metadata>
+          <manifest>
+            <item id="cover-page" href="cover.xhtml" media-type="application/xhtml+xml" />
+            <item id="cover-image" href="images/cover.jpg" media-type="image/jpeg" properties="cover-image" />
+          </manifest>
+          <spine>
+            <itemref idref="cover-page" />
+          </spine>
+        </package>`
+      ),
+      "OPS/cover.xhtml": Buffer.from(
+        `<?xml version="1.0"?>
+        <html>
+          <body>
+            <p align="center"><img src="images/cover.jpg" width="600" height="900" /></p>
+          </body>
+        </html>`
+      ),
+      "OPS/images/cover.jpg": Buffer.from([255, 216, 255])
+    })
+
+    const book = await new BookParser().parse({ data: zipBytes })
+
+    expect(book.metadata.coverImageHref).toBe("OPS/images/cover.jpg")
+    expect(book.sections[0]?.presentationRole).toBe("cover")
+  })
+
+  it("marks additional single-image sections as image pages", async () => {
+    const zipBytes = zipSync({
+      mimetype: Buffer.from("application/epub+zip"),
+      "META-INF/container.xml": Buffer.from(
+        `<?xml version="1.0"?>
+        <container>
+          <rootfiles>
+            <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml" />
+          </rootfiles>
+        </container>`
+      ),
+      "OPS/content.opf": Buffer.from(
+        `<?xml version="1.0"?>
+        <package>
+          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:title>Fixture Book</dc:title>
+            <meta name="cover" content="cover-item" />
+          </metadata>
+          <manifest>
+            <item id="cover-page" href="cover.xhtml" media-type="application/xhtml+xml" />
+            <item id="title-page" href="title.xhtml" media-type="application/xhtml+xml" />
+            <item id="chapter-1" href="chapter-1.xhtml" media-type="application/xhtml+xml" />
+            <item id="cover-item" href="images/cover.jpg" media-type="image/jpeg" />
+            <item id="title-image" href="images/title.jpg" media-type="image/jpeg" />
+          </manifest>
+          <spine>
+            <itemref idref="cover-page" />
+            <itemref idref="title-page" />
+            <itemref idref="chapter-1" />
+          </spine>
+        </package>`
+      ),
+      "OPS/cover.xhtml": Buffer.from(
+        `<?xml version="1.0"?>
+        <html><body><p><img src="images/cover.jpg" /></p></body></html>`
+      ),
+      "OPS/title.xhtml": Buffer.from(
+        `<?xml version="1.0"?>
+        <html><body><p><img src="images/title.jpg" /></p></body></html>`
+      ),
+      "OPS/chapter-1.xhtml": Buffer.from(
+        `<?xml version="1.0"?>
+        <html><body><p>Hello</p></body></html>`
+      ),
+      "OPS/images/cover.jpg": Buffer.from([255, 216, 255]),
+      "OPS/images/title.jpg": Buffer.from([255, 216, 255])
+    })
+
+    const book = await new BookParser().parse({ data: zipBytes })
+
+    expect(book.sections[0]?.presentationRole).toBe("cover")
+    expect(book.sections[1]?.presentationRole).toBe("image-page")
+    expect(book.sections[2]?.presentationRole).toBeUndefined()
+  })
 
   it("falls back to NCX when NAV is missing", async () => {
     const zipBytes = zipSync({

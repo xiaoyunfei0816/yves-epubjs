@@ -113,4 +113,41 @@ describe("style resolver", () => {
       marginBottom: 10
     })
   })
+
+  it("maps legacy presentational attributes into supported block and text styles", () => {
+    const document = parseHtmlDocument(`
+      <html>
+        <body>
+          <p align="center"><font size="2" color="#663300" face="KaiTi">Hello</font></p>
+        </body>
+      </html>
+    `)
+    const paragraph = selectFirstHtmlElement("p", document)
+    const font = selectFirstHtmlElement("font", document)
+
+    expect(paragraph).toBeTruthy()
+    expect(font).toBeTruthy()
+
+    expect(
+      paragraph
+        ? resolveElementStyle({
+            element: paragraph
+          })
+        : {}
+    ).toEqual({
+      textAlign: "center"
+    })
+
+    expect(
+      font
+        ? resolveElementTextStyle({
+            element: font
+          })
+        : {}
+    ).toEqual({
+      fontSize: 13,
+      color: "#663300",
+      fontFamily: "KaiTi"
+    })
+  })
 })

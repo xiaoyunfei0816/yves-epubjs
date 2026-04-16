@@ -176,6 +176,53 @@ describe("parseXhtmlDocument", () => {
     });
   });
 
+  it("preserves legacy paragraph alignment and font tag styling for old epub markup", () => {
+    const xml = `<?xml version="1.0"?>
+      <html>
+        <body>
+          <p align="center">
+            <img src="Image00122.jpg" width="644" height="219" />
+          </p>
+          <p align="center">
+            <font size="2" color="#663300"><b>图1.3　简历中描述项目的STAR模型</b></font>
+          </p>
+        </body>
+      </html>`
+
+    const section = parseXhtmlDocument(xml, "OPS/text00000.html")
+
+    expect(section.blocks[0]).toMatchObject({
+      kind: "text",
+      style: {
+        textAlign: "center"
+      },
+      inlines: [
+        {
+          kind: "image",
+          src: "OPS/Image00122.jpg",
+          width: 644,
+          height: 219
+        }
+      ]
+    })
+
+    expect(section.blocks[1]).toMatchObject({
+      kind: "text",
+      style: {
+        textAlign: "center"
+      },
+      inlines: [
+        {
+          kind: "span",
+          style: {
+            fontSize: 13,
+            color: "#663300"
+          }
+        }
+      ]
+    })
+  })
+
   it("flattens structural wrapper elements and preserves supported semantic blocks", () => {
     const xml = `<?xml version="1.0"?>
       <html>
