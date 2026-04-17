@@ -46,6 +46,52 @@ describe("DomChapterRenderer", () => {
     expect(container.querySelector("style[data-epub-dom-normalization='true']")).toBeFalsy();
   });
 
+  it("injects linked stylesheet text before normalization css and clears it", () => {
+    const container = document.createElement("div");
+    const renderer = new DomChapterRenderer();
+
+    renderer.render(container, {
+      sectionId: "section-1",
+      sectionHref: "OPS/chapter.xhtml",
+      linkedStyleSheets: [
+        {
+          href: "OPS/styles/chapter.css",
+          text: ".badge { height: 1.1em; }"
+        }
+      ],
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography: {
+        fontSize: 18,
+        lineHeight: 1.6,
+        paragraphSpacing: 12
+      },
+      fontFamily: '"Iowan Old Style", serif',
+      nodes: [
+        {
+          kind: "element",
+          tagName: "p",
+          attributes: {},
+          children: [{ kind: "text", text: "Hello" }]
+        }
+      ]
+    });
+
+    const sourceStyle = container.querySelector("style[data-epub-dom-source='OPS/styles/chapter.css']");
+    const normalizationStyle = container.querySelector("style[data-epub-dom-normalization='true']");
+
+    expect(sourceStyle?.textContent).toContain(".badge { height: 1.1em; }");
+    expect(sourceStyle?.compareDocumentPosition(normalizationStyle!)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+
+    renderer.clear(container);
+
+    expect(container.querySelector("style[data-epub-dom-source]")).toBeFalsy();
+  });
+
   it("builds normalized css for theme and typography constraints", () => {
     const css = buildDomChapterNormalizationCss({
       theme: {

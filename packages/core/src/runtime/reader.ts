@@ -1349,6 +1349,10 @@ export class EpubReader {
       sectionId: section.id,
       sectionHref: section.href,
       ...(section.presentationRole ? { presentationRole: section.presentationRole } : {}),
+      linkedStyleSheets: (input.linkedStyleSheets ?? []).map((stylesheet) => ({
+        href: stylesheet.href,
+        text: this.resolveDomStyleSheetText(stylesheet.href, stylesheet.text)
+      })),
       nodes: input.preprocessed.nodes,
       theme: this.theme,
       typography: this.typography,
@@ -1448,6 +1452,14 @@ export class EpubReader {
   }
 
   private resolveDomStyleAttributeValue(sectionHref: string, value: string): string {
+    return this.resolveDomCssUrlValues(sectionHref, value)
+  }
+
+  private resolveDomStyleSheetText(sectionHref: string, value: string): string {
+    return this.resolveDomCssUrlValues(sectionHref, value)
+  }
+
+  private resolveDomCssUrlValues(sectionHref: string, value: string): string {
     return value.replace(
       /url\(\s*(['"]?)([^)"']+)\1\s*\)/gi,
       (match, quote: string, path: string) => {
@@ -2397,11 +2409,19 @@ export class EpubReader {
     }
 
     const candidates = this.options.container.querySelectorAll<HTMLElement>(
-      ".epub-dom-section img, .epub-dom-section source, .epub-dom-section image, .epub-dom-section use, .epub-dom-section [style*='url(']"
+      ".epub-dom-section img, .epub-dom-section source, .epub-dom-section image, .epub-dom-section use, .epub-dom-section [style*='url('], style[data-epub-dom-source]"
     );
     let patched = false;
 
     for (const element of candidates) {
+      if (element.tagName.toLowerCase() === "style") {
+        if (element.textContent?.includes(path)) {
+          element.textContent = element.textContent.replaceAll(path, objectUrl)
+          patched = true
+        }
+        continue
+      }
+
       if (element.getAttribute("src") === path) {
         element.setAttribute("src", objectUrl);
         patched = true;

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { LayoutEngine } from "../src/layout/layout-engine";
 import type { Book, SectionDocument } from "../src/model/types";
+import { parseCssStyleSheet } from "../src/parser/css-ast-adapter";
 import { parseXhtmlDocument } from "../src/parser/xhtml-parser";
 import { DisplayListBuilder } from "../src/renderer/display-list-builder";
-import type { TextRunDrawOp } from "../src/renderer/draw-ops";
+import type { ImageDrawOp, TextRunDrawOp } from "../src/renderer/draw-ops";
 import { EpubReader } from "../src/runtime/reader";
 
 const typography = {
@@ -287,6 +288,70 @@ describe("pretext layout integration", () => {
     expect(textOps.length).toBeGreaterThan(0)
     expect(textOps.every((op) => op.color === "#884400")).toBe(true)
     expect(textOps[0]?.x ?? 0).toBeGreaterThan(20)
+  })
+
+  it("respects linked stylesheet inline image sizing and margins on the canvas path", () => {
+    const section = parseXhtmlDocument(
+      `<?xml version="1.0"?>
+        <html>
+          <body>
+            <p>Alpha<img class="badge" src="OPS/badge.png" width="20" height="20" alt="Badge" />Omega</p>
+          </body>
+        </html>`,
+      "OPS/inline-image.xhtml",
+      [
+        parseCssStyleSheet(`
+          .badge {
+            height: 1.1em;
+            margin-left: 0.2em;
+            margin-right: 0.3em;
+            vertical-align: middle;
+          }
+        `)
+      ]
+    )
+
+    const engine = new LayoutEngine()
+    const layout = engine.layout(
+      {
+        section,
+        spineIndex: 0,
+        viewportWidth: 280,
+        viewportHeight: 600,
+        typography,
+        fontFamily: "serif"
+      },
+      "scroll"
+    )
+
+    const displayList = new DisplayListBuilder().buildSection({
+      section,
+      width: 280,
+      viewportHeight: 600,
+      blocks: layout.blocks,
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography,
+      activeBlockId: undefined
+    })
+
+    const textOps = displayList.ops.filter(
+      (op): op is TextRunDrawOp =>
+        op.kind === "text" && op.blockId === "text-1"
+    )
+    const imageOp = displayList.ops.find(
+      (op): op is ImageDrawOp => op.kind === "image" && op.blockId === "text-1"
+    )
+    const alphaOp = textOps.find((op) => op.text.includes("Alpha"))
+    const omegaOp = textOps.find((op) => op.text.includes("Omega"))
+
+    expect(imageOp).toBeTruthy()
+    expect(imageOp!.rect.height).toBeCloseTo(17.6, 1)
+    expect(imageOp!.rect.width).toBeCloseTo(17.6, 1)
+    expect(imageOp!.rect.x).toBeGreaterThan((alphaOp?.x ?? 0) + (alphaOp?.width ?? 0) + 3)
+    expect(omegaOp?.x ?? 0).toBeGreaterThan(imageOp!.rect.x + imageOp!.rect.width + 4.5)
   })
 
   it("renders paginated content to canvas", async () => {

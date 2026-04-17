@@ -3,6 +3,7 @@ import type { Book, SectionDocument } from "../src/model/types";
 import {
   EpubReader,
   createSharedChapterRenderInput,
+  parseCssStyleSheet,
   toCanvasChapterRenderInput
 } from "../src";
 
@@ -32,6 +33,79 @@ const COMPLEX_CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
   </html>`;
 
 describe("EpubReader chapter render routing", () => {
+  it("keeps stylesheet-backed simple chapters on the canvas path", async () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 320
+    });
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 480
+    });
+    document.body.appendChild(container);
+
+    const linkedStyleSheet = {
+      href: "OPS/styles/chapter.css",
+      mediaType: "text/css",
+      text: ".badge { float: right; height: 1.1em; margin-left: 0.1em; }",
+      ast: parseCssStyleSheet(".badge { float: right; height: 1.1em; margin-left: 0.1em; }")
+    };
+    const sharedInput = createSharedChapterRenderInput({
+      href: "OPS/simple.xhtml",
+      content: `<?xml version="1.0" encoding="utf-8"?>
+        <html xmlns="http://www.w3.org/1999/xhtml">
+          <body>
+            <section>
+              <h1>Simple</h1>
+              <p>Alpha<img class="badge" src="badge.png" width="20" height="20" alt="Badge" />Omega</p>
+            </section>
+          </body>
+        </html>`,
+      linkedStyleSheets: [linkedStyleSheet]
+    });
+    const section: SectionDocument = {
+      ...toCanvasChapterRenderInput(sharedInput).section,
+      id: "section-1"
+    };
+    const book: Book = {
+      metadata: { title: "Canvas First" },
+      manifest: [],
+      spine: [{ idref: "item-1", href: section.href, linear: true }],
+      toc: [],
+      sections: [section]
+    };
+
+    const reader = new EpubReader({ container, mode: "scroll" });
+    (
+      reader as unknown as {
+        book: Book;
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[];
+      }
+    ).book = book;
+    (
+      reader as unknown as {
+        book: Book;
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[];
+      }
+    ).chapterRenderInputs = [sharedInput];
+
+    await reader.render();
+
+    expect(reader.getRenderMetrics().backend).toBe("canvas");
+    expect(reader.getRenderDiagnostics()).toEqual({
+      mode: "canvas",
+      score: 0,
+      reasons: [],
+      alignmentTarget: "dom-baseline",
+      styleProfile: "shared",
+      sectionId: "section-1",
+      sectionHref: "OPS/simple.xhtml"
+    });
+    expect(container.dataset.renderMode).toBe("canvas");
+    expect(container.querySelector("canvas.epub-canvas-section")).toBeTruthy();
+  });
+
   it("routes different chapters to canvas and dom rendering paths", async () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", {

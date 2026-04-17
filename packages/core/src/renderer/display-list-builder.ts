@@ -201,12 +201,17 @@ export class DisplayListBuilder {
 
       for (const fragment of line.fragments) {
         cursorX += fragment.gapBefore;
-        const fragmentWidth = fragment.image?.width ?? approximateTextWidth(fragment.text, fragment.font);
+        const fragmentWidth = fragment.image
+          ? fragment.image.marginLeft + fragment.image.width + fragment.image.marginRight
+          : approximateTextWidth(fragment.text, fragment.font);
         const baselineShift = fragment.baselineShift ?? 0
         if (fragment.image) {
           const imageRect = {
-            x: cursorX,
-            y: lineTop + Math.max(0, (lineHeight - fragment.image.height) * 0.5),
+            x: cursorX + fragment.image.marginLeft,
+            y:
+              lineTop +
+              Math.max(0, (lineHeight - fragment.image.height) * 0.5) +
+              baselineShift,
             width: fragment.image.width,
             height: fragment.image.height
           }
@@ -232,7 +237,7 @@ export class DisplayListBuilder {
             alt: fragment.image.alt,
             locator: input.locator
           })
-          cursorX += fragment.image.width;
+          cursorX += fragmentWidth;
           continue
         }
         const rect = {
@@ -375,11 +380,12 @@ export class DisplayListBuilder {
     switch (input.block.kind) {
       case "image": {
         const renderSrc = input.resolveImageUrl?.(input.block.src) ?? input.block.src;
+        const intrinsicSize = resolveImageIntrinsicSize(input.block);
         const imageLayout = resolveImageLayout({
           availableWidth: width,
           viewportHeight: input.viewportHeight,
-          ...(input.block.width ? { intrinsicWidth: input.block.width } : {}),
-          ...(input.block.height ? { intrinsicHeight: input.block.height } : {}),
+          ...(intrinsicSize.width ? { intrinsicWidth: intrinsicSize.width } : {}),
+          ...(intrinsicSize.height ? { intrinsicHeight: intrinsicSize.height } : {}),
           fillWidth: this.isCoverImageBlock(input.section, input.block)
         });
         const imageRect = {
@@ -875,11 +881,12 @@ export class DisplayListBuilder {
     for (const child of input.block.blocks) {
       if (child.kind === "image") {
         const renderSrc = input.resolveImageUrl?.(child.src) ?? child.src
+        const intrinsicSize = resolveImageIntrinsicSize(child)
         const imageLayout = resolveImageLayout({
           availableWidth: input.width,
           viewportHeight: input.viewportHeight,
-          ...(child.width ? { intrinsicWidth: child.width } : {}),
-          ...(child.height ? { intrinsicHeight: child.height } : {})
+          ...(intrinsicSize.width ? { intrinsicWidth: intrinsicSize.width } : {}),
+          ...(intrinsicSize.height ? { intrinsicHeight: intrinsicSize.height } : {})
         })
         const imageRect = {
           x: input.x + imageLayout.xOffset,
@@ -1183,4 +1190,24 @@ export class DisplayListBuilder {
       )
       .join("\n");
   }
+}
+
+function resolveImageIntrinsicSize(image: {
+  width?: number;
+  height?: number;
+  style?: {
+    width?: number;
+    height?: number;
+  };
+}): {
+  width?: number;
+  height?: number;
+} {
+  const width = image.style?.width ?? image.width;
+  const height = image.style?.height ?? image.height;
+
+  return {
+    ...(typeof width === "number" && width > 0 ? { width } : {}),
+    ...(typeof height === "number" && height > 0 ? { height } : {})
+  };
 }

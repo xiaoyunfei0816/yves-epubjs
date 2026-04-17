@@ -1,4 +1,5 @@
 import type { SectionDocument } from "../model/types"
+import type { CssAstStyleSheet } from "./css-ast-adapter"
 import { parseXhtmlDocument } from "./xhtml-parser"
 
 const SUPPORTED_SPINE_CONTENT_MEDIA_TYPES = new Set([
@@ -10,6 +11,7 @@ export type ParseSpineContentDocumentInput = {
   href: string
   mediaType?: string
   content: string
+  stylesheets?: CssAstStyleSheet[]
 }
 
 export function canParseSpineContentDocument(mediaType: string | undefined): boolean {
@@ -25,5 +27,9 @@ export function parseSpineContentDocument(
     )
   }
 
-  return parseXhtmlDocument(input.content, input.href)
+  return parseXhtmlDocument(
+    input.content,
+    input.href,
+    input.stylesheets ?? []
+  )
 }

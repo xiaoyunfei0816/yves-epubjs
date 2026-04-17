@@ -52,6 +52,11 @@ export type TextStyle = {
   letterSpacing?: number;
   whiteSpace?: "normal" | "pre-wrap";
   wordBreak?: "normal" | "keep-all" | "break-word";
+  width?: number;
+  height?: number;
+  verticalAlign?: "baseline" | "middle" | "sub" | "sup";
+  marginLeft?: number;
+  marginRight?: number;
 };
 
 export type NodeAttributes = {

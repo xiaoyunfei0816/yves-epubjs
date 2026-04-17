@@ -39,6 +39,8 @@ export type LayoutInlineFragment = {
     title?: string;
     width: number;
     height: number;
+    marginLeft: number;
+    marginRight: number;
   };
   href?: string;
   title?: string;
@@ -229,7 +231,9 @@ export class LayoutEngine {
                   ...(coverImage.alt ? { alt: coverImage.alt } : {}),
                   ...(coverImage.title ? { title: coverImage.title } : {}),
                   width: imageLayout.width,
-                  height: imageLayout.height
+                  height: imageLayout.height,
+                  marginLeft: 0,
+                  marginRight: 0
                 }
               },
               0
@@ -681,9 +685,10 @@ export class LayoutEngine {
           {
             const effectiveFontSize =
               typography.fontSize * (state.fontScale ?? 1);
-            const height =
-              inline.height ?? Math.max(14, effectiveFontSize * 1.05);
-            const width = inline.width ?? height;
+            const imageMetrics = resolveInlineImageMetrics(
+              inline,
+              Math.max(14, effectiveFontSize * 1.05)
+            );
             const font = this.buildFont(
               typography.fontFamily,
               effectiveFontSize,
@@ -693,7 +698,13 @@ export class LayoutEngine {
               text: "\uFFFC",
               font,
               break: "never",
-              extraWidth: Math.max(0, width - effectiveFontSize * 0.56)
+              extraWidth: Math.max(
+                0,
+                imageMetrics.marginLeft +
+                  imageMetrics.width +
+                  imageMetrics.marginRight -
+                  effectiveFontSize * 0.56
+              )
             });
             sources.push(
               this.createSourceFragment(
@@ -704,8 +715,10 @@ export class LayoutEngine {
                     src: inline.src,
                     ...(inline.alt ? { alt: inline.alt } : {}),
                     ...(inline.title ? { title: inline.title } : {}),
-                    width,
-                    height
+                    width: imageMetrics.width,
+                    height: imageMetrics.height,
+                    marginLeft: imageMetrics.marginLeft,
+                    marginRight: imageMetrics.marginRight
                   }
                 },
                 0
@@ -814,11 +827,16 @@ export class LayoutEngine {
 
     switch (block.kind) {
       case "image": {
+        const intrinsicSize = resolveImageIntrinsicSize(block);
         return resolveImageLayout({
           availableWidth: Math.max(1, contentWidth),
           viewportHeight: input.viewportHeight,
-          ...(block.width ? { intrinsicWidth: block.width } : {}),
-          ...(block.height ? { intrinsicHeight: block.height } : {}),
+          ...(intrinsicSize.width
+            ? { intrinsicWidth: intrinsicSize.width }
+            : {}),
+          ...(intrinsicSize.height
+            ? { intrinsicHeight: intrinsicSize.height }
+            : {}),
           fillWidth: this.isCoverImageBlock(input.section, block)
         }).blockHeight;
       }
@@ -937,6 +955,8 @@ export class LayoutEngine {
         title?: string;
         width: number;
         height: number;
+        marginLeft: number;
+        marginRight: number;
       };
       code?: boolean;
       mark?: boolean;
@@ -1003,6 +1023,8 @@ function sourceToFragmentOptions(source: RichInlineSource | undefined): {
     title?: string;
     width: number;
     height: number;
+    marginLeft: number;
+    marginRight: number;
   };
   code?: boolean;
   mark?: boolean;
@@ -1028,6 +1050,97 @@ function sourceToFragmentOptions(source: RichInlineSource | undefined): {
     ...(typeof source.baselineShift === "number"
       ? { baselineShift: source.baselineShift }
       : {})
+  };
+}
+
+function resolveInlineImageMetrics(
+  inline: Extract<InlineNode, { kind: "image" }>,
+  fallbackHeight: number
+): {
+  width: number;
+  height: number;
+  marginLeft: number;
+  marginRight: number;
+} {
+  const intrinsicWidth = inline.width;
+  const intrinsicHeight = inline.height;
+  const styledWidth = inline.style?.width;
+  const styledHeight = inline.style?.height;
+  const width = resolveInlineImageDimension({
+    styledPrimary: styledWidth,
+    styledSecondary: styledHeight,
+    intrinsicPrimary: intrinsicWidth,
+    intrinsicSecondary: intrinsicHeight,
+    fallback: fallbackHeight
+  });
+  const height = resolveInlineImageDimension({
+    styledPrimary: styledHeight,
+    styledSecondary: styledWidth,
+    intrinsicPrimary: intrinsicHeight,
+    intrinsicSecondary: intrinsicWidth,
+    fallback: fallbackHeight
+  });
+
+  return {
+    width,
+    height,
+    marginLeft: Math.max(0, inline.style?.marginLeft ?? 0),
+    marginRight: Math.max(0, inline.style?.marginRight ?? 0)
+  };
+}
+
+function resolveInlineImageDimension(input: {
+  styledPrimary: number | undefined;
+  styledSecondary: number | undefined;
+  intrinsicPrimary: number | undefined;
+  intrinsicSecondary: number | undefined;
+  fallback: number;
+}): number {
+  if (typeof input.styledPrimary === "number" && input.styledPrimary > 0) {
+    return input.styledPrimary;
+  }
+
+  if (
+    typeof input.styledSecondary === "number" &&
+    input.styledSecondary > 0 &&
+    typeof input.intrinsicPrimary === "number" &&
+    input.intrinsicPrimary > 0 &&
+    typeof input.intrinsicSecondary === "number" &&
+    input.intrinsicSecondary > 0
+  ) {
+    return (
+      (input.styledSecondary * input.intrinsicPrimary) /
+      input.intrinsicSecondary
+    );
+  }
+
+  if (
+    typeof input.intrinsicPrimary === "number" &&
+    input.intrinsicPrimary > 0
+  ) {
+    return input.intrinsicPrimary;
+  }
+
+  return input.fallback;
+}
+
+function resolveImageIntrinsicSize(image: {
+  width?: number;
+  height?: number;
+  style?: {
+    width?: number;
+    height?: number;
+  };
+}): {
+  width?: number;
+  height?: number;
+} {
+  const width = image.style?.width ?? image.width;
+  const height = image.style?.height ?? image.height;
+
+  return {
+    ...(typeof width === "number" && width > 0 ? { width } : {}),
+    ...(typeof height === "number" && height > 0 ? { height } : {})
   };
 }
 
@@ -1149,12 +1262,17 @@ function estimateFigureBlockHeight(
 
   for (const child of block.blocks) {
     if (child.kind === "image") {
+      const intrinsicSize = resolveImageIntrinsicSize(child);
       total +=
         resolveImageLayout({
           availableWidth: contentWidth,
           viewportHeight,
-          ...(child.width ? { intrinsicWidth: child.width } : {}),
-          ...(child.height ? { intrinsicHeight: child.height } : {})
+          ...(intrinsicSize.width
+            ? { intrinsicWidth: intrinsicSize.width }
+            : {}),
+          ...(intrinsicSize.height
+            ? { intrinsicHeight: intrinsicSize.height }
+            : {})
         }).height + 10;
       continue;
     }

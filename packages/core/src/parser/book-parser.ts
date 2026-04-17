@@ -8,6 +8,11 @@ import { parseNavDocument } from "./nav-parser";
 import { parseNcxDocument } from "./ncx-parser";
 import { parseOpfDocument } from "./opf-parser";
 import { parseSpineContentDocument } from "./spine-content-parser";
+import {
+  CssAstCache,
+  loadChapterStyleSheets,
+  type ParsedStyleSheetResource
+} from "./css-resource-loader";
 import type { BlockNode, InlineNode } from "../model/types";
 
 export type BookParserInput = {
@@ -21,6 +26,7 @@ export type BookParseResult = {
   sectionContents: Array<{
     href: string;
     content: string;
+    linkedStyleSheets: ParsedStyleSheetResource[];
   }>;
 };
 
@@ -48,12 +54,21 @@ export class BookParser {
             ncxManifestItem.href
           )
         : [];
+    const stylesheetCache = new CssAstCache()
     const sectionContents = await Promise.all(
       opf.spine.map(async (spineItem, index) => {
         const sectionXml = await container.readText(spineItem.href);
+        const linkedStyleSheets = await loadChapterStyleSheets({
+          sectionHref: spineItem.href,
+          sectionXml,
+          manifest: opf.manifest,
+          cache: stylesheetCache,
+          readText: (href) => container.readText(href)
+        })
         return {
           href: spineItem.href,
           content: sectionXml,
+          linkedStyleSheets,
           index
         };
       })
@@ -67,6 +82,7 @@ export class BookParser {
         const section = parseSpineContentDocument({
           href: spineItem.href,
           content: entry.content,
+          stylesheets: entry.linkedStyleSheets.map((stylesheet) => stylesheet.ast),
           ...(spineItem.mediaType ? { mediaType: spineItem.mediaType } : {})
         });
         return {
@@ -106,7 +122,11 @@ export class BookParser {
         sections
       },
       resources: container,
-      sectionContents: sectionContents.map(({ href, content }) => ({ href, content }))
+      sectionContents: sectionContents.map(({ href, content, linkedStyleSheets }) => ({
+        href,
+        content,
+        linkedStyleSheets
+      }))
     };
   }
 

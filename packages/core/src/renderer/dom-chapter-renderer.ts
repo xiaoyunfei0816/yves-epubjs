@@ -8,6 +8,10 @@ export type DomChapterRenderInput = {
   presentationRole?: "cover" | "image-page";
   presentationImageSrc?: string;
   presentationImageAlt?: string;
+  linkedStyleSheets?: Array<{
+    href: string;
+    text: string;
+  }>;
   nodes: PreprocessedChapterNode[];
   theme: Theme;
   typography: TypographyOptions;
@@ -26,7 +30,9 @@ export class DomChapterRenderer {
 
   clear(container: HTMLElement): void {
     container
-      .querySelectorAll(".epub-dom-section, style[data-epub-dom-normalization]")
+      .querySelectorAll(
+        ".epub-dom-section, style[data-epub-dom-normalization], style[data-epub-dom-source]"
+      )
       .forEach((element) => element.remove());
   }
 
@@ -39,6 +45,7 @@ export class DomChapterRenderer {
     }
 
     return [
+      ...serializeLinkedStyleSheets(input.linkedStyleSheets),
       `<style data-epub-dom-normalization="true">${buildDomChapterNormalizationCss({
         theme: input.theme,
         typography: input.typography,
@@ -58,6 +65,7 @@ export class DomChapterRenderer {
       input.presentationRole === "cover" ? "epub-dom-cover" : "epub-dom-image-page"
 
     return [
+      ...serializeLinkedStyleSheets(input.linkedStyleSheets),
       `<style data-epub-dom-normalization="true">${buildDomChapterNormalizationCss({
         theme: input.theme,
         typography: input.typography,
@@ -136,4 +144,17 @@ function escapeHtmlText(value: string): string {
 
 function escapeHtmlAttribute(value: string): string {
   return escapeHtmlText(value).replaceAll('"', "&quot;");
+}
+
+function serializeLinkedStyleSheets(
+  stylesheets: DomChapterRenderInput["linkedStyleSheets"]
+): string[] {
+  return (stylesheets ?? []).map(
+    (stylesheet) =>
+      `<style data-epub-dom-source="${escapeHtmlAttribute(stylesheet.href)}">${escapeStyleTagText(stylesheet.text)}</style>`
+  );
+}
+
+function escapeStyleTagText(value: string): string {
+  return value.replaceAll("</style", "<\\/style");
 }

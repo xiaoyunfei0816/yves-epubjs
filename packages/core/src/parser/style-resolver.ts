@@ -19,6 +19,9 @@ const ALLOWED_PROPERTIES = new Set([
   "letter-spacing",
   "white-space",
   "word-break",
+  "width",
+  "height",
+  "vertical-align",
   "margin-top",
   "margin-bottom",
   "margin-left",
@@ -124,7 +127,7 @@ function applySingleDeclaration(
       }
       break
     case "font-size": {
-      const fontSize = parseNumericValue(value)
+      const fontSize = parseCssLengthValue(value)
       if (fontSize !== undefined) {
         target.fontSize = fontSize
       }
@@ -139,7 +142,7 @@ function applySingleDeclaration(
       }
       break
     case "line-height": {
-      const lineHeight = parseNumericValue(value)
+      const lineHeight = parseLineHeightValue(value)
       if (lineHeight !== undefined) {
         target.lineHeight = lineHeight
       }
@@ -159,7 +162,7 @@ function applySingleDeclaration(
       break
     }
     case "letter-spacing": {
-      const letterSpacing = parseNumericValue(value)
+      const letterSpacing = parseCssLengthValue(value)
       if (letterSpacing !== undefined) {
         target.letterSpacing = letterSpacing
       }
@@ -175,6 +178,27 @@ function applySingleDeclaration(
         target.wordBreak = value
       }
       break
+    case "width": {
+      const width = parseCssLengthValue(value)
+      if (width !== undefined) {
+        target.width = width
+      }
+      break
+    }
+    case "height": {
+      const height = parseCssLengthValue(value)
+      if (height !== undefined) {
+        target.height = height
+      }
+      break
+    }
+    case "vertical-align": {
+      const verticalAlign = normalizeVerticalAlign(value)
+      if (verticalAlign) {
+        target.verticalAlign = verticalAlign
+      }
+      break
+    }
     case "margin-top":
       assignBlockMetric(target, "marginTop", value)
       break
@@ -217,7 +241,7 @@ function assignBlockMetric(
     | "paddingRight",
   value: string
 ): void {
-  const numericValue = parseNumericValue(value)
+  const numericValue = parseCssLengthValue(value)
   if (numericValue !== undefined) {
     target[property] = numericValue
   }
@@ -240,19 +264,52 @@ function normalizeTextAlign(value: string): TextAlign | undefined {
   }
 }
 
-function parseNumericValue(value: string): number | undefined {
+function normalizeVerticalAlign(
+  value: string
+): NonNullable<TextStyle["verticalAlign"]> | undefined {
+  switch (value) {
+    case "baseline":
+    case "middle":
+    case "sub":
+    case "sup":
+      return value
+    default:
+      return undefined
+  }
+}
+
+function parseLineHeightValue(value: string): number | undefined {
+  const numericValue = parseCssLengthValue(value)
+  if (numericValue !== undefined) {
+    return numericValue
+  }
+
   const normalized = value.trim().toLowerCase()
   if (!normalized) {
     return undefined
   }
 
-  const matched = normalized.match(/^(-?\d+(?:\.\d+)?)(px)?$/)
+  const parsed = Number(normalized)
+  return Number.isNaN(parsed) ? undefined : parsed
+}
+
+function parseCssLengthValue(value: string): number | undefined {
+  const normalized = value.trim().toLowerCase()
+  if (!normalized) {
+    return undefined
+  }
+
+  const matched = normalized.match(/^(-?\d+(?:\.\d+)?)(px|em)?$/)
   if (!matched) {
     return undefined
   }
 
   const parsed = Number(matched[1])
-  return Number.isNaN(parsed) ? undefined : parsed
+  if (Number.isNaN(parsed)) {
+    return undefined
+  }
+
+  return matched[2] === "em" ? parsed * 16 : parsed
 }
 
 function collectLegacyPresentationalDeclarations(
@@ -306,5 +363,5 @@ function normalizeLegacyFontSize(value: string): number | undefined {
     return namedSizes[normalized]
   }
 
-  return parseNumericValue(normalized)
+  return parseCssLengthValue(normalized)
 }

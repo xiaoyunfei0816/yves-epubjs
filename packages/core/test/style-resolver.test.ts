@@ -114,6 +114,41 @@ describe("style resolver", () => {
     })
   })
 
+  it("parses inline image-friendly stylesheet values from linked css", () => {
+    const document = parseHtmlDocument(`
+      <html>
+        <body>
+          <img class="h-pic" src="badge.png" />
+        </body>
+      </html>
+    `)
+    const image = selectFirstHtmlElement("img", document)
+    expect(image).toBeTruthy()
+
+    const stylesheet = parseCssStyleSheet(`
+      .h-pic {
+        height: 1.1em;
+        margin-left: 0.1em;
+        margin-right: 0.15em;
+        vertical-align: middle;
+      }
+    `)
+
+    const resolved = image
+      ? resolveElementTextStyle({
+          element: image,
+          stylesheets: [stylesheet]
+        })
+      : {}
+
+    expect(resolved).toEqual({
+      height: 17.6,
+      marginLeft: 1.6,
+      marginRight: 2.4,
+      verticalAlign: "middle"
+    })
+  })
+
   it("maps legacy presentational attributes into supported block and text styles", () => {
     const document = parseHtmlDocument(`
       <html>

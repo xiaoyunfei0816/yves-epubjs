@@ -22,6 +22,7 @@ import {
   type HtmlDomNode
 } from "./html-dom-adapter"
 import { normalizePreformattedText } from "../utils/preformatted-text"
+import type { CssAstStyleSheet } from "./css-ast-adapter"
 import { resolveElementStyle, resolveElementTextStyle } from "./style-resolver"
 import { parseXhtmlDomDocument } from "./xhtml-dom-parser"
 
@@ -38,7 +39,10 @@ function createTextNode(text: string): InlineNode[] {
   return [{ kind: "text", text: normalized }]
 }
 
-function getInlineNodeMetadata(node: HtmlDomElement): {
+function getInlineNodeMetadata(
+  node: HtmlDomElement,
+  stylesheets: CssAstStyleSheet[]
+): {
   tagName: string
   className?: string
   lang?: string
@@ -67,7 +71,10 @@ function getInlineNodeMetadata(node: HtmlDomElement): {
   if (dir?.trim()) {
     metadata.dir = dir.trim()
   }
-  const style = resolveElementTextStyle({ element: node })
+  const style = resolveElementTextStyle({
+    element: node,
+    stylesheets
+  })
   if (Object.keys(style).length > 0) {
     metadata.style = style
   }
@@ -75,7 +82,10 @@ function getInlineNodeMetadata(node: HtmlDomElement): {
   return metadata
 }
 
-function getBlockNodeMetadata(node: HtmlDomElement): {
+function getBlockNodeMetadata(
+  node: HtmlDomElement,
+  stylesheets: CssAstStyleSheet[]
+): {
   tagName: string
   className?: string
   lang?: string
@@ -104,7 +114,10 @@ function getBlockNodeMetadata(node: HtmlDomElement): {
   if (dir?.trim()) {
     metadata.dir = dir.trim()
   }
-  const style = resolveElementStyle({ element: node })
+  const style = resolveElementStyle({
+    element: node,
+    stylesheets
+  })
   if (Object.keys(style).length > 0) {
     metadata.style = style
   }
@@ -114,7 +127,8 @@ function getBlockNodeMetadata(node: HtmlDomElement): {
 
 function parseInlineNodes(
   nodes: HtmlDomNode[],
-  sectionHref: string
+  sectionHref: string,
+  stylesheets: CssAstStyleSheet[]
 ): InlineNode[] {
   const inlines: InlineNode[] = []
 
@@ -140,12 +154,16 @@ function parseInlineNodes(
       case "mark":
       case "del":
       case "ins": {
-        const semanticChildren = parseInlineNodes(childNodes, sectionHref)
+        const semanticChildren = parseInlineNodes(
+          childNodes,
+          sectionHref,
+          stylesheets
+        )
         if (semanticChildren.length > 0) {
           inlines.push({
             kind: node.name,
             children: semanticChildren,
-            ...getInlineNodeMetadata(node)
+            ...getInlineNodeMetadata(node, stylesheets)
           } as InlineNode)
         }
         break
@@ -154,20 +172,20 @@ function parseInlineNodes(
       case "b":
         inlines.push({
           kind: "strong",
-          children: parseInlineNodes(childNodes, sectionHref),
-          ...getInlineNodeMetadata(node)
+          children: parseInlineNodes(childNodes, sectionHref, stylesheets),
+          ...getInlineNodeMetadata(node, stylesheets)
         })
         break
       case "em":
       case "i":
         inlines.push({
           kind: "emphasis",
-          children: parseInlineNodes(childNodes, sectionHref),
-          ...getInlineNodeMetadata(node)
+          children: parseInlineNodes(childNodes, sectionHref, stylesheets),
+          ...getInlineNodeMetadata(node, stylesheets)
         })
         break
       case "code": {
-        const text = parseInlineNodes(childNodes, sectionHref)
+        const text = parseInlineNodes(childNodes, sectionHref, stylesheets)
           .map((inline) => ("text" in inline ? inline.text : ""))
           .join("")
           .trim()
@@ -181,8 +199,8 @@ function parseInlineNodes(
         const linkNode: InlineNode = {
           kind: "link",
           href: hrefAttribute ? resolveResourcePath(sectionHref, hrefAttribute) : "",
-          children: parseInlineNodes(childNodes, sectionHref),
-          ...getInlineNodeMetadata(node)
+          children: parseInlineNodes(childNodes, sectionHref, stylesheets),
+          ...getInlineNodeMetadata(node, stylesheets)
         }
         const title = getHtmlElementAttribute(node, "title")
         if (title?.trim()) {
@@ -199,7 +217,8 @@ function parseInlineNodes(
 
         const imageNode: InlineNode = {
           kind: "image",
-          src: resolveResourcePath(sectionHref, src)
+          src: resolveResourcePath(sectionHref, src),
+          ...getInlineNodeMetadata(node, stylesheets)
         }
         const alt = getHtmlElementAttribute(node, "alt")
         const title = getHtmlElementAttribute(node, "title")
@@ -228,12 +247,12 @@ function parseInlineNodes(
       }
       default:
         {
-          const fallbackChildren = parseInlineNodes(childNodes, sectionHref)
+          const fallbackChildren = parseInlineNodes(childNodes, sectionHref, stylesheets)
           if (fallbackChildren.length > 0) {
             inlines.push({
               kind: "span",
               children: fallbackChildren,
-              ...getInlineNodeMetadata(node)
+              ...getInlineNodeMetadata(node, stylesheets)
             })
           }
         }
@@ -253,7 +272,10 @@ class XhtmlBlockParser {
   private pendingAnchors: string[] = []
   readonly anchors: Record<string, string> = {}
 
-  constructor(private readonly sectionHref: string) {}
+  constructor(
+    private readonly sectionHref: string,
+    private readonly stylesheets: CssAstStyleSheet[] = []
+  ) {}
 
   parseDocument(xml: string): SectionDocument {
     const domDocument = parseXhtmlDomDocument(xml)
@@ -399,8 +421,12 @@ class XhtmlBlockParser {
           id: blockId,
           kind: "heading",
           level: Number(node.name[1]) as 1 | 2 | 3 | 4 | 5 | 6,
-          inlines: parseInlineNodes(getHtmlNodeChildren(node), this.sectionHref),
-          ...getBlockNodeMetadata(node)
+          inlines: parseInlineNodes(
+            getHtmlNodeChildren(node),
+            this.sectionHref,
+            this.stylesheets
+          ),
+          ...getBlockNodeMetadata(node, this.stylesheets)
         }
       ]
     }
@@ -412,8 +438,12 @@ class XhtmlBlockParser {
         {
           id: blockId,
           kind: "text",
-          inlines: parseInlineNodes(getHtmlNodeChildren(node), this.sectionHref),
-          ...getBlockNodeMetadata(node)
+          inlines: parseInlineNodes(
+            getHtmlNodeChildren(node),
+            this.sectionHref,
+            this.stylesheets
+          ),
+          ...getBlockNodeMetadata(node, this.stylesheets)
         }
       ]
     }
@@ -426,7 +456,7 @@ class XhtmlBlockParser {
           id: blockId,
           kind: "quote",
           blocks: this.parseChildBlocks(node),
-          ...getBlockNodeMetadata(node)
+          ...getBlockNodeMetadata(node, this.stylesheets)
         }
       ]
     }
@@ -442,7 +472,7 @@ class XhtmlBlockParser {
         id: blockId,
         kind: "code",
         text: normalizePreformattedText(getHtmlNodeTextContent(codeNode ?? node)),
-        ...getBlockNodeMetadata(node)
+        ...getBlockNodeMetadata(node, this.stylesheets)
       }
 
       if (language?.trim()) {
@@ -469,7 +499,7 @@ class XhtmlBlockParser {
           id: blockId,
           kind: "figure",
           blocks: contentBlocks,
-          ...getBlockNodeMetadata(node),
+          ...getBlockNodeMetadata(node, this.stylesheets),
           ...(captionNode
             ? { caption: this.parseBlocksWithInlineFallback(captionNode) }
             : {})
@@ -485,7 +515,7 @@ class XhtmlBlockParser {
           id: blockId,
           kind: "aside",
           blocks: this.parseBlocksWithInlineFallback(node),
-          ...getBlockNodeMetadata(node)
+          ...getBlockNodeMetadata(node, this.stylesheets)
         }
       ]
     }
@@ -498,7 +528,7 @@ class XhtmlBlockParser {
           id: blockId,
           kind: "nav",
           blocks: this.parseBlocksWithInlineFallback(node),
-          ...getBlockNodeMetadata(node)
+          ...getBlockNodeMetadata(node, this.stylesheets)
         }
       ]
     }
@@ -510,7 +540,7 @@ class XhtmlBlockParser {
         {
           id: blockId,
           kind: "thematic-break",
-          ...getBlockNodeMetadata(node)
+          ...getBlockNodeMetadata(node, this.stylesheets)
         }
       ]
     }
@@ -529,7 +559,7 @@ class XhtmlBlockParser {
         kind: "list",
         ordered: node.name === "ol",
         items,
-        ...getBlockNodeMetadata(node)
+        ...getBlockNodeMetadata(node, this.stylesheets)
       }
 
       const start = getHtmlElementAttribute(node, "start")
@@ -552,7 +582,7 @@ class XhtmlBlockParser {
           id: blockId,
           kind: "table",
           rows: this.parseTableRows(node),
-          ...getBlockNodeMetadata(node),
+          ...getBlockNodeMetadata(node, this.stylesheets),
           ...(captionNode
             ? { caption: this.parseBlocksWithInlineFallback(captionNode) }
             : {})
@@ -568,7 +598,7 @@ class XhtmlBlockParser {
           id: blockId,
           kind: "definition-list",
           items: this.parseDefinitionListItems(node),
-          ...getBlockNodeMetadata(node)
+          ...getBlockNodeMetadata(node, this.stylesheets)
         }
       ]
     }
@@ -595,7 +625,7 @@ class XhtmlBlockParser {
       return blocks
     }
 
-    const metadata = getBlockNodeMetadata(node)
+    const metadata = getBlockNodeMetadata(node, this.stylesheets)
     const mergedStyle = {
       ...(metadata.style ?? {}),
       ...(block.style ?? {})
@@ -622,7 +652,7 @@ class XhtmlBlockParser {
       id: blockId,
       kind: "image",
       src: resolveResourcePath(this.sectionHref, src),
-      ...getBlockNodeMetadata(node)
+      ...getBlockNodeMetadata(node, this.stylesheets)
     }
 
     const alt = getHtmlElementAttribute(node, "alt")
@@ -658,7 +688,11 @@ class XhtmlBlockParser {
       return blocks
     }
 
-    const parsedInlines = parseInlineNodes(getHtmlNodeChildren(node), this.sectionHref)
+    const parsedInlines = parseInlineNodes(
+      getHtmlNodeChildren(node),
+      this.sectionHref,
+      this.stylesheets
+    )
     if (parsedInlines.length === 0) {
       return []
     }
@@ -668,7 +702,7 @@ class XhtmlBlockParser {
         id: this.createBlockId("text"),
         kind: "text",
         inlines: parsedInlines,
-        ...getBlockNodeMetadata(node)
+        ...getBlockNodeMetadata(node, this.stylesheets)
       }
     ]
   }
@@ -679,7 +713,11 @@ class XhtmlBlockParser {
       return blocks
     }
 
-    const parsedInlines = parseInlineNodes(getHtmlNodeChildren(node), this.sectionHref)
+    const parsedInlines = parseInlineNodes(
+      getHtmlNodeChildren(node),
+      this.sectionHref,
+      this.stylesheets
+    )
     if (parsedInlines.length === 0) {
       return []
     }
@@ -689,7 +727,7 @@ class XhtmlBlockParser {
         id: this.createBlockId("text"),
         kind: "text",
         inlines: parsedInlines,
-        ...getBlockNodeMetadata(node)
+        ...getBlockNodeMetadata(node, this.stylesheets)
       }
     ]
   }
@@ -770,7 +808,11 @@ class XhtmlBlockParser {
                 {
                   id: this.createBlockId("text"),
                   kind: "text",
-                  inlines: parseInlineNodes(getHtmlNodeChildren(cellNode), this.sectionHref)
+                  inlines: parseInlineNodes(
+                    getHtmlNodeChildren(cellNode),
+                    this.sectionHref,
+                    this.stylesheets
+                  )
                 }
               ]
       }
@@ -801,8 +843,12 @@ class XhtmlBlockParser {
 
 export function parseXhtmlDocument(
   xml: string,
-  sectionHref: string
+  sectionHref: string,
+  stylesheets: CssAstStyleSheet[] = []
 ): SectionDocument {
-  const parser = new XhtmlBlockParser(normalizeResourcePath(sectionHref))
+  const parser = new XhtmlBlockParser(
+    normalizeResourcePath(sectionHref),
+    stylesheets
+  )
   return parser.parseDocument(xml)
 }

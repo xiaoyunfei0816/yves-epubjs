@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parseCssStyleSheet } from "../src/parser/css-ast-adapter";
 import { parseXhtmlDocument } from "../src/parser/xhtml-parser";
 
 function stripIds(value: unknown): unknown {
@@ -381,5 +382,46 @@ describe("parseXhtmlDocument", () => {
       ]
     });
     expect(section.anchors["custom-1"]).toBe("text-1");
+  });
+
+  it("applies linked stylesheet rules to inline image metadata without changing structure", () => {
+    const xml = `<?xml version="1.0"?>
+      <html>
+        <body>
+          <p>Alpha<img class="h-pic" src="images/badge.png" width="20" height="20" alt="Badge" />Omega</p>
+        </body>
+      </html>`;
+    const stylesheet = parseCssStyleSheet(`
+      .h-pic {
+        height: 1.1em;
+        margin-left: 0.2em;
+        margin-right: 0.3em;
+        vertical-align: middle;
+      }
+    `);
+
+    const section = parseXhtmlDocument(xml, "OPS/chapter.xhtml", [stylesheet]);
+
+    expect(section.blocks[0]).toMatchObject({
+      kind: "text",
+      inlines: [
+        { kind: "text", text: "Alpha" },
+        {
+          kind: "image",
+          src: "OPS/images/badge.png",
+          width: 20,
+          height: 20,
+          alt: "Badge",
+          className: "h-pic",
+          style: {
+            height: 17.6,
+            marginLeft: 3.2,
+            marginRight: 4.8,
+            verticalAlign: "middle"
+          }
+        },
+        { kind: "text", text: "Omega" }
+      ]
+    });
   });
 });
