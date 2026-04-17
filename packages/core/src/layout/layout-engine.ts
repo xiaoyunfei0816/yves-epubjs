@@ -183,14 +183,14 @@ export class LayoutEngine {
       typography: input.typography
     });
 
-    const paddingTop = block.style?.paddingTop ?? 0
-    const paddingBottom = block.style?.paddingBottom ?? 0
-    const paddingLeft = block.style?.paddingLeft ?? 0
-    const paddingRight = block.style?.paddingRight ?? 0
-    const contentWidth = Math.max(40, width - paddingLeft - paddingRight)
+    const paddingTop = block.style?.paddingTop ?? 0;
+    const paddingBottom = block.style?.paddingBottom ?? 0;
+    const paddingLeft = block.style?.paddingLeft ?? 0;
+    const paddingRight = block.style?.paddingRight ?? 0;
+    const contentWidth = Math.max(40, width - paddingLeft - paddingRight);
 
     if (block.kind === "text") {
-      const coverImage = this.getCoverImageInline(block, input.section)
+      const coverImage = this.getCoverImageInline(block, input.section);
       if (coverImage) {
         const imageLayout = resolveImageLayout({
           availableWidth: contentWidth,
@@ -198,17 +198,24 @@ export class LayoutEngine {
           ...(coverImage.width ? { intrinsicWidth: coverImage.width } : {}),
           ...(coverImage.height ? { intrinsicHeight: coverImage.height } : {}),
           fillWidth: true
-        })
+        });
         const font = this.buildFont(
           input.fontFamily,
           block.style?.fontSize ?? input.typography.fontSize,
           {
-            ...(block.style?.fontFamily ? { fontFamily: block.style.fontFamily } : {}),
-            ...(block.style?.fontStyle ? { fontStyle: block.style.fontStyle } : {}),
-            ...(block.style?.fontWeight ? { fontWeight: block.style.fontWeight } : {})
+            ...(block.style?.fontFamily
+              ? { fontFamily: block.style.fontFamily }
+              : {}),
+            ...(block.style?.fontStyle
+              ? { fontStyle: block.style.fontStyle }
+              : {}),
+            ...(block.style?.fontWeight
+              ? { fontWeight: block.style.fontWeight }
+              : {})
           }
-        )
-        const marginBottom = block.style?.marginBottom ?? styleProfile.text.marginBottom
+        );
+        const marginBottom =
+          block.style?.marginBottom ?? styleProfile.text.marginBottom;
         const line: LayoutTextLine = {
           width: imageLayout.width,
           height: imageLayout.height,
@@ -228,7 +235,7 @@ export class LayoutEngine {
               0
             )
           ]
-        }
+        };
 
         return {
           type: "pretext",
@@ -237,31 +244,47 @@ export class LayoutEngine {
           lineHeight: imageLayout.height,
           textAlign: "center",
           ...(block.style?.color ? { color: block.style.color } : {}),
-          ...(block.style?.backgroundColor ? { backgroundColor: block.style.backgroundColor } : {}),
+          ...(block.style?.backgroundColor
+            ? { backgroundColor: block.style.backgroundColor }
+            : {}),
           paddingTop,
           paddingBottom,
           paddingLeft,
           paddingRight,
           lines: [line],
-          estimatedHeight: imageLayout.blockHeight + marginBottom + paddingTop + paddingBottom
-        }
+          estimatedHeight:
+            imageLayout.blockHeight + marginBottom + paddingTop + paddingBottom
+        };
       }
     }
 
     const lines: LayoutTextLine[] = [];
     for (const segment of compiled.segments) {
-      const lineCountBefore = lines.length
-      walkRichInlineLineRanges(segment.prepared, contentWidth, (range: RichInlineLineRange) => {
-        const materialized = materializeRichInlineLineRange(segment.prepared, range);
-        lines.push(this.materializeLine(segment.sources, materialized, compiled.lineHeight));
-      });
+      const lineCountBefore = lines.length;
+      walkRichInlineLineRanges(
+        segment.prepared,
+        contentWidth,
+        (range: RichInlineLineRange) => {
+          const materialized = materializeRichInlineLineRange(
+            segment.prepared,
+            range
+          );
+          lines.push(
+            this.materializeLine(
+              segment.sources,
+              materialized,
+              compiled.lineHeight
+            )
+          );
+        }
+      );
 
       if (lines.length === lineCountBefore) {
         lines.push({
           width: 0,
           height: compiled.lineHeight,
           fragments: []
-        })
+        });
       }
     }
 
@@ -274,7 +297,8 @@ export class LayoutEngine {
     }
 
     if (block.kind === "heading") {
-      const marginBottom = block.style?.marginBottom ?? styleProfile.heading.marginBottom
+      const marginBottom =
+        block.style?.marginBottom ?? styleProfile.heading.marginBottom;
       return {
         type: "pretext",
         id: block.id,
@@ -283,7 +307,9 @@ export class LayoutEngine {
         lineHeight: compiled.lineHeight,
         textAlign: compiled.textAlign,
         ...(block.style?.color ? { color: block.style.color } : {}),
-        ...(block.style?.backgroundColor ? { backgroundColor: block.style.backgroundColor } : {}),
+        ...(block.style?.backgroundColor
+          ? { backgroundColor: block.style.backgroundColor }
+          : {}),
         paddingTop,
         paddingBottom,
         paddingLeft,
@@ -296,7 +322,8 @@ export class LayoutEngine {
       };
     }
 
-    const marginBottom = block.style?.marginBottom ?? styleProfile.text.marginBottom
+    const marginBottom =
+      block.style?.marginBottom ?? styleProfile.text.marginBottom;
     return {
       type: "pretext",
       id: block.id,
@@ -304,7 +331,9 @@ export class LayoutEngine {
       lineHeight: compiled.lineHeight,
       textAlign: compiled.textAlign,
       ...(block.style?.color ? { color: block.style.color } : {}),
-      ...(block.style?.backgroundColor ? { backgroundColor: block.style.backgroundColor } : {}),
+      ...(block.style?.backgroundColor
+        ? { backgroundColor: block.style.backgroundColor }
+        : {}),
       paddingTop,
       paddingBottom,
       paddingLeft,
@@ -323,29 +352,32 @@ export class LayoutEngine {
     defaultLineHeight: number
   ): LayoutTextLine {
     const height = line.fragments.reduce((maxHeight, fragment) => {
-      const options = sourceToFragmentOptions(sources[fragment.itemIndex])
+      const options = sourceToFragmentOptions(sources[fragment.itemIndex]);
       if (options.image) {
-        return Math.max(maxHeight, options.image.height)
+        return Math.max(maxHeight, options.image.height);
       }
 
-      return Math.max(maxHeight, extractFontSize(options.font) * 1.45)
-    }, defaultLineHeight)
+      return Math.max(maxHeight, extractFontSize(options.font) * 1.45);
+    }, defaultLineHeight);
 
     return {
       width: line.width,
       height,
       fragments: line.fragments.map((fragment) => {
-        const options = sourceToFragmentOptions(sources[fragment.itemIndex])
+        const options = sourceToFragmentOptions(sources[fragment.itemIndex]);
         return this.createSourceFragment(
           options.image ? "" : fragment.text,
           options,
           fragment.gapBefore
-        )
+        );
       })
     };
   }
 
-  private getCompiledBlock(block: TextBlock | HeadingBlock, input: LayoutInput): CompiledBlock | null {
+  private getCompiledBlock(
+    block: TextBlock | HeadingBlock,
+    input: LayoutInput
+  ): CompiledBlock | null {
     if (this.containsUnsupportedInline(block.inlines)) {
       return null;
     }
@@ -362,7 +394,8 @@ export class LayoutEngine {
     });
     const baseFontSize =
       block.kind === "heading"
-        ? (block.style?.fontSize ?? input.typography.fontSize * styleProfile.heading.scale[block.level])
+        ? (block.style?.fontSize ??
+          input.typography.fontSize * styleProfile.heading.scale[block.level])
         : (block.style?.fontSize ?? input.typography.fontSize);
     const lineHeight =
       block.style?.lineHeight ??
@@ -377,13 +410,19 @@ export class LayoutEngine {
         fontSize: baseFontSize
       },
       {
-        ...(block.style?.fontFamily ? { fontFamily: block.style.fontFamily } : {}),
+        ...(block.style?.fontFamily
+          ? { fontFamily: block.style.fontFamily }
+          : {}),
         ...(block.style?.fontStyle ? { fontStyle: block.style.fontStyle } : {}),
-        ...(block.style?.fontWeight ? { fontWeight: block.style.fontWeight } : {}),
+        ...(block.style?.fontWeight
+          ? { fontWeight: block.style.fontWeight }
+          : {}),
         ...(block.style?.color ? { color: block.style.color } : {}),
-        ...(block.style?.backgroundColor ? { backgroundColor: block.style.backgroundColor } : {})
+        ...(block.style?.backgroundColor
+          ? { backgroundColor: block.style.backgroundColor }
+          : {})
       }
-    )
+    );
 
     const compiled = {
       segments,
@@ -403,34 +442,47 @@ export class LayoutEngine {
     },
     state: InlineStyleState
   ): CompiledSegment[] {
-    const segments: CompiledSegment[] = []
-    let items: RichInlineItem[] = []
-    let sources: RichInlineSource[] = []
+    const segments: CompiledSegment[] = [];
+    const items: RichInlineItem[] = [];
+    const sources: RichInlineSource[] = [];
 
     const flushSegment = (): void => {
       if (items.length === 0) {
         segments.push({
           prepared: prepareRichInline([
-            { text: "", font: this.buildFont(typography.fontFamily, typography.fontSize, state) }
+            {
+              text: "",
+              font: this.buildFont(
+                typography.fontFamily,
+                typography.fontSize,
+                state
+              )
+            }
           ]),
           sources: [
             this.createSourceFragment(
               "",
-              { font: this.buildFont(typography.fontFamily, typography.fontSize, state) },
+              {
+                font: this.buildFont(
+                  typography.fontFamily,
+                  typography.fontSize,
+                  state
+                )
+              },
               0
             )
           ]
-        })
+        });
       } else {
         segments.push({
           prepared: prepareRichInline([...items]),
           sources: [...sources]
-        })
+        });
       }
 
-      items.length = 0
-      sources.length = 0
-    }
+      items.length = 0;
+      sources.length = 0;
+    };
 
     this.collectRichInlineItems(
       inlines,
@@ -439,13 +491,13 @@ export class LayoutEngine {
       items,
       sources,
       flushSegment
-    )
+    );
 
     if (segments.length === 0 || items.length > 0 || sources.length > 0) {
-      flushSegment()
+      flushSegment();
     }
 
-    return segments
+    return segments;
   }
 
   private collectRichInlineItems(
@@ -466,8 +518,13 @@ export class LayoutEngine {
             continue;
           }
 
-          const effectiveFontSize = typography.fontSize * (state.fontScale ?? 1);
-          const font = this.buildFont(typography.fontFamily, effectiveFontSize, state);
+          const effectiveFontSize =
+            typography.fontSize * (state.fontScale ?? 1);
+          const font = this.buildFont(
+            typography.fontFamily,
+            effectiveFontSize,
+            state
+          );
           items.push({
             text: inline.text,
             font
@@ -482,11 +539,14 @@ export class LayoutEngine {
                 ...(state.code ? { code: true } : {}),
                 ...(state.mark ? { mark: true } : {}),
                 ...(state.color ? { color: state.color } : {}),
-                ...(state.backgroundColor ? { backgroundColor: state.backgroundColor } : {}),
+                ...(state.backgroundColor
+                  ? { backgroundColor: state.backgroundColor }
+                  : {}),
                 ...(state.verticalAlign
                   ? {
                       baselineShift:
-                        effectiveFontSize * (state.verticalAlign === "sup" ? -0.28 : 0.18)
+                        effectiveFontSize *
+                        (state.verticalAlign === "sup" ? -0.28 : 0.18)
                     }
                   : {})
               },
@@ -508,15 +568,25 @@ export class LayoutEngine {
             typography,
             {
               ...state,
-              ...(inline.kind === "emphasis" ? { fontStyle: "italic" as const } : {}),
-              ...(inline.kind === "small" ? { fontScale: (state.fontScale ?? 1) * 0.85 } : {}),
+              ...(inline.kind === "emphasis"
+                ? { fontStyle: "italic" as const }
+                : {}),
+              ...(inline.kind === "small"
+                ? { fontScale: (state.fontScale ?? 1) * 0.85 }
+                : {}),
               ...(inline.kind === "sub" || inline.kind === "sup"
                 ? { fontScale: (state.fontScale ?? 1) * 0.83 }
                 : {}),
               ...(inline.kind === "mark" ? { mark: true } : {}),
-              ...(inline.style?.fontFamily ? { fontFamily: inline.style.fontFamily } : {}),
-              ...(inline.style?.fontStyle ? { fontStyle: inline.style.fontStyle } : {}),
-              ...(inline.style?.fontWeight ? { fontWeight: inline.style.fontWeight } : {}),
+              ...(inline.style?.fontFamily
+                ? { fontFamily: inline.style.fontFamily }
+                : {}),
+              ...(inline.style?.fontStyle
+                ? { fontStyle: inline.style.fontStyle }
+                : {}),
+              ...(inline.style?.fontWeight
+                ? { fontWeight: inline.style.fontWeight }
+                : {}),
               ...(inline.style?.color ? { color: inline.style.color } : {}),
               ...(inline.style?.backgroundColor
                 ? { backgroundColor: inline.style.backgroundColor }
@@ -538,7 +608,9 @@ export class LayoutEngine {
             typography,
             {
               ...state,
-              ...(inline.style?.fontFamily ? { fontFamily: inline.style.fontFamily } : {}),
+              ...(inline.style?.fontFamily
+                ? { fontFamily: inline.style.fontFamily }
+                : {}),
               fontWeight: inline.style?.fontWeight ?? "700",
               ...(inline.style?.color ? { color: inline.style.color } : {}),
               ...(inline.style?.backgroundColor
@@ -565,10 +637,14 @@ export class LayoutEngine {
           );
           break;
         case "code": {
-          const font = this.buildFont('"SFMono-Regular", "SF Mono", Consolas, monospace', typography.fontSize * (state.fontScale ?? 1) * 0.94, {
-            ...state,
-            code: true
-          });
+          const font = this.buildFont(
+            '"SFMono-Regular", "SF Mono", Consolas, monospace',
+            typography.fontSize * (state.fontScale ?? 1) * 0.94,
+            {
+              ...state,
+              code: true
+            }
+          );
           items.push({
             text: inline.text,
             font,
@@ -582,7 +658,9 @@ export class LayoutEngine {
                 code: true,
                 ...(state.mark ? { mark: true } : {}),
                 ...(state.color ? { color: state.color } : {}),
-                ...(state.backgroundColor ? { backgroundColor: state.backgroundColor } : {}),
+                ...(state.backgroundColor
+                  ? { backgroundColor: state.backgroundColor }
+                  : {}),
                 ...(state.verticalAlign
                   ? {
                       baselineShift:
@@ -601,16 +679,22 @@ export class LayoutEngine {
           break;
         case "image":
           {
-            const effectiveFontSize = typography.fontSize * (state.fontScale ?? 1)
-            const height = inline.height ?? Math.max(14, effectiveFontSize * 1.05)
-            const width = inline.width ?? height
-            const font = this.buildFont(typography.fontFamily, effectiveFontSize, state)
+            const effectiveFontSize =
+              typography.fontSize * (state.fontScale ?? 1);
+            const height =
+              inline.height ?? Math.max(14, effectiveFontSize * 1.05);
+            const width = inline.width ?? height;
+            const font = this.buildFont(
+              typography.fontFamily,
+              effectiveFontSize,
+              state
+            );
             items.push({
               text: "\uFFFC",
               font,
               break: "never",
               extraWidth: Math.max(0, width - effectiveFontSize * 0.56)
-            })
+            });
             sources.push(
               this.createSourceFragment(
                 "",
@@ -626,7 +710,7 @@ export class LayoutEngine {
                 },
                 0
               )
-            )
+            );
           }
           break;
         default:
@@ -635,13 +719,20 @@ export class LayoutEngine {
     }
   }
 
-  private buildFont(fontFamily: string, fontSize: number, state: InlineStyleState): string {
+  private buildFont(
+    fontFamily: string,
+    fontSize: number,
+    state: InlineStyleState
+  ): string {
     const style = state.fontStyle ?? "normal";
     const weight = state.fontWeight ?? "400";
     return `${style} ${weight} ${fontSize}px ${state.fontFamily ?? fontFamily}`;
   }
 
-  private getBlockCacheKey(block: TextBlock | HeadingBlock, input: LayoutInput): string {
+  private getBlockCacheKey(
+    block: TextBlock | HeadingBlock,
+    input: LayoutInput
+  ): string {
     const kindSuffix = block.kind === "heading" ? `:h${block.level}` : ":p";
     return [
       block.id,
@@ -693,17 +784,23 @@ export class LayoutEngine {
     return false;
   }
 
-  private estimatePretextHeight(lines: LayoutTextLine[], marginBottom: number): number {
-    const contentHeight = lines.reduce((total, line) => total + line.height, 0)
+  private estimatePretextHeight(
+    lines: LayoutTextLine[],
+    marginBottom: number
+  ): number {
+    const contentHeight = lines.reduce((total, line) => total + line.height, 0);
     const minimumHeight = lines.reduce(
       (maxHeight, line) => Math.max(maxHeight, line.height),
       0
-    )
+    );
 
     return Math.max(minimumHeight, contentHeight + marginBottom);
   }
 
-  private estimateNativeBlockHeight(block: BlockNode, input: LayoutInput): number {
+  private estimateNativeBlockHeight(
+    block: BlockNode,
+    input: LayoutInput
+  ): number {
     const typography = input.typography;
     const styleProfile = buildReadingStyleProfile({
       theme: DEFAULT_ALIGNMENT_THEME,
@@ -726,18 +823,18 @@ export class LayoutEngine {
         }).blockHeight;
       }
       case "code": {
-        const codeFont = `400 ${styleProfile.code.fontSize}px ${styleProfile.code.fontFamily}`
+        const codeFont = `400 ${styleProfile.code.fontSize}px ${styleProfile.code.fontFamily}`;
         const codeWidth = Math.max(
           40,
           contentWidth -
             styleProfile.code.blockPaddingX * 2 -
             (block.style?.paddingLeft ?? 0) -
             (block.style?.paddingRight ?? 0)
-        )
+        );
         const lineCount = Math.max(
           1,
           countWrappedPreformattedLines(block.text, codeWidth, codeFont)
-        )
+        );
         return (
           lineCount * styleProfile.code.lineHeight +
           styleProfile.code.blockPaddingY * 2 +
@@ -763,12 +860,22 @@ export class LayoutEngine {
       case "list":
         return Math.max(
           baseLineHeight * 2,
-          estimateListBlockHeight(block, input.viewportWidth, typography, styleProfile)
+          estimateListBlockHeight(
+            block,
+            input.viewportWidth,
+            typography,
+            styleProfile
+          )
         );
       case "table":
         return Math.max(
           baseLineHeight * 3,
-          estimateTableBlockHeight(block, input.viewportWidth, typography, styleProfile)
+          estimateTableBlockHeight(
+            block,
+            input.viewportWidth,
+            typography,
+            styleProfile
+          )
         );
       case "figure":
         return Math.max(
@@ -842,7 +949,9 @@ export class LayoutEngine {
       font: options.font,
       gapBefore,
       ...(options.color ? { color: options.color } : {}),
-      ...(options.backgroundColor ? { backgroundColor: options.backgroundColor } : {}),
+      ...(options.backgroundColor
+        ? { backgroundColor: options.backgroundColor }
+        : {}),
       ...(options.image ? { image: options.image } : {}),
       ...(options.href ? { href: options.href } : {}),
       ...(options.title ? { title: options.title } : {}),
@@ -859,19 +968,26 @@ export class LayoutEngine {
     section: SectionDocument
   ): Extract<InlineNode, { kind: "image" }> | undefined {
     if (section.presentationRole !== "cover" || section.blocks.length !== 1) {
-      return undefined
+      return undefined;
     }
 
     if (block.inlines.length !== 1) {
-      return undefined
+      return undefined;
     }
 
-    const [inline] = block.inlines
-    return inline?.kind === "image" ? inline : undefined
+    const [inline] = block.inlines;
+    return inline?.kind === "image" ? inline : undefined;
   }
 
-  private isCoverImageBlock(section: SectionDocument, block: BlockNode): block is Extract<BlockNode, { kind: "image" }> {
-    return section.presentationRole === "cover" && section.blocks.length === 1 && block.kind === "image"
+  private isCoverImageBlock(
+    section: SectionDocument,
+    block: BlockNode
+  ): block is Extract<BlockNode, { kind: "image" }> {
+    return (
+      section.presentationRole === "cover" &&
+      section.blocks.length === 1 &&
+      block.kind === "image"
+    );
   }
 }
 
@@ -901,7 +1017,9 @@ function sourceToFragmentOptions(source: RichInlineSource | undefined): {
   return {
     font: source.font,
     ...(source.color ? { color: source.color } : {}),
-    ...(source.backgroundColor ? { backgroundColor: source.backgroundColor } : {}),
+    ...(source.backgroundColor
+      ? { backgroundColor: source.backgroundColor }
+      : {}),
     ...(source.image ? { image: source.image } : {}),
     ...(source.href ? { href: source.href } : {}),
     ...(source.title ? { title: source.title } : {}),
@@ -919,34 +1037,43 @@ function estimateListBlockHeight(
   typography: TypographyOptions,
   styleProfile: ReturnType<typeof buildReadingStyleProfile>
 ): number {
-  const font = `400 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
-  const lineHeight = Math.max(typography.fontSize * 1.45, 18)
+  const font = `400 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`;
+  const lineHeight = Math.max(typography.fontSize * 1.45, 18);
   const contentWidth = Math.max(
     40,
     Math.floor(viewportWidth) - styleProfile.section.sidePadding * 2
-  )
+  );
   const estimateRecursive = (list: ListBlock, depth: number): number => {
-    let total = 0
+    let total = 0;
     for (const item of list.items) {
-      const textBlocks = item.blocks.filter((child) => child.kind !== "list")
-      const itemText = textBlocks.map(extractBlockText).filter(Boolean).join(" ")
+      const textBlocks = item.blocks.filter((child) => child.kind !== "list");
+      const itemText = textBlocks
+        .map(extractBlockText)
+        .filter(Boolean)
+        .join(" ");
       const textWidth = Math.max(
         40,
-        contentWidth - depth * styleProfile.list.indent - styleProfile.list.markerGap
-      )
+        contentWidth -
+          depth * styleProfile.list.indent -
+          styleProfile.list.markerGap
+      );
       total +=
-        estimateWrappedTextHeight(itemText || " ", textWidth, font, lineHeight) +
-        styleProfile.list.itemGap
+        estimateWrappedTextHeight(
+          itemText || " ",
+          textWidth,
+          font,
+          lineHeight
+        ) + styleProfile.list.itemGap;
       for (const child of item.blocks) {
         if (child.kind === "list") {
-          total += estimateRecursive(child, depth + 1)
+          total += estimateRecursive(child, depth + 1);
         }
       }
     }
-    return total
-  }
+    return total;
+  };
 
-  return estimateRecursive(block, 0) + styleProfile.text.marginBottom
+  return estimateRecursive(block, 0) + styleProfile.text.marginBottom;
 }
 
 function estimateTableBlockHeight(
@@ -958,43 +1085,50 @@ function estimateTableBlockHeight(
   const contentWidth = Math.max(
     40,
     Math.floor(viewportWidth) - styleProfile.section.sidePadding * 2
-  )
-  const captionFont = `italic 400 ${Math.max(14, typography.fontSize - 1)}px "Iowan Old Style", "Palatino Linotype", serif`
-  const cellFont = `400 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
-  const headerFont = `700 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
-  const lineHeight = Math.max(typography.fontSize * 1.45, 18)
-  const padding = styleProfile.table.cellPadding
-  let total = styleProfile.text.marginBottom
+  );
+  const captionFont = `italic 400 ${Math.max(14, typography.fontSize - 1)}px "Iowan Old Style", "Palatino Linotype", serif`;
+  const cellFont = `400 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`;
+  const headerFont = `700 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`;
+  const lineHeight = Math.max(typography.fontSize * 1.45, 18);
+  const padding = styleProfile.table.cellPadding;
+  let total = styleProfile.text.marginBottom;
 
   if (block.caption?.length) {
-    total += estimateWrappedTextHeight(
-      block.caption.map(extractBlockText).filter(Boolean).join(" "),
-      contentWidth,
-      captionFont,
-      lineHeight
-    ) + styleProfile.text.marginBottom
+    total +=
+      estimateWrappedTextHeight(
+        block.caption.map(extractBlockText).filter(Boolean).join(" "),
+        contentWidth,
+        captionFont,
+        lineHeight
+      ) + styleProfile.text.marginBottom;
   }
 
   const columnCount = Math.max(
     1,
-    ...block.rows.map((row) => row.cells.reduce((sum, cell) => sum + (cell.colSpan ?? 1), 0))
-  )
-  const columnWidth = contentWidth / columnCount
+    ...block.rows.map((row) =>
+      row.cells.reduce((sum, cell) => sum + (cell.colSpan ?? 1), 0)
+    )
+  );
+  const columnWidth = contentWidth / columnCount;
   for (const row of block.rows) {
-    let rowHeight = lineHeight + padding * 2
+    let rowHeight = lineHeight + padding * 2;
     for (const cell of row.cells) {
-      const font = cell.header ? headerFont : cellFont
-      const cellWidth = Math.max(32, columnWidth * Math.max(1, cell.colSpan ?? 1) - padding * 2)
-      const text = cell.blocks.map(extractBlockText).filter(Boolean).join(" ")
+      const font = cell.header ? headerFont : cellFont;
+      const cellWidth = Math.max(
+        32,
+        columnWidth * Math.max(1, cell.colSpan ?? 1) - padding * 2
+      );
+      const text = cell.blocks.map(extractBlockText).filter(Boolean).join(" ");
       rowHeight = Math.max(
         rowHeight,
-        estimateWrappedTextHeight(text || " ", cellWidth, font, lineHeight) + padding * 2
-      )
+        estimateWrappedTextHeight(text || " ", cellWidth, font, lineHeight) +
+          padding * 2
+      );
     }
-    total += rowHeight
+    total += rowHeight;
   }
 
-  return total + styleProfile.text.marginBottom
+  return total + styleProfile.text.marginBottom;
 }
 
 function estimateFigureBlockHeight(
@@ -1007,11 +1141,11 @@ function estimateFigureBlockHeight(
   const contentWidth = Math.max(
     40,
     Math.floor(viewportWidth) - styleProfile.section.sidePadding * 2
-  )
-  const bodyFont = `400 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
-  const captionFont = `italic 400 ${Math.max(14, typography.fontSize - 1)}px "Iowan Old Style", "Palatino Linotype", serif`
-  const lineHeight = Math.max(typography.fontSize * 1.45, 18)
-  let total = styleProfile.text.marginBottom
+  );
+  const bodyFont = `400 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`;
+  const captionFont = `italic 400 ${Math.max(14, typography.fontSize - 1)}px "Iowan Old Style", "Palatino Linotype", serif`;
+  const lineHeight = Math.max(typography.fontSize * 1.45, 18);
+  let total = styleProfile.text.marginBottom;
 
   for (const child of block.blocks) {
     if (child.kind === "image") {
@@ -1021,13 +1155,14 @@ function estimateFigureBlockHeight(
           viewportHeight,
           ...(child.width ? { intrinsicWidth: child.width } : {}),
           ...(child.height ? { intrinsicHeight: child.height } : {})
-        }).height + 10
-      continue
+        }).height + 10;
+      continue;
     }
 
-    const text = extractBlockText(child)
+    const text = extractBlockText(child);
     if (text) {
-      total += estimateWrappedTextHeight(text, contentWidth, bodyFont, lineHeight) + 8
+      total +=
+        estimateWrappedTextHeight(text, contentWidth, bodyFont, lineHeight) + 8;
     }
   }
 
@@ -1037,8 +1172,8 @@ function estimateFigureBlockHeight(
       Math.max(40, contentWidth - 24),
       captionFont,
       Math.max((typography.fontSize - 1) * 1.45, 18)
-    )
+    );
   }
 
-  return total + 10
+  return total + 10;
 }
