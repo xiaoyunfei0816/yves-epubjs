@@ -19,6 +19,7 @@ function createAnalysisInput(overrides: Partial<ChapterAnalysisInput> = {}): Cha
     styledElementCount: 0,
     inlineStyleDeclarationCount: 0,
     stylePropertyCounts: {},
+    stylePropertyValueCounts: {},
     classTokenCount: 0,
     idAttributeCount: 0,
     ...overrides
@@ -53,20 +54,43 @@ describe("chapter render analyzer", () => {
           color: 1,
           "font-size": 1,
           float: 1,
+          "text-indent": 1,
           position: 1,
-          flex: 1,
-          grid: 1
+          display: 2
+        },
+        stylePropertyValueCounts: {
+          "display:flex": 1,
+          "display:grid": 1
         }
       })
     );
 
     expect(reasons).toEqual([
       "complex-style:float",
+      "complex-style:text-indent",
       "complex-style:position",
       "complex-style:flex",
       "complex-style:grid"
     ]);
   });
+
+  it("does not escalate ordinary display declarations into dom-only layout signals", () => {
+    const reasons = collectComplexStyleReasons(
+      createAnalysisInput({
+        stylePropertyCounts: {
+          display: 2,
+          color: 1,
+          "font-size": 1
+        },
+        stylePropertyValueCounts: {
+          "display:block": 1,
+          "display:inline-block": 1
+        }
+      })
+    )
+
+    expect(reasons).toEqual([])
+  })
 
   it("prefers canvas for low-complexity chapters", () => {
     const analysis = createAnalysisInput({
@@ -80,6 +104,10 @@ describe("chapter render analyzer", () => {
       stylePropertyCounts: {
         color: 2,
         "font-size": 2
+      },
+      stylePropertyValueCounts: {
+        "color:#333": 2,
+        "font-size:1em": 2
       }
     });
 
@@ -122,6 +150,9 @@ describe("chapter render analyzer", () => {
       },
       stylePropertyCounts: {
         float: 1
+      },
+      stylePropertyValueCounts: {
+        "float:left": 1
       }
     });
 

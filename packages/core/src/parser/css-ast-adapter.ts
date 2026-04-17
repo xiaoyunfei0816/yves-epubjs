@@ -25,10 +25,59 @@ export function getCssRuleDeclarations(rule: CssAstRule): CssAstDeclaration[] {
   return children.filter((node): node is CssAstDeclaration => node.type === "Declaration")
 }
 
+export function getCssAllDeclarations(stylesheet: CssAstStyleSheet): CssAstDeclaration[] {
+  return collectCssDeclarations(stylesheet)
+}
+
 export function serializeCssNode(node: CssAstNode): string {
   return generate(node)
 }
 
 export function getCssDeclarationValueText(declaration: CssAstDeclaration): string {
   return declaration.value ? serializeCssNode(declaration.value) : ""
+}
+
+function collectCssDeclarations(node: CssAstNode | undefined): CssAstDeclaration[] {
+  if (!node) {
+    return []
+  }
+
+  if (node.type === "Declaration") {
+    return [node as CssAstDeclaration]
+  }
+
+  return getCssChildNodes(node).flatMap((child) => collectCssDeclarations(child))
+}
+
+function getCssChildNodes(node: CssAstNode): CssAstNode[] {
+  const directChildren = getCssNodeListChildren(
+    node as CssAstNode & {
+      children?: {
+        toArray(): CssAstNode[]
+      }
+    }
+  )
+  const blockChildren = getCssNodeListChildren(
+    (node as CssAstNode & {
+      block?: {
+        children?: {
+          toArray(): CssAstNode[]
+        }
+      }
+    }).block
+  )
+
+  return [...directChildren, ...blockChildren]
+}
+
+function getCssNodeListChildren(
+  node:
+    | {
+        children?: {
+          toArray(): CssAstNode[]
+        }
+      }
+    | undefined
+): CssAstNode[] {
+  return node?.children?.toArray() ?? []
 }

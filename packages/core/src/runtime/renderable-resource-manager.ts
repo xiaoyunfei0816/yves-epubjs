@@ -1,0 +1,180 @@
+import { getMimeTypeFromPath } from "../container/resource-mime"
+
+export type RenderableResourceConsumer = "canvas" | "dom"
+
+type RenderableResourceManagerOptions = {
+  getContainer: () => HTMLElement | null | undefined
+  readBinary: (path: string) => Promise<Uint8Array> | null
+  shouldTrackDomLayoutChanges: () => boolean
+  onCanvasResourceResolved: () => void
+  onDomLayoutChange: () => void
+}
+
+export class RenderableResourceManager {
+  private readonly objectUrls = new Map<string, string>()
+  private readonly pendingConsumers = new Map<string, Set<RenderableResourceConsumer>>()
+
+  constructor(private readonly options: RenderableResourceManagerOptions) {}
+
+  isReady(path: string): boolean {
+    const resolved = this.objectUrls.get(path)
+    return typeof resolved === "string" && resolved.startsWith("blob:")
+  }
+
+  resolveUrl(
+    path: string,
+    consumer: RenderableResourceConsumer
+  ): string {
+    const readBinary = this.options.readBinary(path)
+    if (!readBinary || typeof Blob === "undefined" || typeof URL === "undefined") {
+      return path
+    }
+
+    this.trackConsumer(path, consumer)
+    const cached = this.objectUrls.get(path)
+    if (cached) {
+      return cached
+    }
+
+    const mimeType = getMimeTypeFromPath(path) ?? "application/octet-stream"
+    const placeholder = path
+
+    readBinary
+      .then((binary) => {
+        if (typeof URL.createObjectURL !== "function") {
+          return
+        }
+
+        const bytes = new Uint8Array(binary.byteLength)
+        bytes.set(binary)
+        const objectUrl = URL.createObjectURL(
+          new Blob([bytes.buffer as ArrayBuffer], { type: mimeType })
+        )
+        const previous = this.objectUrls.get(path)
+        if (
+          previous &&
+          previous !== path &&
+          typeof URL.revokeObjectURL === "function"
+        ) {
+          URL.revokeObjectURL(previous)
+        }
+        this.objectUrls.set(path, objectUrl)
+        const consumers = this.pendingConsumers.get(path)
+        if (consumers?.has("dom")) {
+          this.patchRenderedDomResource(path, objectUrl)
+        }
+        if (consumers?.has("canvas")) {
+          this.options.onCanvasResourceResolved()
+        }
+        this.pendingConsumers.delete(path)
+      })
+      .catch(() => {
+        this.pendingConsumers.delete(path)
+      })
+
+    this.objectUrls.set(path, placeholder)
+    return placeholder
+  }
+
+  revokeAll(): void {
+    if (
+      typeof URL === "undefined" ||
+      typeof URL.revokeObjectURL !== "function"
+    ) {
+      this.objectUrls.clear()
+      this.pendingConsumers.clear()
+      return
+    }
+
+    for (const value of this.objectUrls.values()) {
+      if (value.startsWith("blob:")) {
+        URL.revokeObjectURL(value)
+      }
+    }
+
+    this.objectUrls.clear()
+    this.pendingConsumers.clear()
+  }
+
+  private trackConsumer(
+    path: string,
+    consumer: RenderableResourceConsumer
+  ): void {
+    const consumers = this.pendingConsumers.get(path) ?? new Set<RenderableResourceConsumer>()
+    consumers.add(consumer)
+    this.pendingConsumers.set(path, consumers)
+  }
+
+  private patchRenderedDomResource(path: string, objectUrl: string): boolean {
+    const container = this.options.getContainer()
+    if (!container) {
+      return false
+    }
+
+    const candidates = container.querySelectorAll<HTMLElement>(
+      ".epub-dom-section img, .epub-dom-section source, .epub-dom-section image, .epub-dom-section use, .epub-dom-section [style*='url('], style[data-epub-dom-source]"
+    )
+    let patched = false
+
+    for (const element of candidates) {
+      if (element.tagName.toLowerCase() === "style") {
+        if (element.textContent?.includes(path)) {
+          element.textContent = element.textContent.replaceAll(path, objectUrl)
+          this.trackDomLayoutChange(null)
+          patched = true
+        }
+        continue
+      }
+
+      if (element.getAttribute("src") === path) {
+        element.setAttribute("src", objectUrl)
+        this.trackDomLayoutChange(element)
+        patched = true
+      }
+
+      if (element.getAttribute("href") === path) {
+        element.setAttribute("href", objectUrl)
+        this.trackDomLayoutChange(element)
+        patched = true
+      }
+
+      if (element.getAttribute("xlink:href") === path) {
+        element.setAttribute("xlink:href", objectUrl)
+        this.trackDomLayoutChange(element)
+        patched = true
+      }
+
+      const style = element.getAttribute("style")
+      if (style?.includes(path)) {
+        element.setAttribute("style", style.replaceAll(path, objectUrl))
+        this.trackDomLayoutChange(element)
+        patched = true
+      }
+    }
+
+    return patched
+  }
+
+  private trackDomLayoutChange(element: HTMLElement | null): void {
+    if (!this.options.shouldTrackDomLayoutChanges()) {
+      return
+    }
+
+    if (element instanceof HTMLImageElement) {
+      if (element.complete) {
+        this.options.onDomLayoutChange()
+        return
+      }
+
+      element.addEventListener("load", () => {
+        this.options.onDomLayoutChange()
+      }, { once: true })
+      element.addEventListener("error", () => {
+        this.options.onDomLayoutChange()
+      }, { once: true })
+      return
+    }
+
+    this.options.onDomLayoutChange()
+  }
+}

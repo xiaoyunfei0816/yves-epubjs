@@ -1,4 +1,9 @@
 import type { XhtmlDomDocument } from "../parser/xhtml-dom-parser";
+import type { CssAstStyleSheet } from "../parser/css-ast-adapter";
+import {
+  getCssAllDeclarations,
+  getCssDeclarationValueText
+} from "../parser/css-ast-adapter";
 import {
   getHtmlElementAttribute,
   getHtmlNodeChildren,
@@ -22,6 +27,7 @@ export type ChapterAnalysisInput = {
   styledElementCount: number;
   inlineStyleDeclarationCount: number;
   stylePropertyCounts: Record<string, number>;
+  stylePropertyValueCounts: Record<string, number>;
   classTokenCount: number;
   idAttributeCount: number;
 };
@@ -30,9 +36,14 @@ export function buildChapterAnalysisInput(input: {
   href: string;
   document?: Pick<XhtmlDomDocument, "bodyElement" | "htmlElement">;
   chapter?: PreprocessedChapter;
+  stylesheets?: CssAstStyleSheet[];
 }): ChapterAnalysisInput {
   if (input.chapter) {
-    return buildChapterAnalysisInputFromPreprocessedChapter(input.href, input.chapter);
+    return buildChapterAnalysisInputFromPreprocessedChapter(
+      input.href,
+      input.chapter,
+      input.stylesheets
+    );
   }
 
   const root = input.document?.bodyElement ?? input.document?.htmlElement;
@@ -47,6 +58,7 @@ export function buildChapterAnalysisInput(input: {
       styledElementCount: 0,
       inlineStyleDeclarationCount: 0,
       stylePropertyCounts: {},
+      stylePropertyValueCounts: {},
       classTokenCount: 0,
       idAttributeCount: 0
     };
@@ -63,6 +75,7 @@ export function buildChapterAnalysisInput(input: {
     styledElementCount: 0,
     inlineStyleDeclarationCount: 0,
     stylePropertyCounts: {},
+    stylePropertyValueCounts: {},
     classTokenCount: 0,
     idAttributeCount: 0
   };
@@ -71,12 +84,15 @@ export function buildChapterAnalysisInput(input: {
     visitNode(child, 1, analysis);
   }
 
+  collectStyleSheetDeclarations(input.stylesheets, analysis)
+
   return analysis;
 }
 
 function buildChapterAnalysisInputFromPreprocessedChapter(
   href: string,
-  chapter: PreprocessedChapter
+  chapter: PreprocessedChapter,
+  stylesheets?: CssAstStyleSheet[]
 ): ChapterAnalysisInput {
   const analysis: ChapterAnalysisInput = {
     href,
@@ -89,6 +105,7 @@ function buildChapterAnalysisInputFromPreprocessedChapter(
     styledElementCount: 0,
     inlineStyleDeclarationCount: 0,
     stylePropertyCounts: {},
+    stylePropertyValueCounts: {},
     classTokenCount: 0,
     idAttributeCount: 0
   };
@@ -96,6 +113,8 @@ function buildChapterAnalysisInputFromPreprocessedChapter(
   for (const node of chapter.nodes) {
     visitPreprocessedNode(node, 1, analysis);
   }
+
+  collectStyleSheetDeclarations(stylesheets, analysis)
 
   return analysis;
 }
@@ -164,9 +183,7 @@ function collectElementAttributes(
   analysis.styledElementCount += 1;
   analysis.inlineStyleDeclarationCount += declarations.length;
   for (const declaration of declarations) {
-    const property = declaration.property.toLowerCase();
-    analysis.stylePropertyCounts[property] =
-      (analysis.stylePropertyCounts[property] ?? 0) + 1;
+    collectStyleDeclaration(declaration.property, declaration.value, analysis)
   }
 }
 
@@ -211,9 +228,7 @@ function visitPreprocessedNode(
       analysis.styledElementCount += 1;
       analysis.inlineStyleDeclarationCount += declarations.length;
       for (const declaration of declarations) {
-        const property = declaration.property.toLowerCase();
-        analysis.stylePropertyCounts[property] =
-          (analysis.stylePropertyCounts[property] ?? 0) + 1;
+        collectStyleDeclaration(declaration.property, declaration.value, analysis)
       }
     }
   }
@@ -221,4 +236,47 @@ function visitPreprocessedNode(
   for (const child of node.children) {
     visitPreprocessedNode(child, depth + 1, analysis);
   }
+}
+
+function collectStyleSheetDeclarations(
+  stylesheets: CssAstStyleSheet[] | undefined,
+  analysis: ChapterAnalysisInput
+): void {
+  for (const stylesheet of stylesheets ?? []) {
+    for (const declaration of getCssAllDeclarations(stylesheet)) {
+      const property = declaration.property.trim().toLowerCase()
+      if (!property) {
+        continue
+      }
+
+      collectStyleDeclaration(property, getCssDeclarationValueText(declaration), analysis)
+    }
+  }
+}
+
+function collectStyleDeclaration(
+  property: string,
+  value: string,
+  analysis: ChapterAnalysisInput
+): void {
+  const normalizedProperty = property.trim().toLowerCase()
+  const normalizedValue = normalizeStyleDeclarationValue(value)
+  if (!normalizedProperty) {
+    return
+  }
+
+  analysis.stylePropertyCounts[normalizedProperty] =
+    (analysis.stylePropertyCounts[normalizedProperty] ?? 0) + 1
+
+  if (!normalizedValue) {
+    return
+  }
+
+  const valueKey = `${normalizedProperty}:${normalizedValue}`
+  analysis.stylePropertyValueCounts[valueKey] =
+    (analysis.stylePropertyValueCounts[valueKey] ?? 0) + 1
+}
+
+function normalizeStyleDeclarationValue(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ")
 }

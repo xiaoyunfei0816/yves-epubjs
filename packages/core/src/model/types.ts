@@ -290,6 +290,7 @@ export type TypographyOptions = {
 export type Locator = {
   spineIndex: number;
   blockId?: string;
+  anchorId?: string;
   inlineOffset?: number;
   cfi?: string;
   progressInSection?: number;
@@ -298,6 +299,7 @@ export type Locator = {
 export type SearchResult = {
   locator: Locator;
   excerpt: string;
+  matchText?: string;
   sectionId: string;
   href: string;
 };
@@ -352,12 +354,24 @@ export type RenderMetrics = {
   totalCanvasHeight: number;
 };
 
+export type RenderLayoutAuthority = "project-layout" | "browser-layout";
+
+export type RenderGeometrySource = "interaction-map" | "dom-geometry";
+
+export type RenderInteractionModel = "canvas-hit-test" | "dom-events";
+
+export type RenderFlowModel = "scroll-slices" | "paginated-pages" | "dom-flow";
+
 export type RenderDiagnostics = {
   mode: RenderMode;
   score: number;
   reasons: string[];
   sectionId?: string;
   sectionHref?: string;
+  layoutAuthority?: RenderLayoutAuthority;
+  geometrySource?: RenderGeometrySource;
+  interactionModel?: RenderInteractionModel;
+  flowModel?: RenderFlowModel;
   alignmentTarget?: "dom-baseline";
   styleProfile?: "shared";
 };

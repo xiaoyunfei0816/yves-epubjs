@@ -32,7 +32,7 @@ const COMPLEX_CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
     </body>
   </html>`;
 
-function createHybridReaderFixture(): {
+function createHybridReaderFixture(mode: "scroll" | "paginated" = "scroll"): {
   reader: EpubReader;
   container: HTMLDivElement;
   book: Book;
@@ -91,7 +91,7 @@ function createHybridReaderFixture(): {
     sections: [simpleSection, complexSection]
   };
 
-  const reader = new EpubReader({ container, mode: "scroll" });
+  const reader = new EpubReader({ container, mode });
   (
     reader as unknown as {
       book: Book;
@@ -132,6 +132,282 @@ describe("EpubReader hybrid navigation", () => {
     expect(container.dataset.renderMode).toBe("canvas");
   });
 
+  it("uses rendered dom anchor targets for toc jumps before falling back to section progress", async () => {
+    const originalOffsetTop = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetTop"
+    );
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight"
+    );
+    const originalGetBoundingClientRect = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "getBoundingClientRect"
+    );
+
+    try {
+      let currentScrollTop = 0;
+
+      Object.defineProperty(HTMLElement.prototype, "offsetTop", {
+        configurable: true,
+        get() {
+          const sectionId = this.dataset?.sectionId;
+          if (sectionId === "section-1") {
+            return 0;
+          }
+          if (sectionId === "section-2") {
+            return 520;
+          }
+          return originalOffsetTop?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+        configurable: true,
+        get() {
+          const sectionId = this.dataset?.sectionId;
+          if (sectionId === "section-1") {
+            return 520;
+          }
+          if (sectionId === "section-2") {
+            return 1400;
+          }
+          return originalOffsetHeight?.get?.call(this) ?? 0;
+        }
+      });
+      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+        configurable: true,
+        value() {
+          if (this === document.body.lastElementChild) {
+            return {
+              x: 0,
+              y: 100,
+              top: 100,
+              left: 0,
+              bottom: 580,
+              right: 320,
+              width: 320,
+              height: 480,
+              toJSON() {
+                return this;
+              }
+            };
+          }
+          if (this.id === "details") {
+            return {
+              x: 0,
+              y: 920 - currentScrollTop,
+              top: 920 - currentScrollTop,
+              left: 0,
+              bottom: 948 - currentScrollTop,
+              right: 320,
+              width: 320,
+              height: 28,
+              toJSON() {
+                return this;
+              }
+            };
+          }
+          return originalGetBoundingClientRect?.value?.call(this) ?? {
+            x: 0,
+            y: 0,
+            top: 0,
+            left: 0,
+            bottom: 0,
+            right: 0,
+            width: 0,
+            height: 0,
+            toJSON() {
+              return this;
+            }
+          };
+        }
+      });
+
+      const { reader, container } = createHybridReaderFixture();
+      Object.defineProperty(container, "scrollTop", {
+        configurable: true,
+        get() {
+          return currentScrollTop;
+        },
+        set(value: number) {
+          currentScrollTop = value;
+        }
+      });
+
+      await reader.render();
+      await reader.goToTocItem("toc-complex");
+
+      expect(reader.getRenderMetrics().backend).toBe("dom");
+      expect(reader.getCurrentLocation()?.spineIndex).toBe(1);
+      expect(reader.getCurrentLocation()?.blockId).toBeTruthy();
+      expect(reader.getCurrentLocation()?.progressInSection ?? 0).toBeGreaterThan(0.5);
+      expect(container.scrollTop).toBe(804);
+    } finally {
+      if (originalOffsetTop) {
+        Object.defineProperty(HTMLElement.prototype, "offsetTop", originalOffsetTop);
+      }
+      if (originalOffsetHeight) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
+      }
+      if (originalGetBoundingClientRect) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "getBoundingClientRect",
+          originalGetBoundingClientRect
+        );
+      }
+    }
+  });
+
+  it("maps locators and viewport points inside dom chapters without requiring canvas regions", async () => {
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight"
+    );
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight"
+    );
+    const originalGetBoundingClientRect = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "getBoundingClientRect"
+    );
+
+    try {
+      let currentContainer: HTMLElement | null = null;
+
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+        configurable: true,
+        get() {
+          if (this.classList?.contains("epub-dom-section")) {
+            return 1400;
+          }
+          return originalOffsetHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+        configurable: true,
+        get() {
+          if (this.classList?.contains("epub-dom-section")) {
+            return 1400;
+          }
+          return originalScrollHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+        configurable: true,
+        value() {
+          if (this === currentContainer) {
+            return {
+              x: 0,
+              y: 100,
+              top: 100,
+              left: 0,
+              bottom: 580,
+              right: 320,
+              width: 320,
+              height: 480,
+              toJSON() {
+                return this;
+              }
+            };
+          }
+          if (this.classList?.contains("epub-dom-section")) {
+            return {
+              x: 0,
+              y: 116,
+              top: 116,
+              left: 0,
+              bottom: 516,
+              right: 320,
+              width: 320,
+              height: 400,
+              toJSON() {
+                return this;
+              }
+            };
+          }
+          if (this.id === "details") {
+            return {
+              x: 12,
+              y: 236,
+              top: 236,
+              left: 12,
+              bottom: 264,
+              right: 308,
+              width: 296,
+              height: 28,
+              toJSON() {
+                return this;
+              }
+            };
+          }
+          return originalGetBoundingClientRect?.value?.call(this) ?? {
+            x: 0,
+            y: 0,
+            top: 0,
+            left: 0,
+            bottom: 0,
+            right: 0,
+            width: 0,
+            height: 0,
+            toJSON() {
+              return this;
+            }
+          };
+        }
+      });
+
+      const { reader, container } = createHybridReaderFixture("paginated");
+      currentContainer = container;
+
+      await reader.render();
+      expect(container.dataset.renderMode).toBe("canvas");
+
+      await reader.goToTocItem("toc-complex");
+
+      expect(reader.getRenderMetrics().backend).toBe("dom");
+      const locator = reader.getCurrentLocation();
+      expect(locator?.anchorId).toBe("details");
+
+      const rects = reader.mapLocatorToViewport(locator!);
+      expect(rects).toHaveLength(1);
+      expect(rects[0]).toMatchObject({
+        x: 12,
+        y: 136,
+        width: 296,
+        height: 28
+      });
+
+      const mappedLocator = reader.mapViewportToLocator({
+        x: 18,
+        y: 142
+      });
+      expect(mappedLocator?.spineIndex).toBe(1);
+      expect(mappedLocator?.anchorId).toBe("details");
+      expect(mappedLocator?.blockId).toBeTruthy();
+      expect(mappedLocator?.progressInSection ?? 0).toBeGreaterThan(0.08);
+    } finally {
+      if (originalOffsetHeight) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
+      }
+      if (originalScrollHeight) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", originalScrollHeight);
+      }
+      if (originalGetBoundingClientRect) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "getBoundingClientRect",
+          originalGetBoundingClientRect
+        );
+      }
+    }
+  });
+
   it("keeps same-chapter anchor links inside dom chapters on the current section", async () => {
     const { reader, container } = createHybridReaderFixture();
 
@@ -156,5 +432,148 @@ describe("EpubReader hybrid navigation", () => {
     expect(reader.getCurrentLocation()?.spineIndex).toBe(1);
     expect(reader.getCurrentLocation()?.blockId).toBeTruthy();
     expect(container.dataset.renderMode).toBe("dom");
+  });
+
+  it("maps dom anchored-fragment clicks onto the current locator contract", async () => {
+    const originalGetBoundingClientRect = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "getBoundingClientRect"
+    );
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight"
+    );
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight"
+    );
+
+    try {
+      let currentContainer: HTMLElement | null = null;
+
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+        configurable: true,
+        get() {
+          if (this.classList?.contains("epub-dom-section")) {
+            return 1400;
+          }
+          return originalOffsetHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+        configurable: true,
+        get() {
+          if (this.classList?.contains("epub-dom-section")) {
+            return 1400;
+          }
+          return originalScrollHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+        configurable: true,
+        value() {
+          if (this === currentContainer) {
+            return {
+              x: 0,
+              y: 100,
+              top: 100,
+              left: 0,
+              bottom: 580,
+              right: 320,
+              width: 320,
+              height: 480,
+              toJSON() {
+                return this;
+              }
+            };
+          }
+          if (this.classList?.contains("epub-dom-section")) {
+            return {
+              x: 0,
+              y: 116,
+              top: 116,
+              left: 0,
+              bottom: 516,
+              right: 320,
+              width: 320,
+              height: 400,
+              toJSON() {
+                return this;
+              }
+            };
+          }
+          if (this.id === "details") {
+            return {
+              x: 16,
+              y: 236,
+              top: 236,
+              left: 16,
+              bottom: 264,
+              right: 304,
+              width: 288,
+              height: 28,
+              toJSON() {
+                return this;
+              }
+            };
+          }
+          return originalGetBoundingClientRect?.value?.call(this) ?? {
+            x: 0,
+            y: 0,
+            top: 0,
+            left: 0,
+            bottom: 0,
+            right: 0,
+            width: 0,
+            height: 0,
+            toJSON() {
+              return this;
+            }
+          };
+        }
+      });
+
+      const { reader, container } = createHybridReaderFixture("paginated");
+      currentContainer = container;
+
+      await reader.goToLocation({
+        spineIndex: 1,
+        progressInSection: 0
+      });
+
+      const details = container.querySelector("#details");
+      expect(details).toBeTruthy();
+
+      details?.dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          clientX: 24,
+          clientY: 244
+        })
+      );
+
+      expect(reader.getRenderMetrics().backend).toBe("dom");
+      expect(reader.getCurrentLocation()?.spineIndex).toBe(1);
+      expect(reader.getCurrentLocation()?.anchorId).toBe("details");
+      expect(reader.getCurrentLocation()?.blockId).toBeTruthy();
+      expect(reader.getCurrentLocation()?.progressInSection ?? 0).toBeGreaterThan(0.08);
+    } finally {
+      if (originalGetBoundingClientRect) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "getBoundingClientRect",
+          originalGetBoundingClientRect
+        );
+      }
+      if (originalOffsetHeight) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
+      }
+      if (originalScrollHeight) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", originalScrollHeight);
+      }
+    }
   });
 });

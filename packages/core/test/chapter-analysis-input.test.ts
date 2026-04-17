@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildChapterAnalysisInput,
+  parseCssStyleSheet,
   parseXhtmlDomDocument,
   type ChapterAnalysisInput
 } from "../src";
@@ -33,6 +34,7 @@ describe("chapter analysis input", () => {
       styledElementCount: 0,
       inlineStyleDeclarationCount: 0,
       stylePropertyCounts: {},
+      stylePropertyValueCounts: {},
       classTokenCount: 0,
       idAttributeCount: 0
     } satisfies ChapterAnalysisInput);
@@ -71,6 +73,10 @@ describe("chapter analysis input", () => {
     expect(analysis.stylePropertyCounts).toEqual({
       "font-size": 1,
       color: 1
+    });
+    expect(analysis.stylePropertyValueCounts).toEqual({
+      "font-size:18px": 1,
+      "color:#333": 1
     });
     expect(analysis.classTokenCount).toBe(1);
     expect(analysis.idAttributeCount).toBe(0);
@@ -120,7 +126,43 @@ describe("chapter analysis input", () => {
       display: 1,
       position: 1
     });
+    expect(analysis.stylePropertyValueCounts).toEqual({
+      "display:flex": 1,
+      "position:absolute": 1
+    });
     expect(analysis.classTokenCount).toBe(0);
     expect(analysis.idAttributeCount).toBe(1);
   });
-});
+
+  it("includes linked stylesheet declarations in property counts", () => {
+    const analysis = buildChapterAnalysisInput({
+      href: "OPS/styled.xhtml",
+      document: parseXhtmlDomDocument(`<?xml version="1.0" encoding="utf-8"?>
+      <html xmlns="http://www.w3.org/1999/xhtml">
+        <body>
+          <p class="noindent"><span class="dropcap">A</span>lpha</p>
+        </body>
+      </html>`),
+      stylesheets: [
+        parseCssStyleSheet(`
+          p { text-indent: 2em; }
+          span.dropcap { float: left; font-size: 1.6em; display: block; }
+        `)
+      ]
+    })
+
+    expect(analysis.stylePropertyCounts).toEqual({
+      "text-indent": 1,
+      float: 1,
+      "font-size": 1,
+      display: 1
+    })
+    expect(analysis.stylePropertyValueCounts).toEqual({
+      "text-indent:2em": 1,
+      "float:left": 1,
+      "font-size:1.6em": 1,
+      "display:block": 1
+    })
+    expect(analysis.classTokenCount).toBe(2)
+  })
+})

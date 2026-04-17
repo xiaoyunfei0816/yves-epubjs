@@ -1002,6 +1002,7 @@ describe("pretext layout integration", () => {
 
     await reader.goToTocItem("toc-later");
     expect(reader.getCurrentLocation()?.blockId).toBe("text-2");
+    expect(reader.getCurrentLocation()?.progressInSection ?? 0).toBeGreaterThan(0);
     expect(reader.getPaginationInfo().currentPage).toBeGreaterThan(1);
   });
 

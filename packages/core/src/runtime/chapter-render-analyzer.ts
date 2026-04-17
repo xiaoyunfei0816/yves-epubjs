@@ -3,20 +3,21 @@ import type { ChapterRenderDecision } from "../model/types";
 import {
   createChapterRenderDecision
 } from "./chapter-render-decision";
+import {
+  COMPLEX_DOM_STYLE_PROPERTIES,
+  HIGH_RISK_DOM_TAGS
+} from "./canvas-backlog-boundary";
 
-export const HIGH_RISK_TAGS = [
-  "table",
-  "svg",
-  "math",
-  "iframe"
-] as const;
+export const HIGH_RISK_TAGS = HIGH_RISK_DOM_TAGS;
 
-export const COMPLEX_STYLE_PROPERTIES = [
-  "float",
-  "position",
-  "flex",
-  "grid"
-] as const;
+export const COMPLEX_STYLE_PROPERTIES = COMPLEX_DOM_STYLE_PROPERTIES;
+
+// Analyzer deliberately treats layout-heavy CSS as an opt-in DOM signal.
+// We only escalate flex/grid when the declaration value itself is `display:flex`
+// or `display:grid`; ordinary `display:block` / `display:inline-block` should
+// stay on the canvas-friendly path and must not trigger fallback by themselves.
+// The source-of-truth freeze list lives in `canvas-backlog-boundary.ts`; adding
+// new complex CSS compatibility work now requires updating that boundary first.
 
 export type ChapterRenderAnalyzerConfig = {
   domThreshold: number;
@@ -27,6 +28,10 @@ export type ChapterRenderAnalyzerConfig = {
 };
 
 export const DEFAULT_CHAPTER_RENDER_ANALYZER_CONFIG: ChapterRenderAnalyzerConfig = {
+  // `20` is deliberate:
+  // - one high-risk tag (20) routes directly to DOM
+  // - one frozen complex-style signal (15) stays on canvas unless combined
+  // - two frozen complex-style signals (30) route to DOM
   domThreshold: 20,
   deepNestThreshold: 6,
   imageDenseThreshold: 8,
@@ -49,12 +54,12 @@ export function collectHighRiskTagReasons(
 }
 
 export function collectComplexStyleReasons(
-  input: Pick<ChapterAnalysisInput, "stylePropertyCounts">
+  input: Pick<ChapterAnalysisInput, "stylePropertyCounts" | "stylePropertyValueCounts">
 ): string[] {
   const reasons: string[] = [];
 
   for (const property of COMPLEX_STYLE_PROPERTIES) {
-    if (hasComplexStyleProperty(input.stylePropertyCounts, property)) {
+    if (hasComplexStyleProperty(input, property)) {
       reasons.push(`complex-style:${property}`);
     }
   }
@@ -128,19 +133,19 @@ export function analyzeChapterRenderMode(
 }
 
 function hasComplexStyleProperty(
-  stylePropertyCounts: Record<string, number>,
-  property: (typeof COMPLEX_STYLE_PROPERTIES)[number]
+  input: Pick<ChapterAnalysisInput, "stylePropertyCounts" | "stylePropertyValueCounts">,
+  property: string
 ): boolean {
-  if ((stylePropertyCounts[property] ?? 0) > 0) {
+  if ((input.stylePropertyCounts[property] ?? 0) > 0) {
     return true;
   }
 
   if (property === "flex") {
-    return (stylePropertyCounts.display ?? 0) > 0;
+    return (input.stylePropertyValueCounts["display:flex"] ?? 0) > 0;
   }
 
   if (property === "grid") {
-    return (stylePropertyCounts.display ?? 0) > 0;
+    return (input.stylePropertyValueCounts["display:grid"] ?? 0) > 0;
   }
 
   return false;

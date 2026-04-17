@@ -1,9 +1,10 @@
 {
   "id": "minimal-book",
-  "title": "Minimal Book Fixture",
+  "title": "Playwright Smoke Book",
   "purpose": [
-    "validate fixture directory access",
-    "reserve a stable location for a future real epub sample"
+    "provide a stable EPUB fixture for Playwright smoke coverage",
+    "exercise TOC, search, and paginated navigation without relying on local downloads"
   ],
-  "status": "placeholder"
+  "status": "active",
+  "entry": "book.epub"
 }
