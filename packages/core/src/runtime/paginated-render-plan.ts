@@ -10,6 +10,7 @@ import type {
   Theme,
   TypographyOptions
 } from "../model/types"
+import { normalizeLocator } from "./locator"
 import type { SectionDisplayList } from "../renderer/draw-ops"
 
 export type PageBlockSlice =
@@ -68,6 +69,12 @@ export function buildPaginatedPages(options: {
       blocks: []
     }
     let usedHeight = 0
+
+    if (section.renditionLayout === "pre-paginated") {
+      pages.push(currentPage)
+      pageNumber += 1
+      continue
+    }
 
     for (const layoutBlock of layout.blocks) {
       if (layoutBlock.type === "pretext") {
@@ -193,6 +200,7 @@ export function buildPageDisplayList(options: {
   theme: Theme
   typography: TypographyOptions
   highlightedBlockIds: Set<string>
+  underlinedBlockIds: Set<string>
   activeBlockId: string | undefined
   resolveImageLoaded: (src: string) => boolean
   resolveImageUrl: (src: string) => string
@@ -206,6 +214,7 @@ export function buildPageDisplayList(options: {
     typography: TypographyOptions
     locatorMap: Map<string, Locator>
     highlightedBlockIds: Set<string>
+    underlinedBlockIds: Set<string>
     activeBlockId: string | undefined
     resolveImageLoaded: (src: string) => boolean
     resolveImageUrl: (src: string) => string
@@ -232,15 +241,18 @@ export function buildPageDisplayList(options: {
 
   const locatorMap = new Map<string, Locator>()
   for (const block of blocks) {
-    locatorMap.set(block.id, {
-      spineIndex: options.page.spineIndex,
-      blockId: block.id,
-      progressInSection:
-        options.page.totalPagesInSection > 1
-          ? (options.page.pageNumberInSection - 1) /
-            (options.page.totalPagesInSection - 1)
-          : 0
-    })
+    locatorMap.set(
+      block.id,
+      normalizeLocator({
+        spineIndex: options.page.spineIndex,
+        blockId: block.id,
+        progressInSection:
+          options.page.totalPagesInSection > 1
+            ? (options.page.pageNumberInSection - 1) /
+              (options.page.totalPagesInSection - 1)
+            : 0
+      })
+    )
   }
 
   return options.buildSectionDisplayList({
@@ -252,6 +264,7 @@ export function buildPageDisplayList(options: {
     typography: options.typography,
     locatorMap,
     highlightedBlockIds: options.highlightedBlockIds,
+    underlinedBlockIds: options.underlinedBlockIds,
     activeBlockId: options.activeBlockId,
     resolveImageLoaded: options.resolveImageLoaded,
     resolveImageUrl: options.resolveImageUrl

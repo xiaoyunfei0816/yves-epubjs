@@ -102,7 +102,8 @@ describe("EpubReader chapter render routing", () => {
       interactionModel: "canvas-hit-test",
       flowModel: "scroll-slices",
       alignmentTarget: "dom-baseline",
-      styleProfile: "shared",
+      publisherStyles: "enabled",
+      styleProfile: "default-reflowable",
       sectionId: "section-1",
       sectionHref: "OPS/simple.xhtml"
     });
@@ -176,7 +177,8 @@ describe("EpubReader chapter render routing", () => {
       interactionModel: "canvas-hit-test",
       flowModel: "scroll-slices",
       alignmentTarget: "dom-baseline",
-      styleProfile: "shared",
+      publisherStyles: "enabled",
+      styleProfile: "default-reflowable",
       sectionId: "section-1",
       sectionHref: "OPS/simple.xhtml"
     });
@@ -190,7 +192,8 @@ describe("EpubReader chapter render routing", () => {
         interactionModel: "canvas-hit-test",
         flowModel: "scroll-slices",
         alignmentTarget: "dom-baseline",
-        styleProfile: "shared",
+        publisherStyles: "enabled",
+        styleProfile: "default-reflowable",
         sectionId: "section-1",
         sectionHref: "OPS/simple.xhtml",
         isCurrent: true
@@ -204,7 +207,8 @@ describe("EpubReader chapter render routing", () => {
         interactionModel: "dom-events",
         flowModel: "dom-flow",
         alignmentTarget: "dom-baseline",
-        styleProfile: "shared",
+        publisherStyles: "enabled",
+        styleProfile: "default-reflowable",
         sectionId: "section-2",
         sectionHref: "OPS/complex.xhtml",
         isCurrent: false
@@ -229,7 +233,8 @@ describe("EpubReader chapter render routing", () => {
       interactionModel: "dom-events",
       flowModel: "dom-flow",
       alignmentTarget: "dom-baseline",
-      styleProfile: "shared",
+      publisherStyles: "enabled",
+      styleProfile: "default-reflowable",
       sectionId: "section-2",
       sectionHref: "OPS/complex.xhtml"
     });
@@ -243,7 +248,8 @@ describe("EpubReader chapter render routing", () => {
         interactionModel: "canvas-hit-test",
         flowModel: "scroll-slices",
         alignmentTarget: "dom-baseline",
-        styleProfile: "shared",
+        publisherStyles: "enabled",
+        styleProfile: "default-reflowable",
         sectionId: "section-1",
         sectionHref: "OPS/simple.xhtml",
         isCurrent: false
@@ -257,7 +263,8 @@ describe("EpubReader chapter render routing", () => {
         interactionModel: "dom-events",
         flowModel: "dom-flow",
         alignmentTarget: "dom-baseline",
-        styleProfile: "shared",
+        publisherStyles: "enabled",
+        styleProfile: "default-reflowable",
         sectionId: "section-2",
         sectionHref: "OPS/complex.xhtml",
         isCurrent: true
@@ -431,7 +438,8 @@ describe("EpubReader chapter render routing", () => {
       interactionModel: "dom-events",
       flowModel: "dom-flow",
       alignmentTarget: "dom-baseline",
-      styleProfile: "shared",
+      publisherStyles: "enabled",
+      styleProfile: "default-reflowable",
       sectionId: "section-1",
       sectionHref: "OPS/publisher.xhtml"
     });

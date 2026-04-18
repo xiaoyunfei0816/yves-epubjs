@@ -5,6 +5,7 @@ import type {
   Rect,
   SectionDocument
 } from "../model/types"
+import { normalizeLocator } from "./locator"
 import { findRenderedAnchorTarget } from "./navigation-target"
 
 type DomLocatorViewportInput = {
@@ -22,6 +23,11 @@ type DomPointLocatorInput = {
   section: SectionDocument
   spineIndex: number
   point: Point
+}
+
+export type DomPointHitTarget = {
+  target: HTMLElement
+  rect: Rect
 }
 
 export function mapDomLocatorToViewport(input: DomLocatorViewportInput): Rect[] {
@@ -60,21 +66,75 @@ export function mapDomPointToLocator(input: DomPointLocatorInput): Locator {
   })
 
   if (!target) {
-    return {
+    return normalizeLocator({
       spineIndex: input.spineIndex,
       progressInSection: progress
-    }
+    })
   }
 
   const anchorId = resolveAnchorIdForElement(input.section, target)
   const blockId = resolveBlockIdForElement(input.section, target, sectionRoot)
 
-  return {
+  return normalizeLocator({
     spineIndex: input.spineIndex,
     progressInSection: progress,
     ...(anchorId ? { anchorId } : {}),
     ...(blockId ? { blockId } : {})
+  })
+}
+
+export function findDomHitTargetAtPoint(input: {
+  container: HTMLElement
+  sectionElement: HTMLElement
+  point: Point
+}): DomPointHitTarget | null {
+  const sectionRoot = getDomSectionRoot(input.sectionElement)
+  const candidates = collectDomHitTargets(sectionRoot)
+  if (candidates.length === 0) {
+    return null
   }
+
+  const containerRect = input.container.getBoundingClientRect()
+  const pointX = input.point.x
+  const pointY = input.point.y
+  const matching = candidates
+    .map((candidate) => ({
+      target: candidate,
+      rect: candidate.getBoundingClientRect()
+    }))
+    .filter(({ rect }) => {
+      const localRect = {
+        left: rect.left - containerRect.left,
+        right: rect.right - containerRect.left,
+        top: rect.top - containerRect.top,
+        bottom: rect.bottom - containerRect.top
+      }
+
+      return (
+        pointX >= localRect.left &&
+        pointX <= localRect.right &&
+        pointY >= localRect.top &&
+        pointY <= localRect.bottom
+      )
+    })
+
+  if (matching.length === 0) {
+    return null
+  }
+
+  matching.sort((left, right) => {
+    const leftArea = left.rect.width * left.rect.height
+    const rightArea = right.rect.width * right.rect.height
+    return leftArea - rightArea
+  })
+
+  const matched = matching[0]
+  return matched
+    ? {
+        target: matched.target,
+        rect: measureElementRectWithinContainer(input.container, matched.target, "paginated")
+      }
+    : null
 }
 
 function createProgressRect(input: {
@@ -185,6 +245,19 @@ function findDomTargetContainingPoint(input: {
 
 function collectDomGeometryTargets(sectionRoot: HTMLElement): HTMLElement[] {
   const targets = sectionRoot.querySelectorAll<HTMLElement>("[id], a[name]")
+  const elements = Array.from(targets)
+
+  if (sectionRoot.id || sectionRoot.getAttribute("name")) {
+    elements.unshift(sectionRoot)
+  }
+
+  return elements
+}
+
+function collectDomHitTargets(sectionRoot: HTMLElement): HTMLElement[] {
+  const targets = sectionRoot.querySelectorAll<HTMLElement>(
+    'a[href], img, image, [id], [name]'
+  )
   const elements = Array.from(targets)
 
   if (sectionRoot.id || sectionRoot.getAttribute("name")) {

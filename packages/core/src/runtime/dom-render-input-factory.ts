@@ -1,7 +1,14 @@
 import { resolveResourcePath } from "../container/resource-path"
-import type { Book, SectionDocument, Theme, TypographyOptions } from "../model/types"
+import type {
+  Book,
+  PublisherStylesMode,
+  SectionDocument,
+  Theme,
+  TypographyOptions
+} from "../model/types"
 import type { DomChapterRenderInput } from "../renderer/dom-chapter-renderer"
 import type { SharedChapterRenderInput } from "./chapter-render-input"
+import { stripPublisherStylesFromPreprocessedNodes } from "./publisher-styles"
 
 type DomRenderInputFactoryOptions = {
   book: Book | null
@@ -10,7 +17,17 @@ type DomRenderInputFactoryOptions = {
   theme: Theme
   typography: TypographyOptions
   fontFamily: string
+  publisherStyles: PublisherStylesMode
+  availableWidth?: number
+  availableHeight?: number
   resolveDomResourceUrl: (path: string) => string
+}
+
+export type FixedLayoutFrame = {
+  viewport: NonNullable<SectionDocument["renditionViewport"]>
+  width: number
+  height: number
+  scale: number
 }
 
 export function createDomChapterRenderInput(
@@ -19,18 +36,29 @@ export function createDomChapterRenderInput(
   const renderInput: DomChapterRenderInput = {
     sectionId: options.section.id,
     sectionHref: options.section.href,
+    ...(options.section.lang ? { sectionLanguage: options.section.lang } : {}),
+    ...(options.section.renditionLayout
+      ? { renditionLayout: options.section.renditionLayout }
+      : {}),
     ...(options.section.presentationRole
       ? { presentationRole: options.section.presentationRole }
       : {}),
-    linkedStyleSheets: (options.input.linkedStyleSheets ?? []).map((stylesheet) => ({
-      href: stylesheet.href,
-      text: resolveDomStyleSheetText(
-        stylesheet.href,
-        stylesheet.text,
-        options.resolveDomResourceUrl
-      )
-    })),
-    nodes: options.input.preprocessed.nodes,
+    ...(options.publisherStyles === "enabled"
+      ? {
+          linkedStyleSheets: (options.input.linkedStyleSheets ?? []).map((stylesheet) => ({
+            href: stylesheet.href,
+            text: resolveDomStyleSheetText(
+              stylesheet.href,
+              stylesheet.text,
+              options.resolveDomResourceUrl
+            )
+          }))
+        }
+      : {}),
+    nodes:
+      options.publisherStyles === "enabled"
+        ? options.input.preprocessed.nodes
+        : stripPublisherStylesFromPreprocessedNodes(options.input.preprocessed.nodes),
     theme: options.theme,
     typography: options.typography,
     fontFamily: options.fontFamily,
@@ -40,8 +68,24 @@ export function createDomChapterRenderInput(
         tagName,
         attributeName,
         value,
+        publisherStyles: options.publisherStyles,
         resolveDomResourceUrl: options.resolveDomResourceUrl
       })
+  }
+  const fixedLayoutFrame = resolveFixedLayoutFrame({
+    section: options.section,
+    ...(typeof options.availableWidth === "number"
+      ? { availableWidth: options.availableWidth }
+      : {}),
+    ...(typeof options.availableHeight === "number"
+      ? { availableHeight: options.availableHeight }
+      : {})
+  })
+  if (fixedLayoutFrame) {
+    renderInput.fixedLayoutViewport = fixedLayoutFrame.viewport
+    renderInput.fixedLayoutScale = fixedLayoutFrame.scale
+    renderInput.fixedLayoutRenderWidth = fixedLayoutFrame.width
+    renderInput.fixedLayoutRenderHeight = fixedLayoutFrame.height
   }
 
   const presentationImage = resolvePresentationSectionImage(options.book, options.section)
@@ -56,15 +100,52 @@ export function createDomChapterRenderInput(
   }
 }
 
+export function resolveFixedLayoutFrame(input: {
+  section: SectionDocument
+  availableWidth?: number
+  availableHeight?: number
+}): FixedLayoutFrame | null {
+  if (
+    input.section.renditionLayout !== "pre-paginated" ||
+    !input.section.renditionViewport
+  ) {
+    return null
+  }
+
+  const viewport = input.section.renditionViewport
+  const availableWidth =
+    typeof input.availableWidth === "number" && input.availableWidth > 0
+      ? input.availableWidth
+      : viewport.width
+  const availableHeight =
+    typeof input.availableHeight === "number" && input.availableHeight > 0
+      ? input.availableHeight
+      : viewport.height
+  const scale = Math.min(availableWidth / viewport.width, availableHeight / viewport.height)
+  const normalizedScale = Number.isFinite(scale) && scale > 0 ? scale : 1
+
+  return {
+    viewport,
+    width: Math.round(viewport.width * normalizedScale),
+    height: Math.round(viewport.height * normalizedScale),
+    scale: Number(normalizedScale.toFixed(4))
+  }
+}
+
 function resolveDomAttributeValue(input: {
   sectionHref: string
   tagName: string
   attributeName: string
   value: string
+  publisherStyles: PublisherStylesMode
   resolveDomResourceUrl: (path: string) => string
 }): string {
   const normalizedTagName = input.tagName.toLowerCase()
   const normalizedAttributeName = input.attributeName.toLowerCase()
+
+  if (input.publisherStyles === "disabled" && normalizedAttributeName === "style") {
+    return ""
+  }
 
   if (normalizedAttributeName === "style") {
     return resolveDomCssUrlValues(

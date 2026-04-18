@@ -1,10 +1,19 @@
 export type ReadingMode = "scroll" | "paginated";
 export type RenderMode = "canvas" | "dom";
+export type RenditionLayout = "reflowable" | "pre-paginated";
+export type RenditionSpread = "auto" | "none" | "landscape" | "portrait" | "both";
+export type ReaderSpreadMode = "auto" | "none" | "always";
+export type PageSpreadPlacement = "left" | "right" | "center";
 export type ChapterRenderReason = string;
 export type ChapterRenderDecision = {
   mode: RenderMode;
   score: number;
   reasons: ChapterRenderReason[];
+};
+
+export type FixedLayoutViewport = {
+  width: number;
+  height: number;
 };
 
 export type BookMetadata = {
@@ -14,6 +23,9 @@ export type BookMetadata = {
   creator?: string;
   publisher?: string;
   coverImageHref?: string;
+  renditionLayout?: RenditionLayout;
+  renditionViewport?: FixedLayoutViewport;
+  renditionSpread?: RenditionSpread;
 };
 
 export type ManifestItem = {
@@ -29,6 +41,8 @@ export type SpineItem = {
   linear: boolean;
   mediaType?: string;
   properties?: string;
+  renditionLayout?: RenditionLayout;
+  pageSpreadPlacement?: PageSpreadPlacement;
 };
 
 export type TocItem = {
@@ -263,6 +277,11 @@ export type SectionDocument = {
   href: string;
   title?: string;
   lang?: string;
+  dir?: ReadingDirection;
+  renditionLayout?: RenditionLayout;
+  renditionViewport?: FixedLayoutViewport;
+  renditionSpread?: RenditionSpread;
+  pageSpreadPlacement?: PageSpreadPlacement;
   presentationRole?: "cover" | "image-page";
   blocks: BlockNode[];
   anchors: Record<string, string>;
@@ -281,11 +300,90 @@ export type Theme = {
   background: string;
 };
 
+export type PublisherStylesMode = "enabled" | "disabled";
+export type ReadingDirection = "ltr" | "rtl";
+
 export type TypographyOptions = {
   fontSize: number;
   lineHeight: number;
   paragraphSpacing: number;
+  fontFamily?: string;
+  letterSpacing?: number;
+  wordSpacing?: number;
 };
+
+export type ReaderPreferences = {
+  mode?: ReadingMode;
+  publisherStyles?: PublisherStylesMode;
+  experimentalRtl?: boolean;
+  spreadMode?: ReaderSpreadMode;
+  theme?: Partial<Theme>;
+  typography?: Partial<TypographyOptions>;
+};
+
+export type ReaderSettings = {
+  mode: ReadingMode;
+  publisherStyles: PublisherStylesMode;
+  experimentalRtl: boolean;
+  spreadMode: ReaderSpreadMode;
+  theme: Theme;
+  typography: TypographyOptions;
+};
+
+export type ReadingLanguageContext = {
+  spineIndex: number;
+  sectionId: string;
+  sectionHref: string;
+  bookLanguage?: string;
+  sectionLanguage?: string;
+  resolvedLanguage?: string;
+  contentDirection: ReadingDirection;
+  rtlSuggested: boolean;
+  rtlActive: boolean;
+};
+
+export type ReadingNavigationContext = {
+  spineIndex: number;
+  sectionId: string;
+  sectionHref: string;
+  contentDirection: ReadingDirection;
+  pageProgression: ReadingDirection;
+  rtlActive: boolean;
+  previousPageKey: "ArrowLeft" | "ArrowRight";
+  nextPageKey: "ArrowLeft" | "ArrowRight";
+};
+
+export type ReadingSpreadContext = {
+  spineIndex: number;
+  sectionId: string;
+  sectionHref: string;
+  spreadMode: ReaderSpreadMode;
+  renditionLayout: RenditionLayout;
+  renditionSpread: RenditionSpread;
+  pageSpreadPlacement: PageSpreadPlacement;
+  syntheticSpreadAllowed: boolean;
+  syntheticSpreadActive: boolean;
+  viewportSlotCount: 1 | 2;
+};
+
+export type AccessibilityContainerKind =
+  | "quote"
+  | "figure"
+  | "aside"
+  | "nav"
+  | "list-item"
+  | "table"
+  | "definition-list";
+
+export type AccessibilityEntryKind =
+  | "heading"
+  | "text"
+  | "code"
+  | "image"
+  | "figure-caption"
+  | "table-caption"
+  | "definition-term"
+  | "definition-description";
 
 export type Locator = {
   spineIndex: number;
@@ -294,6 +392,120 @@ export type Locator = {
   inlineOffset?: number;
   cfi?: string;
   progressInSection?: number;
+};
+
+export type SerializedLocator = {
+  spineIndex?: number;
+  href?: string;
+  blockId?: string;
+  anchorId?: string;
+  inlineOffset?: number;
+  cfi?: string;
+  progressInSection?: number;
+};
+
+export type LocatorPrecision =
+  | "section"
+  | "progress"
+  | "block"
+  | "anchor"
+  | "cfi";
+
+export type DecorationStyle = "highlight" | "underline" | "search-hit" | "active";
+
+export type DecorationRenderHint = "margin-marker" | "note-icon";
+
+export type DecorationExtras = {
+  renderHint?: DecorationRenderHint;
+  label?: string;
+};
+
+export type Decoration = {
+  id: string;
+  group: string;
+  locator: Locator;
+  style: DecorationStyle;
+  color?: string;
+  extras?: DecorationExtras;
+};
+
+export type Bookmark = {
+  id: string;
+  publicationId: string;
+  locator: SerializedLocator;
+  createdAt: string;
+  label?: string;
+  excerpt?: string;
+};
+
+export type Annotation = {
+  id: string;
+  publicationId: string;
+  locator: SerializedLocator;
+  quote?: string;
+  note?: string;
+  color?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AnnotationViewportSnapshot = {
+  annotation: Annotation;
+  resolvedLocator: Locator | null;
+  rects: VisibleDrawBounds;
+  visible: boolean;
+};
+
+export type AccessibilityEntry = {
+  id: string;
+  kind: AccessibilityEntryKind;
+  blockId: string;
+  locator: Locator;
+  text: string;
+  containerPath: AccessibilityContainerKind[];
+  headingLevel?: 1 | 2 | 3 | 4 | 5 | 6;
+  altText?: string;
+};
+
+export type AccessibilityDiagnostics = {
+  totalEntries: number;
+  imageEntries: number;
+  imageAltEntries: number;
+  imageMissingAltEntries: number;
+  figureCaptionEntries: number;
+  tableCaptionEntries: number;
+  asideEntries: number;
+  definitionTermEntries: number;
+  definitionDescriptionEntries: number;
+};
+
+export type SectionAccessibilitySnapshot = {
+  spineIndex: number;
+  sectionId: string;
+  sectionHref: string;
+  text: string;
+  entries: AccessibilityEntry[];
+  diagnostics: AccessibilityDiagnostics;
+};
+
+export type PublicationAccessibilitySnapshot = {
+  publicationId?: string;
+  text: string;
+  sections: SectionAccessibilitySnapshot[];
+  diagnostics: AccessibilityDiagnostics;
+};
+
+export type LocatorRestoreDiagnostics = {
+  requestedPrecision: LocatorPrecision;
+  resolvedPrecision?: LocatorPrecision;
+  matchedBy?: "cfi" | "href" | "spineIndex";
+  fallbackApplied: boolean;
+  status: "restored" | "failed";
+  reason?:
+    | "book-not-open"
+    | "publication-mismatch"
+    | "section-not-found"
+    | "invalid-locator";
 };
 
 export type SearchResult = {
@@ -362,10 +574,19 @@ export type RenderInteractionModel = "canvas-hit-test" | "dom-events";
 
 export type RenderFlowModel = "scroll-slices" | "paginated-pages" | "dom-flow";
 
+export type ReaderBaselineStyleProfile = "default-reflowable";
+
 export type RenderDiagnostics = {
   mode: RenderMode;
   score: number;
   reasons: string[];
+  renditionLayout?: RenditionLayout;
+  renditionSpread?: RenditionSpread;
+  spreadMode?: ReaderSpreadMode;
+  pageSpreadPlacement?: PageSpreadPlacement;
+  syntheticSpreadActive?: boolean;
+  viewportSlotCount?: 1 | 2;
+  publisherStyles?: PublisherStylesMode;
   sectionId?: string;
   sectionHref?: string;
   layoutAuthority?: RenderLayoutAuthority;
@@ -373,7 +594,7 @@ export type RenderDiagnostics = {
   interactionModel?: RenderInteractionModel;
   flowModel?: RenderFlowModel;
   alignmentTarget?: "dom-baseline";
-  styleProfile?: "shared";
+  styleProfile?: ReaderBaselineStyleProfile;
 };
 
 export type VisibleSectionDiagnostics = RenderDiagnostics & {
@@ -384,6 +605,10 @@ export type ReaderEventMap = {
   opened: { book: Book };
   rendered: { mode: ReadingMode };
   relocated: { locator: Locator | null };
+  preferencesChanged: {
+    preferences: ReaderPreferences;
+    settings: ReaderSettings;
+  };
   themeChanged: { theme: Theme };
   typographyChanged: { typography: TypographyOptions };
   searchCompleted: { query: string; results: SearchResult[] };
@@ -394,6 +619,7 @@ export type ReaderEvent = keyof ReaderEventMap;
 export type ReaderOptions = {
   container?: HTMLElement;
   canvas?: HTMLCanvasElement;
+  preferences?: ReaderPreferences;
   mode?: ReadingMode;
   theme?: Partial<Theme>;
   typography?: Partial<TypographyOptions>;

@@ -111,8 +111,12 @@ describe("DomChapterRenderer", () => {
     expect(css).toContain("font-family: \"Iowan Old Style\", serif;");
     expect(css).toContain("--reader-side-padding: 8px;");
     expect(css).toContain("--reader-link-color: #1b4b72;");
+    expect(css).toContain("--reader-caption-color: #475569;");
     expect(css).toContain(".epub-dom-section table {");
     expect(css).toContain(".epub-dom-section a {");
+    expect(css).toContain(".epub-dom-section figcaption, .epub-dom-section caption {");
+    expect(css).toContain(".epub-dom-section mark {");
+    expect(css).toContain(".epub-dom-section hr {");
     expect(css).toContain("padding-left: var(--reader-quote-accent-gap);");
   });
 
@@ -215,5 +219,47 @@ describe("DomChapterRenderer", () => {
     expect(markup).toContain("epub-dom-section-image-page epub-dom-image-page")
     expect(markup).toContain('src="blob:title-image"')
     expect(markup).toContain(".epub-dom-section-image-page img {")
+  })
+
+  it("adds fixed-layout sizing hooks for pre-paginated sections", () => {
+    const renderer = new DomChapterRenderer()
+
+    const markup = renderer.createMarkup({
+      sectionId: "section-fxl",
+      sectionHref: "OPS/fxl.xhtml",
+      renditionLayout: "pre-paginated",
+      fixedLayoutViewport: {
+        width: 1200,
+        height: 1600
+      },
+      fixedLayoutRenderWidth: 405,
+      fixedLayoutRenderHeight: 540,
+      fixedLayoutScale: 0.3375,
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography: {
+        fontSize: 18,
+        lineHeight: 1.6,
+        paragraphSpacing: 12
+      },
+      fontFamily: '"Iowan Old Style", serif',
+      nodes: [
+        {
+          kind: "element",
+          tagName: "div",
+          attributes: {},
+          children: [{ kind: "text", text: "Fixed layout page" }]
+        }
+      ]
+    })
+
+    expect(markup).toContain("epub-dom-section-fxl")
+    expect(markup).toContain('data-rendition-layout="pre-paginated"')
+    expect(markup).toContain('data-fxl-viewport-width="1200"')
+    expect(markup).toContain('--fxl-render-width: 405px')
+    expect(markup).toContain('--fxl-render-height: 540px')
+    expect(markup).toContain(".epub-dom-section-fxl {")
   })
 });

@@ -79,17 +79,31 @@ export class BookParser {
         throw new Error(`Missing spine item at index ${entry.index}`);
       }
 
-        const section = parseSpineContentDocument({
-          href: spineItem.href,
-          content: entry.content,
-          stylesheets: entry.linkedStyleSheets.map((stylesheet) => stylesheet.ast),
-          ...(spineItem.mediaType ? { mediaType: spineItem.mediaType } : {})
-        });
-        return {
-          ...section,
-          id: `section-${entry.index + 1}`
-        };
+      const section = parseSpineContentDocument({
+        href: spineItem.href,
+        content: entry.content,
+        stylesheets: entry.linkedStyleSheets.map((stylesheet) => stylesheet.ast),
+        ...(spineItem.mediaType ? { mediaType: spineItem.mediaType } : {})
       });
+      const renditionLayout = spineItem.renditionLayout ?? opf.metadata.renditionLayout
+      return {
+        ...section,
+        id: `section-${entry.index + 1}`,
+        ...(renditionLayout ? { renditionLayout } : {}),
+        ...(opf.metadata.renditionSpread
+          ? { renditionSpread: opf.metadata.renditionSpread }
+          : {}),
+        ...(spineItem.pageSpreadPlacement
+          ? { pageSpreadPlacement: spineItem.pageSpreadPlacement }
+          : {}),
+        ...(section.renditionViewport ?? opf.metadata.renditionViewport
+          ? {
+              renditionViewport:
+                section.renditionViewport ?? opf.metadata.renditionViewport
+            }
+          : {})
+      };
+    });
 
     const coverSectionIndex = resolveCoverSectionIndex(sections, opf.metadata.coverImageHref)
     if (typeof coverSectionIndex === "number") {

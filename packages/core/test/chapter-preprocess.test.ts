@@ -41,7 +41,7 @@ describe("chapter preprocess", () => {
     const chapter = preprocessChapterDocument({
       href: "OPS/chapter-1.xhtml",
       content: `<?xml version="1.0" encoding="utf-8"?>
-        <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+        <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" dir="rtl">
           <head>
             <title>Chapter 1</title>
           </head>
@@ -59,6 +59,7 @@ describe("chapter preprocess", () => {
       href: "OPS/chapter-1.xhtml",
       title: "Chapter 1",
       lang: "en",
+      dir: "rtl",
       rootTagName: "body",
       nodes: [
         {

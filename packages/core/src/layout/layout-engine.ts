@@ -21,6 +21,7 @@ import type {
   TextBlock,
   TypographyOptions
 } from "../model/types";
+import { normalizeLocator } from "../runtime/locator";
 import { buildReadingStyleProfile } from "../renderer/reading-style-profile";
 import { resolveImageLayout } from "../utils/image-layout";
 import { countWrappedPreformattedLines } from "../utils/preformatted-text";
@@ -139,11 +140,14 @@ export class LayoutEngine {
     const locatorMap = new Map<string, Locator>();
 
     for (const block of input.section.blocks) {
-      locatorMap.set(block.id, {
-        spineIndex: input.spineIndex,
-        blockId: block.id,
-        progressInSection: 0
-      });
+      locatorMap.set(
+        block.id,
+        normalizeLocator({
+          spineIndex: input.spineIndex,
+          blockId: block.id,
+          progressInSection: 0
+        })
+      );
 
       const pretextBlock = this.layoutTextLikeBlock(block, input, width);
       if (pretextBlock) {
@@ -1199,7 +1203,7 @@ function estimateTableBlockHeight(
     40,
     Math.floor(viewportWidth) - styleProfile.section.sidePadding * 2
   );
-  const captionFont = `italic 400 ${Math.max(14, typography.fontSize - 1)}px "Iowan Old Style", "Palatino Linotype", serif`;
+  const captionFont = `italic 400 ${styleProfile.caption.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`;
   const cellFont = `400 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`;
   const headerFont = `700 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`;
   const lineHeight = Math.max(typography.fontSize * 1.45, 18);
@@ -1208,11 +1212,12 @@ function estimateTableBlockHeight(
 
   if (block.caption?.length) {
     total +=
+      styleProfile.caption.marginTop +
       estimateWrappedTextHeight(
         block.caption.map(extractBlockText).filter(Boolean).join(" "),
         contentWidth,
         captionFont,
-        lineHeight
+        styleProfile.caption.lineHeight
       ) + styleProfile.text.marginBottom;
   }
 
@@ -1256,7 +1261,7 @@ function estimateFigureBlockHeight(
     Math.floor(viewportWidth) - styleProfile.section.sidePadding * 2
   );
   const bodyFont = `400 ${typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`;
-  const captionFont = `italic 400 ${Math.max(14, typography.fontSize - 1)}px "Iowan Old Style", "Palatino Linotype", serif`;
+  const captionFont = `italic 400 ${styleProfile.caption.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`;
   const lineHeight = Math.max(typography.fontSize * 1.45, 18);
   let total = styleProfile.text.marginBottom;
 
@@ -1273,25 +1278,28 @@ function estimateFigureBlockHeight(
           ...(intrinsicSize.height
             ? { intrinsicHeight: intrinsicSize.height }
             : {})
-        }).height + 10;
+        }).height + styleProfile.media.blockSpacing;
       continue;
     }
 
     const text = extractBlockText(child);
     if (text) {
       total +=
-        estimateWrappedTextHeight(text, contentWidth, bodyFont, lineHeight) + 8;
+        estimateWrappedTextHeight(text, contentWidth, bodyFont, lineHeight) +
+        Math.max(8, Math.round(styleProfile.media.blockSpacing * 0.8));
     }
   }
 
   if (block.caption?.length) {
-    total += estimateWrappedTextHeight(
-      block.caption.map(extractBlockText).filter(Boolean).join(" "),
-      Math.max(40, contentWidth - 24),
-      captionFont,
-      Math.max((typography.fontSize - 1) * 1.45, 18)
-    );
+    total +=
+      styleProfile.caption.marginTop +
+      estimateWrappedTextHeight(
+        block.caption.map(extractBlockText).filter(Boolean).join(" "),
+        Math.max(40, contentWidth - 24),
+        captionFont,
+        styleProfile.caption.lineHeight
+      );
   }
 
-  return total + 10;
+  return total + styleProfile.media.blockSpacing;
 }

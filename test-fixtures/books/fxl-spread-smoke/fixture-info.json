@@ -1,0 +1,10 @@
+{
+  "id": "fxl-spread-smoke",
+  "title": "FXL Spread Smoke Book",
+  "purpose": [
+    "provide a stable fixed-layout EPUB fixture for spread-mode smoke coverage",
+    "exercise search result jumps and annotation overlays inside paired synthetic spreads"
+  ],
+  "status": "active",
+  "entry": "book.epub"
+}

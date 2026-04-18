@@ -4,6 +4,7 @@ import {
   ReaderDiagnosticsPanel,
   ReaderSidebar,
   ReaderToolbar,
+  ReaderViewportOverlay,
   SearchResultsPanel,
   toggleId
 } from "./reader-ui"
@@ -19,11 +20,19 @@ export function App(): JSX.Element {
     results,
     themeKey,
     mode,
+    publisherStyles,
+    experimentalRtl,
     fontSize,
+    fontFamily,
+    letterSpacing,
+    wordSpacing,
     pageValue,
     activeTocId,
     expandedTocIds,
     lightbox,
+    hasSavedBookmark,
+    bookmarkStatus,
+    highlightStatus,
     setPageValue,
     setExpandedTocIds,
     setLightbox,
@@ -34,10 +43,19 @@ export function App(): JSX.Element {
     goToSearchResult,
     handleThemeChange,
     handleModeChange,
+    handlePublisherStylesChange,
+    handleExperimentalRtlChange,
     handleFontSizeChange,
+    handleFontFamilyChange,
+    handleLetterSpacingChange,
+    handleWordSpacingChange,
     goToPreviousPage,
     goToNextPage,
-    goToTocItem
+    goToTocItem,
+    saveBookmark,
+    restoreSavedBookmark,
+    addHighlight,
+    clearHighlights
   } = useReaderController(containerRef)
 
   return (
@@ -149,6 +167,57 @@ export function App(): JSX.Element {
                   />
                 </label>
                 <label className="field-shell">
+                  <span className="field-label">Publisher Styles</span>
+                  <CustomSelect
+                    value={publisherStyles}
+                    options={[
+                      { value: "enabled", label: "Enabled" },
+                      { value: "disabled", label: "Disabled" }
+                    ]}
+                    onChange={async (value) => {
+                      await handlePublisherStylesChange(
+                        value as "enabled" | "disabled"
+                      )
+                    }}
+                  />
+                </label>
+                <label className="field-shell">
+                  <span className="field-label">Experimental RTL</span>
+                  <CustomSelect
+                    value={experimentalRtl ? "enabled" : "disabled"}
+                    options={[
+                      { value: "disabled", label: "Disabled" },
+                      { value: "enabled", label: "Enabled" }
+                    ]}
+                    onChange={async (value) => {
+                      await handleExperimentalRtlChange(value === "enabled")
+                    }}
+                  />
+                </label>
+                <label className="field-shell">
+                  <span className="field-label">Font Family</span>
+                  <CustomSelect
+                    value={fontFamily}
+                    options={[
+                      {
+                        value: '"Iowan Old Style", "Palatino Linotype", serif',
+                        label: "Iowan"
+                      },
+                      {
+                        value: 'Georgia, "Times New Roman", serif',
+                        label: "Georgia"
+                      },
+                      {
+                        value: '"Source Han Serif SC", "Noto Serif SC", serif',
+                        label: "Source Han Serif"
+                      }
+                    ]}
+                    onChange={async (value) => {
+                      await handleFontFamilyChange(value)
+                    }}
+                  />
+                </label>
+                <label className="field-shell">
                   <span className="field-label">Font Size</span>
                   <input
                     type="range"
@@ -157,6 +226,34 @@ export function App(): JSX.Element {
                     value={fontSize}
                     onChange={async (event) =>
                       handleFontSizeChange(Number(event.target.value))
+                    }
+                    className="accent-amber-500"
+                  />
+                </label>
+                <label className="field-shell">
+                  <span className="field-label">Letter Spacing</span>
+                  <input
+                    type="range"
+                    min="-1"
+                    max="4"
+                    step="0.5"
+                    value={letterSpacing}
+                    onChange={async (event) =>
+                      handleLetterSpacingChange(Number(event.target.value))
+                    }
+                    className="accent-amber-500"
+                  />
+                </label>
+                <label className="field-shell">
+                  <span className="field-label">Word Spacing</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="12"
+                    step="1"
+                    value={wordSpacing}
+                    onChange={async (event) =>
+                      handleWordSpacingChange(Number(event.target.value))
                     }
                     className="accent-amber-500"
                   />
@@ -189,13 +286,20 @@ export function App(): JSX.Element {
                   currentPage={snapshot.pagination.currentPage}
                   totalPages={snapshot.pagination.totalPages}
                   pageValue={pageValue}
+                  hasSavedBookmark={hasSavedBookmark}
                   onPageValueChange={setPageValue}
                   onGoToPage={goToPage}
                   onPrevious={goToPreviousPage}
                   onNext={goToNextPage}
+                  onSaveBookmark={saveBookmark}
+                  onRestoreBookmark={restoreSavedBookmark}
+                  onAddHighlight={addHighlight}
+                  onClearHighlights={clearHighlights}
                 />
 
                 <p className="reader-meta">{snapshot.metaText}</p>
+                <p className="reader-bookmark-status">{bookmarkStatus}</p>
+                <p className="reader-highlight-status">{highlightStatus}</p>
 
                 <div className="reader-progress">
                   <input
@@ -211,21 +315,34 @@ export function App(): JSX.Element {
                   </div>
                 </div>
 
-                <div
-                  ref={containerRef}
-                  data-mode={mode}
-                  className="reader-root"
-                >
-                  <article className="placeholder-page">
-                    <h2>Waiting for an EPUB</h2>
-                    <p>Select a local EPUB file to parse and render it.</p>
-                  </article>
+                <div className="reader-stage">
+                  <div
+                    ref={containerRef}
+                    data-mode={mode}
+                    className="reader-root"
+                  >
+                    <article className="placeholder-page">
+                      <h2>Waiting for an EPUB</h2>
+                      <p>Select a local EPUB file to parse and render it.</p>
+                    </article>
+                  </div>
+                  <ReaderViewportOverlay
+                    searchOverlays={snapshot.searchOverlays}
+                    annotationOverlays={snapshot.annotationOverlays}
+                    viewportOffset={snapshot.viewportOffset}
+                  />
                 </div>
               </div>
 
               <aside className="reader-side">
                 <ReaderDiagnosticsPanel
                   renderBackend={snapshot.renderBackend}
+                  publisherStyles={publisherStyles}
+                  locator={snapshot.locator}
+                  restoreDiagnostics={snapshot.restoreDiagnostics}
+                  languageContext={snapshot.languageContext}
+                  navigationContext={snapshot.navigationContext}
+                  spreadContext={snapshot.spreadContext}
                   diagnostics={snapshot.diagnostics}
                   visibleSectionDiagnostics={snapshot.visibleSectionDiagnostics}
                 />

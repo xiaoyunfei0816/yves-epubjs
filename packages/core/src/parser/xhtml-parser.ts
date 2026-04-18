@@ -294,6 +294,12 @@ class XhtmlBlockParser {
     if (domDocument.lang) {
       section.lang = domDocument.lang
     }
+    if (domDocument.dir) {
+      section.dir = domDocument.dir
+    }
+    if (domDocument.viewport) {
+      section.renditionViewport = domDocument.viewport
+    }
 
     return section
   }

@@ -26,8 +26,11 @@ function stripIds(value: unknown): unknown {
 describe("parseXhtmlDocument", () => {
   it("maps headings, paragraphs, lists, quotes, code blocks, images, and thematic breaks", () => {
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
-      <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
-        <head><title>Chapter 1</title></head>
+      <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" dir="rtl">
+        <head>
+          <title>Chapter 1</title>
+          <meta name="viewport" content="width=1024,height=768" />
+        </head>
         <body>
           <h1 id="intro">Chapter 1</h1>
           <p>Alice was beginning to get very tired.</p>
@@ -48,6 +51,11 @@ describe("parseXhtmlDocument", () => {
 
     expect(section.title).toBe("Chapter 1");
     expect(section.lang).toBe("en");
+    expect(section.dir).toBe("rtl");
+    expect(section.renditionViewport).toEqual({
+      width: 1024,
+      height: 768
+    })
     expect(section.anchors.intro).toBe("heading-1");
     expect(section.blocks.map((block) => block.kind)).toEqual([
       "heading",

@@ -133,6 +133,39 @@ describe("parseOpfDocument", () => {
     expect(epub3.metadata.coverImageHref).toBe("OPS/images/cover.jpg")
     expect(epub2.metadata.coverImageHref).toBe("OPS/images/legacy-cover.png")
   })
+
+  it("parses rendition layout, spread metadata, viewport metadata, and spine-level overrides", () => {
+    const result = parseOpfDocument(
+      `<?xml version="1.0"?>
+      <package>
+        <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+          <dc:title>Fixed Layout Book</dc:title>
+          <meta property="rendition:layout">pre-paginated</meta>
+          <meta property="rendition:spread">both</meta>
+          <meta property="rendition:viewport">width=1200,height=1600</meta>
+        </metadata>
+        <manifest>
+          <item id="fxl-page" href="fxl.xhtml" media-type="application/xhtml+xml" />
+          <item id="reflow-page" href="reflow.xhtml" media-type="application/xhtml+xml" />
+        </manifest>
+        <spine>
+          <itemref idref="fxl-page" properties="rendition:layout-pre-paginated page-spread-right" />
+          <itemref idref="reflow-page" properties="rendition:layout-reflowable" />
+        </spine>
+      </package>`,
+      "OPS/content.opf"
+    )
+
+    expect(result.metadata.renditionLayout).toBe("pre-paginated")
+    expect(result.metadata.renditionSpread).toBe("both")
+    expect(result.metadata.renditionViewport).toEqual({
+      width: 1200,
+      height: 1600
+    })
+    expect(result.spine[0]?.renditionLayout).toBe("pre-paginated")
+    expect(result.spine[0]?.pageSpreadPlacement).toBe("right")
+    expect(result.spine[1]?.renditionLayout).toBe("reflowable")
+  })
 });
 
 describe("BookParser", () => {
@@ -342,6 +375,60 @@ describe("BookParser", () => {
     expect(book.sections[0]?.presentationRole).toBe("cover")
     expect(book.sections[1]?.presentationRole).toBe("image-page")
     expect(book.sections[2]?.presentationRole).toBeUndefined()
+  })
+
+  it("propagates fixed-layout metadata, spread hints, and viewport hints to parsed sections", async () => {
+    const zipBytes = zipSync({
+      mimetype: Buffer.from("application/epub+zip"),
+      "META-INF/container.xml": Buffer.from(
+        `<?xml version="1.0"?>
+        <container>
+          <rootfiles>
+            <rootfile full-path="OPS/content.opf" media-type="application/oebps-package+xml" />
+          </rootfiles>
+        </container>`
+      ),
+      "OPS/content.opf": Buffer.from(
+        `<?xml version="1.0"?>
+        <package>
+          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:title>FXL Fixture Book</dc:title>
+            <meta property="rendition:layout">pre-paginated</meta>
+            <meta property="rendition:spread">landscape</meta>
+            <meta property="rendition:viewport">width=1200,height=1600</meta>
+          </metadata>
+          <manifest>
+            <item id="fxl-page" href="fxl.xhtml" media-type="application/xhtml+xml" />
+          </manifest>
+          <spine>
+            <itemref idref="fxl-page" properties="page-spread-left" />
+          </spine>
+        </package>`
+      ),
+      "OPS/fxl.xhtml": Buffer.from(
+        `<?xml version="1.0"?>
+        <html>
+          <head>
+            <meta name="viewport" content="width=1000,height=1400" />
+          </head>
+          <body>
+            <p>Fixed layout page</p>
+          </body>
+        </html>`
+      )
+    })
+
+    const book = await new BookParser().parse({ data: zipBytes })
+
+    expect(book.metadata.renditionLayout).toBe("pre-paginated")
+    expect(book.metadata.renditionSpread).toBe("landscape")
+    expect(book.sections[0]?.renditionLayout).toBe("pre-paginated")
+    expect(book.sections[0]?.renditionSpread).toBe("landscape")
+    expect(book.sections[0]?.pageSpreadPlacement).toBe("left")
+    expect(book.sections[0]?.renditionViewport).toEqual({
+      width: 1000,
+      height: 1400
+    })
   })
 
   it("falls back to NCX when NAV is missing", async () => {

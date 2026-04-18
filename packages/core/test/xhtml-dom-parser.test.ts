@@ -11,8 +11,11 @@ import {
 describe("parseXhtmlDomDocument", () => {
   it("builds a DOM-backed chapter document with body and metadata", () => {
     const parsed = parseXhtmlDomDocument(`<?xml version="1.0" encoding="UTF-8"?>
-      <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
-        <head><title>Chapter 1</title></head>
+      <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" dir="rtl">
+        <head>
+          <title>Chapter 1</title>
+          <meta name="viewport" content="width=1200,height=1600" />
+        </head>
         <body>
           <section id="chapter-1">
             <p>Hello <span class="accent">reader</span>.</p>
@@ -22,6 +25,11 @@ describe("parseXhtmlDomDocument", () => {
 
     expect(parsed.title).toBe("Chapter 1")
     expect(parsed.lang).toBe("en")
+    expect(parsed.dir).toBe("rtl")
+    expect(parsed.viewport).toEqual({
+      width: 1200,
+      height: 1600
+    })
     expect(parsed.htmlElement?.name).toBe("html")
     expect(parsed.headElement?.name).toBe("head")
     expect(parsed.bodyElement?.name).toBe("body")

@@ -24,6 +24,7 @@ export type PreprocessedChapter = {
   href: string;
   title?: string;
   lang?: string;
+  dir?: "ltr" | "rtl";
   rootTagName?: string;
   nodes: PreprocessedChapterNode[];
 };
@@ -39,6 +40,7 @@ export function preprocessChapterDocument(input: {
     href: input.href,
     ...(parsed.title ? { title: parsed.title } : {}),
     ...(parsed.lang ? { lang: parsed.lang } : {}),
+    ...(parsed.dir ? { dir: parsed.dir } : {}),
     ...(root ? { rootTagName: getHtmlTagName(root) } : {}),
     nodes: root ? preprocessChapterChildren(root) : []
   };

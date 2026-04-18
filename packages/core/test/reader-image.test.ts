@@ -224,7 +224,13 @@ describe("EpubReader image resources", () => {
 
   it("forces cover sections onto the dom backend and uses the direct cover image", () => {
     const container = document.createElement("div")
-    const reader = new EpubReader({ container, mode: "paginated" })
+    const reader = new EpubReader({
+      container,
+      mode: "paginated",
+      preferences: {
+        spreadMode: "none"
+      }
+    })
     const section: SectionDocument = {
       id: "section-cover",
       href: "OPS/Text/cover.xhtml",
@@ -317,7 +323,13 @@ describe("EpubReader image resources", () => {
 
   it("forces image-only sections onto the dom backend and uses the standalone image", () => {
     const container = document.createElement("div")
-    const reader = new EpubReader({ container, mode: "paginated" })
+    const reader = new EpubReader({
+      container,
+      mode: "paginated",
+      preferences: {
+        spreadMode: "none"
+      }
+    })
     const section: SectionDocument = {
       id: "section-title-page",
       href: "OPS/text00000.xhtml",
@@ -411,6 +423,385 @@ describe("EpubReader image resources", () => {
     expect(
       state.createDomRenderInput(section, state.chapterRenderInputs[0]!).presentationImageSrc
     ).toBe("OPS/Image00000.jpg")
+  })
+
+  it("forces fixed-layout sections onto the dom backend and computes a fitted viewport box", () => {
+    const container = document.createElement("div")
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 540
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 720
+    })
+    const reader = new EpubReader({
+      container,
+      mode: "paginated",
+      preferences: {
+        spreadMode: "none"
+      }
+    })
+    const section: SectionDocument = {
+      id: "section-fxl",
+      href: "OPS/fxl.xhtml",
+      title: "FXL",
+      renditionLayout: "pre-paginated",
+      renditionViewport: {
+        width: 1200,
+        height: 1600
+      },
+      anchors: {},
+      blocks: []
+    }
+
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: Array<{
+          href: string
+          content: string
+          preprocessed: {
+            href: string
+            nodes: []
+          }
+        }>
+        resolveChapterRenderDecision(sectionIndex: number): { mode: string; score: number; reasons: string[] }
+        createDomRenderInput(
+          section: SectionDocument,
+          input: {
+            href: string
+            content: string
+            preprocessed: {
+              href: string
+              nodes: []
+            }
+          }
+        ): {
+          renditionLayout?: "pre-paginated"
+          fixedLayoutViewport?: { width: number; height: number }
+          fixedLayoutRenderWidth?: number
+          fixedLayoutRenderHeight?: number
+          fixedLayoutScale?: number
+        }
+      }
+    ).book = {
+      metadata: {
+        title: "FXL Book",
+        renditionLayout: "pre-paginated",
+        renditionViewport: {
+          width: 1200,
+          height: 1600
+        }
+      },
+      manifest: [],
+      spine: [{ idref: "fxl", href: section.href, linear: true, renditionLayout: "pre-paginated" }],
+      toc: [],
+      sections: [section]
+    }
+
+    const state = reader as unknown as {
+      chapterRenderInputs: Array<{
+        href: string
+        content: string
+        preprocessed: {
+          href: string
+          nodes: []
+        }
+      }>
+      resolveChapterRenderDecision(sectionIndex: number): { mode: string; score: number; reasons: string[] }
+      createDomRenderInput(
+        section: SectionDocument,
+        input: {
+          href: string
+          content: string
+          preprocessed: {
+            href: string
+            nodes: []
+          }
+        }
+      ): {
+        renditionLayout?: "pre-paginated"
+        fixedLayoutViewport?: { width: number; height: number }
+        fixedLayoutRenderWidth?: number
+        fixedLayoutRenderHeight?: number
+        fixedLayoutScale?: number
+      }
+    }
+    state.chapterRenderInputs = [
+      {
+        href: section.href,
+        content: "<html><body></body></html>",
+        preprocessed: {
+          href: section.href,
+          nodes: []
+        }
+      }
+    ]
+
+    expect(state.resolveChapterRenderDecision(0)).toEqual({
+      mode: "dom",
+      score: 0,
+      reasons: ["fixed-layout-section"]
+    })
+    expect(state.createDomRenderInput(section, state.chapterRenderInputs[0]!).renditionLayout).toBe(
+      "pre-paginated"
+    )
+    expect(
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutViewport
+    ).toEqual({
+      width: 1200,
+      height: 1600
+    })
+    expect(
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutRenderWidth
+    ).toBe(540)
+    expect(
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutRenderHeight
+    ).toBe(720)
+    expect(
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutScale
+    ).toBe(0.45)
+  })
+
+  it("fits fixed-layout sections inside the padded reader viewport instead of using reflow width caps", () => {
+    const container = document.createElement("div")
+    container.style.padding = "24px 30px"
+    document.body.appendChild(container)
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 900
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 720
+    })
+    const reader = new EpubReader({
+      container,
+      mode: "paginated",
+      preferences: {
+        spreadMode: "none"
+      }
+    })
+    const section: SectionDocument = {
+      id: "section-fxl-padded",
+      href: "OPS/fxl-padded.xhtml",
+      title: "FXL Padded",
+      renditionLayout: "pre-paginated",
+      renditionViewport: {
+        width: 1200,
+        height: 1600
+      },
+      anchors: {},
+      blocks: []
+    }
+
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: Array<{
+          href: string
+          content: string
+          preprocessed: {
+            href: string
+            nodes: []
+          }
+        }>
+        createDomRenderInput(
+          section: SectionDocument,
+          input: {
+            href: string
+            content: string
+            preprocessed: {
+              href: string
+              nodes: []
+            }
+          }
+        ): {
+          fixedLayoutRenderWidth?: number
+          fixedLayoutRenderHeight?: number
+          fixedLayoutScale?: number
+        }
+      }
+    ).book = {
+      metadata: {
+        title: "FXL Padded Book",
+        renditionLayout: "pre-paginated",
+        renditionViewport: {
+          width: 1200,
+          height: 1600
+        }
+      },
+      manifest: [],
+      spine: [{ idref: "fxl-padded", href: section.href, linear: true, renditionLayout: "pre-paginated" }],
+      toc: [],
+      sections: [section]
+    }
+
+    const state = reader as unknown as {
+      chapterRenderInputs: Array<{
+        href: string
+        content: string
+        preprocessed: {
+          href: string
+          nodes: []
+        }
+      }>
+      createDomRenderInput(
+        section: SectionDocument,
+        input: {
+          href: string
+          content: string
+          preprocessed: {
+            href: string
+            nodes: []
+          }
+        }
+      ): {
+        fixedLayoutRenderWidth?: number
+        fixedLayoutRenderHeight?: number
+        fixedLayoutScale?: number
+      }
+    }
+    state.chapterRenderInputs = [
+      {
+        href: section.href,
+        content: "<html><body></body></html>",
+        preprocessed: {
+          href: section.href,
+          nodes: []
+        }
+      }
+    ]
+
+    expect(
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutRenderWidth
+    ).toBe(504)
+    expect(
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutRenderHeight
+    ).toBe(672)
+    expect(
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutScale
+    ).toBe(0.42)
+  })
+
+  it("rerenders pre-paginated sections when the fixed-layout viewport changes on resize", async () => {
+    const resizeCallbacks: Array<() => void> = []
+    class MockResizeObserver {
+      constructor(private readonly callback: ResizeObserverCallback) {
+        resizeCallbacks.push(() => {
+          this.callback([], this as unknown as ResizeObserver)
+        })
+      }
+
+      observe(): void {
+        return undefined
+      }
+
+      disconnect(): void {
+        return undefined
+      }
+
+      unobserve(): void {
+        return undefined
+      }
+    }
+
+    vi.stubGlobal("ResizeObserver", MockResizeObserver as unknown as typeof ResizeObserver)
+
+    try {
+      const container = document.createElement("div")
+      container.style.padding = "24px 30px"
+      document.body.appendChild(container)
+      let clientWidth = 920
+      Object.defineProperty(container, "clientWidth", {
+        configurable: true,
+        get: () => clientWidth
+      })
+      Object.defineProperty(container, "clientHeight", {
+        configurable: true,
+        value: 1400
+      })
+
+      const reader = new EpubReader({ container, mode: "paginated" })
+      const section: SectionDocument = {
+        id: "section-fxl-resize",
+        href: "OPS/fxl-resize.xhtml",
+        title: "FXL Resize",
+        renditionLayout: "pre-paginated",
+        renditionViewport: {
+          width: 1200,
+          height: 1600
+        },
+        anchors: {},
+        blocks: []
+      }
+
+      ;(
+        reader as unknown as {
+          book: Book
+          chapterRenderInputs: Array<{
+            href: string
+            content: string
+            preprocessed: {
+              href: string
+              nodes: []
+            }
+          }>
+        }
+      ).book = {
+        metadata: {
+          title: "FXL Resize Book",
+          renditionLayout: "pre-paginated",
+          renditionViewport: {
+            width: 1200,
+            height: 1600
+          }
+        },
+        manifest: [],
+        spine: [{ idref: "fxl-resize", href: section.href, linear: true, renditionLayout: "pre-paginated" }],
+        toc: [],
+        sections: [section]
+      }
+
+      ;(
+        reader as unknown as {
+          chapterRenderInputs: Array<{
+            href: string
+            content: string
+            preprocessed: {
+              href: string
+              nodes: []
+            }
+          }>
+        }
+      ).chapterRenderInputs = [
+        {
+          href: section.href,
+          content: "<html><body></body></html>",
+          preprocessed: {
+            href: section.href,
+            nodes: []
+          }
+        }
+      ]
+
+      const renderSpy = vi.spyOn(
+        reader as unknown as {
+          renderCurrentSection(renderBehavior?: "relocate" | "preserve"): void
+        },
+        "renderCurrentSection"
+      )
+
+      await reader.render()
+      renderSpy.mockClear()
+      clientWidth = 980
+      resizeCallbacks[0]?.()
+
+      expect(renderSpy).toHaveBeenCalledWith("preserve")
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it("starts at the first cover page when leading dom image sections have not measured yet", async () => {

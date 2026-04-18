@@ -419,6 +419,12 @@ select {
   transform: translateY(-1px);
 }
 
+.toolbar-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+  transform: none;
+}
+
 .search-card {
   width: 100%;
   border: 0;
@@ -438,6 +444,18 @@ select {
   margin: 16px 0 10px;
   color: #555f6d;
   font-size: 0.92rem;
+}
+
+.reader-bookmark-status {
+  margin: 0 0 12px;
+  color: #7a5a2b;
+  font-size: 0.84rem;
+}
+
+.reader-highlight-status {
+  margin: -6px 0 12px;
+  color: #315a86;
+  font-size: 0.84rem;
 }
 
 .reader-diagnostics {
@@ -568,6 +586,10 @@ select {
   color: #5f6773;
 }
 
+.reader-stage {
+  position: relative;
+}
+
 .reader-root {
   height: 66vh;
   min-height: 66vh;
@@ -579,8 +601,122 @@ select {
   overflow-anchor: none;
 }
 
+.reader-viewport-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.reader-viewport-overlay-rect {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+}
+
+.reader-viewport-overlay-rect::after {
+  content: attr(data-label);
+  position: absolute;
+  top: -10px;
+  left: 10px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: white;
+}
+
+.reader-viewport-overlay-rect.is-search-hit {
+  background: rgba(245, 158, 11, 0.16);
+  outline: 2px solid rgba(245, 158, 11, 0.42);
+}
+
+.reader-viewport-overlay-rect.is-search-hit::after {
+  background: rgba(180, 83, 9, 0.92);
+}
+
+.reader-viewport-overlay-rect.is-annotation {
+  background: rgba(37, 99, 235, 0.12);
+  outline: 2px solid rgba(37, 99, 235, 0.38);
+}
+
+.reader-viewport-overlay-rect.is-annotation::after {
+  background: rgba(30, 64, 175, 0.92);
+}
+
 .reader-root[data-mode="paginated"] {
   overflow: hidden;
+}
+
+.reader-root[data-mode="paginated"][data-rendition-layout="pre-paginated"] {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.92), rgba(246, 238, 223, 0.72)),
+    linear-gradient(180deg, #f1eadb 0%, #e6dcc8 100%);
+}
+
+.reader-root[data-mode="paginated"][data-rendition-layout="pre-paginated"][data-synthetic-spread="enabled"] {
+  justify-items: stretch;
+}
+
+.reader-root .epub-dom-spread {
+  width: 100%;
+}
+
+.reader-root[data-mode="paginated"][data-rendition-layout="pre-paginated"][data-synthetic-spread="enabled"] .epub-dom-spread {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: center;
+}
+
+.reader-root .epub-dom-spread-slot {
+  min-width: 0;
+}
+
+.reader-root[data-mode="paginated"][data-rendition-layout="pre-paginated"][data-synthetic-spread="enabled"] .epub-dom-spread-slot {
+  min-height: 100%;
+  display: flex;
+}
+
+.reader-root[data-mode="paginated"][data-rendition-layout="pre-paginated"][data-synthetic-spread="enabled"] .epub-dom-spread-slot-blank {
+  border-radius: 14px;
+  border: 1px dashed rgba(116, 92, 52, 0.18);
+  background: rgba(255, 250, 240, 0.32);
+}
+
+.reader-root[data-mode="paginated"][data-rendition-layout="pre-paginated"][data-synthetic-spread="enabled"] .epub-dom-spread-slot-left {
+  justify-content: flex-start;
+}
+
+.reader-root[data-mode="paginated"][data-rendition-layout="pre-paginated"][data-synthetic-spread="enabled"] .epub-dom-spread-slot-right {
+  justify-content: flex-end;
+}
+
+.reader-root[data-mode="paginated"][data-rendition-layout="pre-paginated"][data-synthetic-spread="enabled"][data-page-spread-placement="left"] .epub-dom-section-fxl {
+  justify-self: start;
+}
+
+.reader-root[data-mode="paginated"][data-rendition-layout="pre-paginated"][data-synthetic-spread="enabled"][data-page-spread-placement="right"] .epub-dom-section-fxl {
+  justify-self: end;
+}
+
+.reader-root[data-mode="paginated"][data-rendition-layout="pre-paginated"][data-synthetic-spread="enabled"][data-page-spread-placement="center"] .epub-dom-section-fxl {
+  justify-self: center;
+}
+
+.reader-root[data-mode="paginated"][data-rendition-layout="pre-paginated"] .epub-dom-section-fxl {
+  box-shadow:
+    0 18px 40px rgba(73, 57, 33, 0.18),
+    0 0 0 1px rgba(116, 92, 52, 0.12);
+  border-radius: 14px;
+  background: white;
 }
 
 .placeholder-page {

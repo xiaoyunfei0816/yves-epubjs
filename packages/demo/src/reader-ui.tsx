@@ -1,9 +1,17 @@
 import { useEffect, useId, useRef, useState } from "react"
 import type {
+  AnnotationViewportSnapshot,
+  Locator,
+  LocatorRestoreDiagnostics,
+  ReadingLanguageContext,
+  ReadingNavigationContext,
+  ReadingSpreadContext,
+  Rect,
   RenderDiagnostics,
   TocItem,
   VisibleSectionDiagnostics
 } from "../../core/src/index"
+import type { ReaderDecorationOverlay } from "./use-reader-controller"
 
 export function SearchResultsPanel(props: {
   query: string
@@ -99,10 +107,15 @@ export function ReaderToolbar(props: {
   currentPage: number
   totalPages: number
   pageValue: string
+  hasSavedBookmark: boolean
   onPageValueChange: (value: string) => void
   onGoToPage: (page: number) => void | Promise<void>
   onPrevious: () => void | Promise<void>
   onNext: () => void | Promise<void>
+  onSaveBookmark: () => void | Promise<void>
+  onRestoreBookmark: () => void | Promise<void>
+  onAddHighlight: () => void | Promise<void>
+  onClearHighlights: () => void
 }): JSX.Element {
   return (
     <div className="reader-toolbar">
@@ -125,12 +138,67 @@ export function ReaderToolbar(props: {
         />
       </label>
       <ToolbarButton onClick={() => props.onGoToPage(Number(props.pageValue))}>Go</ToolbarButton>
+      <ToolbarButton onClick={props.onSaveBookmark}>Save Bookmark</ToolbarButton>
+      <ToolbarButton disabled={!props.hasSavedBookmark} onClick={props.onRestoreBookmark}>
+        Restore Bookmark
+      </ToolbarButton>
+      <ToolbarButton onClick={props.onAddHighlight}>Add Highlight</ToolbarButton>
+      <ToolbarButton onClick={props.onClearHighlights}>Clear Highlights</ToolbarButton>
+    </div>
+  )
+}
+
+export function ReaderViewportOverlay(props: {
+  searchOverlays: ReaderDecorationOverlay[]
+  annotationOverlays: AnnotationViewportSnapshot[]
+  viewportOffset: {
+    x: number
+    y: number
+  }
+}): JSX.Element | null {
+  const visibleSearchOverlays = props.searchOverlays.filter((overlay) => overlay.visible)
+  const visibleAnnotationOverlays = props.annotationOverlays.filter((overlay) => overlay.visible)
+
+  if (visibleSearchOverlays.length === 0 && visibleAnnotationOverlays.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="reader-viewport-overlay" aria-hidden="true">
+      {visibleSearchOverlays.flatMap((overlay) =>
+        overlay.rects.map((rect, index) => (
+          <OverlayRect
+            key={`${overlay.id}-${index}`}
+            rect={rect}
+            viewportOffset={props.viewportOffset}
+            className="reader-viewport-overlay-rect is-search-hit"
+            {...(index === 0 ? { label: "Search" } : {})}
+          />
+        ))
+      )}
+      {visibleAnnotationOverlays.flatMap((overlay) =>
+        overlay.rects.map((rect, index) => (
+          <OverlayRect
+            key={`${overlay.annotation.id}-${index}`}
+            rect={rect}
+            viewportOffset={props.viewportOffset}
+            className="reader-viewport-overlay-rect is-annotation"
+            {...(index === 0 ? { label: "Note" } : {})}
+          />
+        ))
+      )}
     </div>
   )
 }
 
 export function ReaderDiagnosticsPanel(props: {
   renderBackend: "canvas" | "dom" | null
+  publisherStyles: "enabled" | "disabled"
+  locator: Locator | null
+  restoreDiagnostics: LocatorRestoreDiagnostics | null
+  languageContext: ReadingLanguageContext | null
+  navigationContext: ReadingNavigationContext | null
+  spreadContext: ReadingSpreadContext | null
   diagnostics: RenderDiagnostics | null
   visibleSectionDiagnostics: VisibleSectionDiagnostics[]
 }): JSX.Element {
@@ -142,6 +210,46 @@ export function ReaderDiagnosticsPanel(props: {
         <strong>{props.renderBackend ?? "none"}</strong>
         <span>Mode</span>
         <strong>{props.diagnostics?.mode ?? "none"}</strong>
+        <span>Publisher CSS</span>
+        <strong>{props.diagnostics?.publisherStyles ?? props.publisherStyles}</strong>
+        <span>Rendition</span>
+        <strong>{props.diagnostics?.renditionLayout ?? "reflowable"}</strong>
+        <span>Language</span>
+        <strong>{props.languageContext?.resolvedLanguage ?? "none"}</strong>
+        <span>Direction</span>
+        <strong>{props.languageContext?.contentDirection ?? "ltr"}</strong>
+        <span>RTL</span>
+        <strong>{props.languageContext?.rtlActive ? "experimental-on" : "off"}</strong>
+        <span>Page Flow</span>
+        <strong>{props.navigationContext?.pageProgression ?? "ltr"}</strong>
+        <span>Spread</span>
+        <strong>
+          {props.spreadContext
+            ? `${props.spreadContext.spreadMode} / ${
+                props.spreadContext.syntheticSpreadActive ? "synthetic-on" : "single-page"
+              }`
+            : "auto / single-page"}
+        </strong>
+        <span>Page Slot</span>
+        <strong>
+          {props.spreadContext
+            ? `${props.spreadContext.pageSpreadPlacement} / ${props.spreadContext.viewportSlotCount}`
+            : "center / 1"}
+        </strong>
+        <span>Nav Keys</span>
+        <strong>
+          {props.navigationContext
+            ? `${props.navigationContext.previousPageKey} / ${props.navigationContext.nextPageKey}`
+            : "ArrowLeft / ArrowRight"}
+        </strong>
+        <span>Locator</span>
+        <strong>{formatLocatorSummary(props.locator)}</strong>
+        <span>Restore</span>
+        <strong>{formatRestoreSummary(props.restoreDiagnostics)}</strong>
+        <span>Restore Match</span>
+        <strong>{formatRestoreMatch(props.restoreDiagnostics)}</strong>
+        <span>Restore Reason</span>
+        <strong>{props.restoreDiagnostics?.reason ?? "none"}</strong>
         <span>Score</span>
         <strong>{props.diagnostics?.score ?? 0}</strong>
         <span>Reasons</span>
@@ -182,6 +290,7 @@ export function ReaderDiagnosticsPanel(props: {
               </div>
               <div className="reader-diagnostics-card-meta">
                 <span>Mode {diagnostic.mode}</span>
+                <span>Publisher {diagnostic.publisherStyles ?? props.publisherStyles}</span>
                 <span>Score {diagnostic.score}</span>
                 <span>{diagnostic.layoutAuthority}</span>
                 <span>{diagnostic.flowModel}</span>
@@ -195,6 +304,42 @@ export function ReaderDiagnosticsPanel(props: {
       </div>
     </div>
   )
+}
+
+function formatLocatorSummary(locator: Locator | null): string {
+  if (!locator) {
+    return "none"
+  }
+
+  const parts = [`s${locator.spineIndex + 1}`]
+  if (locator.blockId) {
+    parts.push(`block:${locator.blockId}`)
+  }
+  if (locator.anchorId) {
+    parts.push(`anchor:${locator.anchorId}`)
+  }
+  if (typeof locator.progressInSection === "number") {
+    parts.push(`progress:${locator.progressInSection.toFixed(3)}`)
+  }
+  return parts.join(" / ")
+}
+
+function formatRestoreSummary(diagnostics: LocatorRestoreDiagnostics | null): string {
+  if (!diagnostics) {
+    return "none"
+  }
+
+  return `${diagnostics.status} / ${diagnostics.requestedPrecision} -> ${
+    diagnostics.resolvedPrecision ?? "none"
+  }`
+}
+
+function formatRestoreMatch(diagnostics: LocatorRestoreDiagnostics | null): string {
+  if (!diagnostics) {
+    return "none / fallback:no"
+  }
+
+  return `${diagnostics.matchedBy ?? "none"} / fallback:${diagnostics.fallbackApplied ? "yes" : "no"}`
 }
 
 export function CustomSelect(props: {
@@ -270,18 +415,47 @@ export function toggleId(current: Set<string>, id: string): Set<string> {
 
 function ToolbarButton(props: {
   children: string
+  disabled?: boolean
   onClick: () => void | Promise<void>
 }): JSX.Element {
   return (
     <button
       type="button"
       className="toolbar-button"
+      disabled={props.disabled}
       onClick={() => {
+        if (props.disabled) {
+          return
+        }
         void props.onClick()
       }}
     >
       {props.children}
     </button>
+  )
+}
+
+function OverlayRect(props: {
+  rect: Rect
+  viewportOffset: {
+    x: number
+    y: number
+  }
+  className: string
+  label?: string
+}): JSX.Element {
+  return (
+    <span
+      className={props.className}
+      style={{
+        width: `${props.rect.width}px`,
+        height: `${props.rect.height}px`,
+        transform: `translate(${props.rect.x - props.viewportOffset.x}px, ${
+          props.rect.y - props.viewportOffset.y
+        }px)`
+      }}
+      data-label={props.label}
+    />
   )
 }
 

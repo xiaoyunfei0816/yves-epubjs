@@ -492,4 +492,75 @@ describe("EpubReader hybrid search", () => {
       }
     }
   });
+
+  it("navigates canvas search results for nested list blocks to the exact page instead of falling back to coarse progress", async () => {
+    const container = document.createElement("div")
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 320
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 220
+    })
+    document.body.appendChild(container)
+
+    const nestedListItems = Array.from({ length: 48 }, (_, index) =>
+      index === 0
+        ? "<li><p>Canvas nested search target.</p></li>"
+        : `<li><p>Supplement ${index + 1}</p></li>`
+    ).join("")
+    const canvasInput = createSharedChapterRenderInput({
+      href: "OPS/nested-list.xhtml",
+      content: `<?xml version="1.0" encoding="utf-8"?>
+        <html xmlns="http://www.w3.org/1999/xhtml">
+          <head><title>Nested Canvas Search</title></head>
+          <body>
+            <section>
+              <p>${"Opening context. ".repeat(260)}</p>
+              <ol>
+                ${nestedListItems}
+              </ol>
+            </section>
+          </body>
+        </html>`
+    })
+    const canvasSection: SectionDocument = {
+      ...toCanvasChapterRenderInput(canvasInput).section,
+      id: "section-1"
+    }
+    const book: Book = {
+      metadata: { title: "Canvas Nested Search" },
+      manifest: [],
+      spine: [{ idref: "item-1", href: canvasSection.href, linear: true }],
+      toc: [],
+      sections: [canvasSection]
+    }
+
+    const reader = new EpubReader({ container, mode: "paginated" })
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+      }
+    ).book = book
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+      }
+    ).chapterRenderInputs = [canvasInput]
+
+    await reader.render()
+
+    const results = await reader.search("Canvas nested search target")
+    expect(results).toHaveLength(1)
+
+    await reader.goToSearchResult(results[0]!)
+
+    expect(reader.getRenderMetrics().backend).toBe("canvas")
+    expect(reader.getPaginationInfo().currentPage).toBeGreaterThan(1)
+    expect(reader.getCurrentLocation()?.blockId).toBe(results[0]?.locator.blockId)
+    expect(reader.mapLocatorToViewport(results[0]!.locator).length).toBeGreaterThan(0)
+  })
 });

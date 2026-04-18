@@ -1,10 +1,22 @@
-import type { Theme, TypographyOptions } from "../model/types";
+import type {
+  FixedLayoutViewport,
+  RenditionLayout,
+  Theme,
+  TypographyOptions
+} from "../model/types";
 import type { PreprocessedChapterNode } from "../runtime/chapter-preprocess";
 import { buildDomChapterNormalizationCss } from "./dom-chapter-style";
 
 export type DomChapterRenderInput = {
   sectionId: string;
   sectionHref: string;
+  sectionLanguage?: string;
+  sectionDirection?: "ltr" | "rtl";
+  renditionLayout?: RenditionLayout;
+  fixedLayoutViewport?: FixedLayoutViewport;
+  fixedLayoutScale?: number;
+  fixedLayoutRenderWidth?: number;
+  fixedLayoutRenderHeight?: number;
   presentationRole?: "cover" | "image-page";
   presentationImageSrc?: string;
   presentationImageAlt?: string;
@@ -50,9 +62,10 @@ export class DomChapterRenderer {
         theme: input.theme,
         typography: input.typography,
         fontFamily: input.fontFamily,
+        ...(input.renditionLayout ? { renditionLayout: input.renditionLayout } : {}),
         ...(input.presentationRole ? { presentationRole: input.presentationRole } : {})
       })}</style>`,
-      `<div class="epub-dom-section${input.presentationRole === "cover" ? " epub-dom-section-cover" : ""}" data-section-id="${escapeHtmlAttribute(input.sectionId)}" data-section-href="${escapeHtmlAttribute(input.sectionHref)}">`,
+      `<div class="epub-dom-section${input.presentationRole === "cover" ? " epub-dom-section-cover" : ""}${input.renditionLayout === "pre-paginated" ? " epub-dom-section-fxl" : ""}" data-section-id="${escapeHtmlAttribute(input.sectionId)}" data-section-href="${escapeHtmlAttribute(input.sectionHref)}"${serializeSectionLanguageAttributes(input)}${serializeFixedLayoutAttributes(input)}>`,
       serializePreprocessedChapterNodes(input.nodes, input.resolveAttributeValue),
       "</div>"
     ].join("");
@@ -70,9 +83,10 @@ export class DomChapterRenderer {
         theme: input.theme,
         typography: input.typography,
         fontFamily: input.fontFamily,
+        ...(input.renditionLayout ? { renditionLayout: input.renditionLayout } : {}),
         ...(input.presentationRole ? { presentationRole: input.presentationRole } : {})
       })}</style>`,
-      `<div class="epub-dom-section epub-dom-section-${input.presentationRole} ${presentationClass}" data-section-id="${escapeHtmlAttribute(input.sectionId)}" data-section-href="${escapeHtmlAttribute(input.sectionHref)}">`,
+      `<div class="epub-dom-section epub-dom-section-${input.presentationRole} ${presentationClass}${input.renditionLayout === "pre-paginated" ? " epub-dom-section-fxl" : ""}" data-section-id="${escapeHtmlAttribute(input.sectionId)}" data-section-href="${escapeHtmlAttribute(input.sectionHref)}"${serializeSectionLanguageAttributes(input)}${serializeFixedLayoutAttributes(input)}>`,
       `<img class="epub-dom-presentation-image" src="${escapeHtmlAttribute(input.presentationImageSrc ?? "")}" alt="${escapeHtmlAttribute(imageAlt)}">`,
       "</div>"
     ].join("")
@@ -113,7 +127,7 @@ function serializePreprocessedChapterNode(
   }
 
   const attributes = Object.entries(node.attributes)
-    .map(([name, value]) => {
+    .flatMap(([name, value]) => {
       const resolvedValue = resolveAttributeValue
         ? resolveAttributeValue({
             tagName: node.tagName,
@@ -121,7 +135,10 @@ function serializePreprocessedChapterNode(
             value
           })
         : value;
-      return ` ${name}="${escapeHtmlAttribute(resolvedValue)}"`;
+      if (!resolvedValue.trim()) {
+        return []
+      }
+      return [` ${name}="${escapeHtmlAttribute(resolvedValue)}"`]
     })
     .join("");
 
@@ -157,4 +174,41 @@ function serializeLinkedStyleSheets(
 
 function escapeStyleTagText(value: string): string {
   return value.replaceAll("</style", "<\\/style");
+}
+
+function serializeSectionLanguageAttributes(input: DomChapterRenderInput): string {
+  return [
+    input.sectionLanguage ? ` lang="${escapeHtmlAttribute(input.sectionLanguage)}"` : "",
+    input.sectionDirection ? ` dir="${escapeHtmlAttribute(input.sectionDirection)}"` : ""
+  ].join("")
+}
+
+function serializeFixedLayoutAttributes(input: DomChapterRenderInput): string {
+  if (input.renditionLayout !== "pre-paginated" || !input.fixedLayoutViewport) {
+    return ""
+  }
+
+  const styleAttributes = [
+    `--fxl-viewport-width: ${input.fixedLayoutViewport.width}px`,
+    `--fxl-viewport-height: ${input.fixedLayoutViewport.height}px`,
+    ...(typeof input.fixedLayoutRenderWidth === "number"
+      ? [`--fxl-render-width: ${input.fixedLayoutRenderWidth}px`]
+      : []),
+    ...(typeof input.fixedLayoutRenderHeight === "number"
+      ? [`--fxl-render-height: ${input.fixedLayoutRenderHeight}px`]
+      : []),
+    ...(typeof input.fixedLayoutScale === "number"
+      ? [`--fxl-scale: ${input.fixedLayoutScale}`]
+      : [])
+  ].join("; ")
+
+  return [
+    ` data-rendition-layout="pre-paginated"`,
+    ` data-fxl-viewport-width="${escapeHtmlAttribute(String(input.fixedLayoutViewport.width))}"`,
+    ` data-fxl-viewport-height="${escapeHtmlAttribute(String(input.fixedLayoutViewport.height))}"`,
+    typeof input.fixedLayoutScale === "number"
+      ? ` data-fxl-scale="${escapeHtmlAttribute(input.fixedLayoutScale.toFixed(4))}"`
+      : "",
+    styleAttributes ? ` style="${escapeHtmlAttribute(styleAttributes)}"` : ""
+  ].join("")
 }

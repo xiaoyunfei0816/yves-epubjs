@@ -41,6 +41,7 @@ type BuilderOptions = {
   resolveImageLoaded?: (src: string) => boolean;
   resolveImageUrl?: (src: string) => string;
   highlightedBlockIds?: Set<string>;
+  underlinedBlockIds?: Set<string>;
   activeBlockId: string | undefined;
 };
 
@@ -78,6 +79,7 @@ export class DisplayListBuilder {
             resolveImageLoaded: options.resolveImageLoaded,
             resolveImageUrl: options.resolveImageUrl,
             highlighted: options.highlightedBlockIds?.has(block.id) ?? false,
+            underlined: options.underlinedBlockIds?.has(block.id) ?? false,
             active: options.activeBlockId === block.id
           })
         : this.buildNativeBlock({
@@ -94,6 +96,7 @@ export class DisplayListBuilder {
             resolveImageLoaded: options.resolveImageLoaded,
             resolveImageUrl: options.resolveImageUrl,
             highlighted: options.highlightedBlockIds?.has(block.id) ?? false,
+            underlined: options.underlinedBlockIds?.has(block.id) ?? false,
             active: options.activeBlockId === block.id
           });
 
@@ -126,6 +129,7 @@ export class DisplayListBuilder {
     resolveImageLoaded: ((src: string) => boolean) | undefined;
     resolveImageUrl: ((src: string) => string) | undefined;
     highlighted: boolean;
+    underlined: boolean;
     active: boolean;
   }): {
     ops: DrawOp[];
@@ -269,7 +273,7 @@ export class DisplayListBuilder {
             : fragment.mark
               ? input.styleProfile.highlight.mark
               : undefined,
-          underline: Boolean(fragment.href),
+          underline: Boolean(fragment.href) || input.underlined,
           href: fragment.href
         } satisfies TextRunDrawOp);
 
@@ -312,6 +316,7 @@ export class DisplayListBuilder {
     resolveImageLoaded: ((src: string) => boolean) | undefined;
     resolveImageUrl: ((src: string) => string) | undefined;
     highlighted: boolean;
+    underlined: boolean;
     active: boolean;
   }): {
     ops: DrawOp[];
@@ -462,6 +467,7 @@ export class DisplayListBuilder {
             color: blockStyle.color,
             textAlign: blockStyle.textAlign,
             highlighted: input.highlighted,
+            underlined: input.underlined,
             active: input.active,
             styleProfile: input.styleProfile
           })
@@ -492,6 +498,7 @@ export class DisplayListBuilder {
             color: blockStyle.color,
             textAlign: blockStyle.textAlign,
             highlighted: input.highlighted,
+            underlined: input.underlined,
             active: input.active,
             styleProfile: input.styleProfile
           })
@@ -537,6 +544,7 @@ export class DisplayListBuilder {
             color: blockStyle.color,
             textAlign: blockStyle.textAlign,
             highlighted: input.highlighted,
+            underlined: input.underlined,
             active: input.active,
             styleProfile: input.styleProfile
           })
@@ -557,6 +565,7 @@ export class DisplayListBuilder {
               color: blockStyle.color
             },
             highlighted: input.highlighted,
+            underlined: input.underlined,
             active: input.active,
             styleProfile: input.styleProfile
           })
@@ -580,6 +589,7 @@ export class DisplayListBuilder {
             resolveImageLoaded: input.resolveImageLoaded,
             resolveImageUrl: input.resolveImageUrl,
             highlighted: input.highlighted,
+            underlined: input.underlined,
             active: input.active,
             styleProfile: input.styleProfile
           })
@@ -600,6 +610,7 @@ export class DisplayListBuilder {
               color: blockStyle.color
             },
             highlighted: input.highlighted,
+            underlined: input.underlined,
             active: input.active,
             styleProfile: input.styleProfile
           })
@@ -622,6 +633,7 @@ export class DisplayListBuilder {
             color: blockStyle.color,
             textAlign: blockStyle.textAlign,
             highlighted: input.highlighted,
+            underlined: input.underlined,
             active: input.active,
             styleProfile: input.styleProfile
           })
@@ -649,6 +661,7 @@ export class DisplayListBuilder {
     color: string;
     textAlign: TextAlign;
     highlighted: boolean;
+    underlined: boolean;
     active: boolean;
     styleProfile: ReadingStyleProfile;
   }): TextRunDrawOp[] {
@@ -687,7 +700,7 @@ export class DisplayListBuilder {
           : input.active
             ? input.styleProfile.highlight.active
             : undefined,
-        underline: undefined,
+        underline: input.underlined || undefined,
         href: undefined
       }
     })
@@ -706,6 +719,7 @@ export class DisplayListBuilder {
     color: string;
     textAlign: TextAlign;
     highlighted: boolean;
+    underlined: boolean;
     active: boolean;
     styleProfile: ReadingStyleProfile;
   }): TextRunDrawOp[] {
@@ -744,7 +758,7 @@ export class DisplayListBuilder {
           : input.active
             ? input.styleProfile.highlight.active
             : undefined,
-        underline: undefined,
+        underline: input.underlined || undefined,
         href: undefined
       }
     })
@@ -760,6 +774,7 @@ export class DisplayListBuilder {
     typography: TypographyOptions;
     theme: Theme;
     highlighted: boolean;
+    underlined: boolean;
     active: boolean;
     styleProfile: ReadingStyleProfile;
   }): TextRunDrawOp[] {
@@ -801,7 +816,7 @@ export class DisplayListBuilder {
             : input.active
               ? input.styleProfile.highlight.active
               : undefined,
-          underline: undefined,
+          underline: input.underlined || undefined,
           href: undefined
         })
 
@@ -830,7 +845,7 @@ export class DisplayListBuilder {
               : input.active
                 ? input.styleProfile.highlight.active
                 : undefined,
-            underline: undefined,
+            underline: input.underlined || undefined,
             href: undefined
           })
         })
@@ -872,6 +887,7 @@ export class DisplayListBuilder {
     resolveImageLoaded: ((src: string) => boolean) | undefined;
     resolveImageUrl: ((src: string) => string) | undefined;
     highlighted: boolean;
+    underlined: boolean;
     active: boolean;
     styleProfile: ReadingStyleProfile;
   }): DrawOp[] {
@@ -906,7 +922,7 @@ export class DisplayListBuilder {
           loaded: Boolean(input.resolveImageLoaded?.(child.src)),
           background: "transparent"
         })
-        currentTop += imageLayout.height + input.styleProfile.text.marginBottom
+        currentTop += imageLayout.height + input.styleProfile.media.blockSpacing
         continue
       }
 
@@ -942,7 +958,7 @@ export class DisplayListBuilder {
             : input.active
               ? input.styleProfile.highlight.active
               : undefined,
-          underline: undefined,
+          underline: input.underlined || undefined,
           href: undefined
         })
       })
@@ -950,12 +966,13 @@ export class DisplayListBuilder {
     }
 
     if (input.block.caption?.length) {
+      currentTop += input.styleProfile.caption.marginTop
       const captionText = input.block.caption.map(extractBlockText).filter(Boolean).join(" ")
-      const captionFont = `italic 400 ${Math.max(14, input.typography.fontSize - 1)}px "Iowan Old Style", "Palatino Linotype", serif`
-      const captionLineHeight = Math.max(extractFontSize(captionFont) * 1.45, 18)
+      const captionFont = `italic 400 ${input.styleProfile.caption.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
+      const captionLineHeight = input.styleProfile.caption.lineHeight
       const captionLines = wrapText(
         captionText,
-        Math.max(40, input.width - input.styleProfile.code.blockPaddingX * 2),
+        Math.max(40, input.width - input.styleProfile.caption.insetX * 2),
         captionFont
       )
       captionLines.forEach((line, lineIndex) => {
@@ -966,24 +983,24 @@ export class DisplayListBuilder {
           blockId: input.block.id,
           locator: input.locator,
           rect: {
-            x: input.x + input.styleProfile.code.blockPaddingX,
+            x: input.x + input.styleProfile.caption.insetX,
             y: currentTop + lineIndex * captionLineHeight,
             width: approximateTextWidth(line, captionFont),
             height: captionLineHeight
           },
           text: line,
-          x: input.x + input.styleProfile.code.blockPaddingX,
+          x: input.x + input.styleProfile.caption.insetX,
           y: currentTop + lineIndex * captionLineHeight,
           width: approximateTextWidth(line, captionFont),
           font: captionFont,
-          color: input.theme.color,
+          color: input.styleProfile.caption.color,
           backgroundColor: undefined,
           highlightColor: input.highlighted
             ? input.styleProfile.highlight.search
             : input.active
               ? input.styleProfile.highlight.active
               : undefined,
-          underline: undefined,
+          underline: input.underlined || undefined,
           href: undefined
         })
       })
@@ -1002,11 +1019,12 @@ export class DisplayListBuilder {
     typography: TypographyOptions;
     theme: Theme;
     highlighted: boolean;
+    underlined: boolean;
     active: boolean;
     styleProfile: ReadingStyleProfile;
   }): DrawOp[] {
     const ops: DrawOp[] = []
-    const captionFont = `italic 400 ${Math.max(14, input.typography.fontSize - 1)}px "Iowan Old Style", "Palatino Linotype", serif`
+    const captionFont = `italic 400 ${input.styleProfile.caption.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
     const cellFont = `400 ${input.typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
     const headerFont = `700 ${input.typography.fontSize}px "Iowan Old Style", "Palatino Linotype", serif`
     const lineHeight = Math.max(input.typography.fontSize * 1.45, 18)
@@ -1015,6 +1033,7 @@ export class DisplayListBuilder {
 
     if (input.block.caption?.length) {
       const captionText = input.block.caption.map(extractBlockText).filter(Boolean).join(" ")
+      currentTop += input.styleProfile.caption.marginTop
       const captionLines = wrapText(captionText, input.width, captionFont)
       captionLines.forEach((line, lineIndex) => {
         ops.push({
@@ -1025,27 +1044,29 @@ export class DisplayListBuilder {
           locator: input.locator,
           rect: {
             x: input.x,
-            y: currentTop + lineIndex * lineHeight,
+            y: currentTop + lineIndex * input.styleProfile.caption.lineHeight,
             width: approximateTextWidth(line, captionFont),
-            height: lineHeight
+            height: input.styleProfile.caption.lineHeight
           },
           text: line,
           x: input.x,
-          y: currentTop + lineIndex * lineHeight,
+          y: currentTop + lineIndex * input.styleProfile.caption.lineHeight,
           width: approximateTextWidth(line, captionFont),
           font: captionFont,
-          color: input.theme.color,
+          color: input.styleProfile.caption.color,
           backgroundColor: undefined,
           highlightColor: input.highlighted
             ? input.styleProfile.highlight.search
             : input.active
               ? input.styleProfile.highlight.active
               : undefined,
-          underline: undefined,
+          underline: input.underlined || undefined,
           href: undefined
         })
       })
-      currentTop += captionLines.length * lineHeight + input.styleProfile.text.marginBottom
+      currentTop +=
+        captionLines.length * input.styleProfile.caption.lineHeight +
+        input.styleProfile.text.marginBottom
     }
 
     const columnCount = Math.max(
@@ -1116,7 +1137,7 @@ export class DisplayListBuilder {
               : input.active
                 ? input.styleProfile.highlight.active
                 : undefined,
-            underline: undefined,
+            underline: input.underlined || undefined,
             href: undefined
           })
         })

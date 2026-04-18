@@ -1,6 +1,15 @@
-import type { TextAlign, Theme, TypographyOptions } from "../model/types";
+import type {
+  ReaderBaselineStyleProfile,
+  TextAlign,
+  Theme,
+  TypographyOptions
+} from "../model/types";
+
+export const DEFAULT_READER_BASELINE_STYLE_PROFILE: ReaderBaselineStyleProfile =
+  "default-reflowable";
 
 export type ReadingStyleProfile = {
+  name: ReaderBaselineStyleProfile;
   section: {
     sidePadding: number;
     bottomPadding: number;
@@ -10,6 +19,8 @@ export type ReadingStyleProfile = {
     marginBottom: number;
     textAlign: TextAlign;
     color: string;
+    letterSpacing: number;
+    wordSpacing: number;
   };
   heading: {
     lineHeight: number;
@@ -19,6 +30,13 @@ export type ReadingStyleProfile = {
   };
   link: {
     color: string;
+  };
+  caption: {
+    color: string;
+    fontSize: number;
+    lineHeight: number;
+    marginTop: number;
+    insetX: number;
   };
   code: {
     fontFamily: string;
@@ -58,6 +76,9 @@ export type ReadingStyleProfile = {
     borderWidth: number;
     cellPadding: number;
   };
+  media: {
+    blockSpacing: number;
+  };
   thematicBreak: {
     blockHeight: number;
     lineWidth: number;
@@ -79,8 +100,11 @@ export function buildReadingStyleProfile(input: {
   const headingMarginBottom = Math.max(12, Math.round(paragraphSpacing * 0.9));
   const textLineHeight = input.typography.fontSize * input.typography.lineHeight;
   const codeFontSize = Math.max(13, input.typography.fontSize - 1);
+  const captionFontSize = Math.max(14, input.typography.fontSize - 1);
+  const captionLineHeight = Math.max(captionFontSize * 1.45, 18);
 
   return {
+    name: DEFAULT_READER_BASELINE_STYLE_PROFILE,
     section: {
       sidePadding: 8,
       bottomPadding: 24
@@ -89,7 +113,9 @@ export function buildReadingStyleProfile(input: {
       lineHeight: textLineHeight,
       marginBottom: paragraphSpacing,
       textAlign: "start",
-      color: input.theme.color
+      color: input.theme.color,
+      letterSpacing: input.typography.letterSpacing ?? 0,
+      wordSpacing: input.typography.wordSpacing ?? 0
     },
     heading: {
       lineHeight: Math.max(input.typography.fontSize * 1.25, textLineHeight),
@@ -106,6 +132,13 @@ export function buildReadingStyleProfile(input: {
     },
     link: {
       color: "#1b4b72"
+    },
+    caption: {
+      color: darkTheme ? "#cbd5e1" : "#475569",
+      fontSize: captionFontSize,
+      lineHeight: captionLineHeight,
+      marginTop: Math.max(8, Math.round(paragraphSpacing * 0.66)),
+      insetX: 12
     },
     code: {
       fontFamily: '"SFMono-Regular", "SF Mono", Consolas, monospace',
@@ -145,6 +178,9 @@ export function buildReadingStyleProfile(input: {
       borderWidth: 1,
       cellPadding: 10
     },
+    media: {
+      blockSpacing: 10
+    },
     thematicBreak: {
       blockHeight: 28,
       lineWidth: 1.5,
@@ -163,17 +199,28 @@ export function buildReadingStyleCssVariables(profile: ReadingStyleProfile): Rec
     "--reader-side-padding": `${profile.section.sidePadding}px`,
     "--reader-bottom-padding": `${profile.section.bottomPadding}px`,
     "--reader-paragraph-spacing": `${profile.text.marginBottom}px`,
+    "--reader-letter-spacing": `${profile.text.letterSpacing}px`,
+    "--reader-word-spacing": `${profile.text.wordSpacing}px`,
     "--reader-heading-spacing": `${profile.heading.marginBottom}px`,
     "--reader-link-color": profile.link.color,
+    "--reader-caption-color": profile.caption.color,
+    "--reader-caption-font-size": `${profile.caption.fontSize}px`,
+    "--reader-caption-line-height": `${profile.caption.lineHeight}px`,
+    "--reader-caption-margin-top": `${profile.caption.marginTop}px`,
     "--reader-code-bg": profile.code.blockBackground,
     "--reader-code-color": profile.code.color,
     "--reader-inline-code-bg": profile.code.inlineBackground,
     "--reader-inline-code-color": profile.code.inlineColor,
+    "--reader-mark-bg": profile.highlight.mark,
     "--reader-quote-accent-width": `${profile.quote.accentWidth}px`,
     "--reader-quote-accent-gap": `${profile.quote.accentGap}px`,
     "--reader-quote-accent-color": profile.quote.accentColor,
+    "--reader-aside-bg": profile.aside.background,
     "--reader-table-border-color": profile.table.borderColor,
-    "--reader-table-cell-padding": `${profile.table.cellPadding}px`
+    "--reader-table-cell-padding": `${profile.table.cellPadding}px`,
+    "--reader-media-block-spacing": `${profile.media.blockSpacing}px`,
+    "--reader-rule-color": profile.thematicBreak.color,
+    "--reader-rule-width": `${profile.thematicBreak.lineWidth}px`
   };
 }
 

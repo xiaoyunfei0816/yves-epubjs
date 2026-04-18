@@ -7,23 +7,59 @@ import {
   type SetStateAction
 } from "react"
 import {
+  type AnnotationViewportSnapshot,
+  deserializeReaderPreferences,
+  deserializeBookmark,
   EpubReader,
+  type Locator,
+  type LocatorRestoreDiagnostics,
+  mergeReaderPreferences,
+  normalizeReaderPreferences,
+  type ReadingLanguageContext,
+  type ReadingNavigationContext,
+  type ReadingSpreadContext,
+  resolveReaderSettings,
+  type ReaderPreferences,
+  type ReaderSettings,
+  type PublisherStylesMode,
+  serializeBookmark,
+  type Bookmark,
   type PaginationInfo,
   type RenderDiagnostics,
   type SearchResult,
   type Theme,
   type TocItem,
+  type VisibleDrawBounds,
   type VisibleSectionDiagnostics
 } from "../../core/src/index"
 import { findActiveTocId } from "./toc-active"
+
+export type ReaderDecorationOverlay = {
+  id: string
+  label: string
+  style: "search-hit" | "annotation"
+  rects: VisibleDrawBounds
+  visible: boolean
+}
 
 export type ReaderSnapshot = {
   metaText: string
   pagination: PaginationInfo
   toc: TocItem[]
   renderBackend: "canvas" | "dom" | null
+  locator: Locator | null
+  restoreDiagnostics: LocatorRestoreDiagnostics | null
+  languageContext: ReadingLanguageContext | null
+  navigationContext: ReadingNavigationContext | null
+  spreadContext: ReadingSpreadContext | null
   diagnostics: RenderDiagnostics | null
   visibleSectionDiagnostics: VisibleSectionDiagnostics[]
+  searchOverlays: ReaderDecorationOverlay[]
+  annotationOverlays: AnnotationViewportSnapshot[]
+  viewportOffset: {
+    x: number
+    y: number
+  }
 }
 
 export const THEMES = {
@@ -43,6 +79,17 @@ export const THEMES = {
 
 type ThemeKey = keyof typeof THEMES
 
+type DemoPreferenceState = {
+  themeKey: ThemeKey
+  mode: "scroll" | "paginated"
+  publisherStyles: PublisherStylesMode
+  experimentalRtl: boolean
+  fontSize: number
+  fontFamily: string
+  letterSpacing: number
+  wordSpacing: number
+}
+
 const INITIAL_SNAPSHOT: ReaderSnapshot = {
   metaText: "No book loaded",
   pagination: {
@@ -51,9 +98,22 @@ const INITIAL_SNAPSHOT: ReaderSnapshot = {
   },
   toc: [],
   renderBackend: null,
+  locator: null,
+  restoreDiagnostics: null,
+  languageContext: null,
+  navigationContext: null,
+  spreadContext: null,
   diagnostics: null,
-  visibleSectionDiagnostics: []
+  visibleSectionDiagnostics: [],
+  searchOverlays: [],
+  annotationOverlays: [],
+  viewportOffset: {
+    x: 0,
+    y: 0
+  }
 }
+
+const DEMO_GLOBAL_PREFERENCES_STORAGE_KEY = "pretext-epub:preferences:global"
 
 export function useReaderController(
   containerRef: RefObject<HTMLDivElement | null>
@@ -62,11 +122,19 @@ export function useReaderController(
   results: SearchResult[]
   themeKey: ThemeKey
   mode: "scroll" | "paginated"
+  publisherStyles: PublisherStylesMode
+  experimentalRtl: boolean
   fontSize: number
+  fontFamily: string
+  letterSpacing: number
+  wordSpacing: number
   pageValue: string
   activeTocId: string | null
   expandedTocIds: Set<string>
   lightbox: { src: string; alt: string } | null
+  hasSavedBookmark: boolean
+  bookmarkStatus: string
+  highlightStatus: string
   setPageValue: (value: string) => void
   setExpandedTocIds: Dispatch<SetStateAction<Set<string>>>
   setLightbox: Dispatch<SetStateAction<{ src: string; alt: string } | null>>
@@ -77,23 +145,61 @@ export function useReaderController(
   goToSearchResult: (result: SearchResult) => Promise<void>
   handleThemeChange: (nextThemeKey: ThemeKey) => Promise<void>
   handleModeChange: (nextMode: "scroll" | "paginated") => Promise<void>
+  handlePublisherStylesChange: (nextMode: PublisherStylesMode) => Promise<void>
+  handleExperimentalRtlChange: (enabled: boolean) => Promise<void>
   handleFontSizeChange: (nextSize: number) => Promise<void>
+  handleFontFamilyChange: (nextFamily: string) => Promise<void>
+  handleLetterSpacingChange: (nextSpacing: number) => Promise<void>
+  handleWordSpacingChange: (nextSpacing: number) => Promise<void>
   goToPreviousPage: () => Promise<void>
   goToNextPage: () => Promise<void>
   goToTocItem: (id: string) => Promise<void>
+  saveBookmark: () => Promise<void>
+  restoreSavedBookmark: () => Promise<void>
+  addHighlight: () => Promise<void>
+  clearHighlights: () => void
 } {
   const readerRef = useRef<EpubReader | null>(null)
   const activeTocIdRef = useRef<string | null>(null)
+  const initialPreferenceStateRef = useRef<DemoPreferenceState | null>(null)
+  const syncSnapshotRef = useRef<(() => void) | null>(null)
+
+  if (!initialPreferenceStateRef.current) {
+    initialPreferenceStateRef.current = getInitialDemoPreferenceState()
+  }
 
   const [snapshot, setSnapshot] = useState<ReaderSnapshot>(INITIAL_SNAPSHOT)
   const [results, setResults] = useState<SearchResult[]>([])
-  const [themeKey, setThemeKey] = useState<ThemeKey>("paper")
-  const [mode, setMode] = useState<"scroll" | "paginated">("scroll")
-  const [fontSize, setFontSize] = useState(18)
+  const [themeKey, setThemeKey] = useState<ThemeKey>(initialPreferenceStateRef.current.themeKey)
+  const [mode, setMode] = useState<"scroll" | "paginated">(initialPreferenceStateRef.current.mode)
+  const [publisherStyles, setPublisherStyles] = useState<PublisherStylesMode>(
+    initialPreferenceStateRef.current.publisherStyles
+  )
+  const [experimentalRtl, setExperimentalRtl] = useState(
+    initialPreferenceStateRef.current.experimentalRtl
+  )
+  const [fontSize, setFontSize] = useState(initialPreferenceStateRef.current.fontSize)
+  const [fontFamily, setFontFamily] = useState(initialPreferenceStateRef.current.fontFamily)
+  const [letterSpacing, setLetterSpacing] = useState(initialPreferenceStateRef.current.letterSpacing)
+  const [wordSpacing, setWordSpacing] = useState(initialPreferenceStateRef.current.wordSpacing)
   const [pageValue, setPageValue] = useState("1")
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null)
   const [expandedTocIds, setExpandedTocIds] = useState<Set<string>>(new Set())
   const [activeTocId, setActiveTocId] = useState<string | null>(null)
+  const [savedBookmark, setSavedBookmark] = useState<Bookmark | null>(null)
+  const [bookmarkStatus, setBookmarkStatus] = useState("No bookmark saved")
+  const [highlightStatus, setHighlightStatus] = useState("No highlights saved")
+
+  function syncPreferenceState(settings: ReaderSettings): void {
+    setThemeKey(resolveThemeKey(settings.theme))
+    setMode(settings.mode)
+    setPublisherStyles(settings.publisherStyles)
+    setExperimentalRtl(settings.experimentalRtl)
+    setFontSize(settings.typography.fontSize)
+    setFontFamily(settings.typography.fontFamily ?? defaultFontFamily())
+    setLetterSpacing(settings.typography.letterSpacing ?? 0)
+    setWordSpacing(settings.typography.wordSpacing ?? 0)
+  }
 
   useEffect(() => {
     const container = containerRef.current
@@ -107,18 +213,39 @@ export function useReaderController(
     const syncSnapshot = (): void => {
       const book = reader.getBook()
       const locator = reader.getCurrentLocation()
+      const restoreDiagnostics = reader.getLastLocationRestoreDiagnostics()
       const metrics = reader.getRenderMetrics()
+      const languageContext = reader.getReadingLanguageContext()
+      const navigationContext = reader.getReadingNavigationContext()
+      const spreadContext = reader.getReadingSpreadContext()
       const diagnostics = reader.getRenderDiagnostics()
       const visibleSectionDiagnostics = reader.getVisibleSectionDiagnostics()
+      const searchOverlays = buildSearchOverlays(reader)
+      const annotationOverlays = reader.getAnnotationViewportSnapshots()
+      const viewportOffset = {
+        x: container.scrollLeft,
+        y: container.scrollTop
+      }
+      const baseSnapshot = {
+        pagination: reader.getPaginationInfo(),
+        toc: book?.toc ?? [],
+        renderBackend: metrics.backend,
+        locator,
+        restoreDiagnostics,
+        languageContext,
+        navigationContext,
+        spreadContext,
+        diagnostics,
+        visibleSectionDiagnostics,
+        searchOverlays,
+        annotationOverlays,
+        viewportOffset
+      } satisfies Omit<ReaderSnapshot, "metaText">
 
       if (!book || !locator) {
         setSnapshot({
+          ...baseSnapshot,
           metaText: "No book loaded",
-          pagination: reader.getPaginationInfo(),
-          toc: book?.toc ?? [],
-          renderBackend: metrics.backend,
-          diagnostics,
-          visibleSectionDiagnostics
         })
         setPageValue("1")
         return
@@ -132,14 +259,12 @@ export function useReaderController(
         activeTocIdRef.current
       )
       setSnapshot({
+        ...baseSnapshot,
         metaText: `${book.metadata.title} · ${section?.title ?? section?.href ?? "Section"} · ${
           locator.spineIndex + 1
         } / ${book.sections.length} · Page ${pagination.currentPage} / ${pagination.totalPages} · ${metrics.backend}`,
         pagination,
-        toc: book.toc,
-        renderBackend: metrics.backend,
-        diagnostics,
-        visibleSectionDiagnostics
+        toc: book.toc
       })
       activeTocIdRef.current = nextActiveTocId
       setActiveTocId(nextActiveTocId)
@@ -148,7 +273,17 @@ export function useReaderController(
       }
       setPageValue(String(pagination.currentPage))
     }
+    syncSnapshotRef.current = syncSnapshot
 
+    const offPreferences = reader.on("preferencesChanged", ({ settings }) => {
+      syncPreferenceState(settings)
+      const publicationId = reader.getPublicationId()
+      persistReaderPreferences({
+        preferences: reader.getPreferences(),
+        ...(publicationId ? { publicationId } : {})
+      })
+      syncSnapshot()
+    })
     const offOpened = reader.on("opened", ({ book }) => {
       setResults([])
       setExpandedTocIds(new Set(flattenBranchIds(book.toc)))
@@ -168,6 +303,10 @@ export function useReaderController(
     })
 
     const handleReaderClick = (event: MouseEvent): void => {
+      if (event.defaultPrevented) {
+        return
+      }
+
       const rect = container.getBoundingClientRect()
       const hit = reader.hitTest({
         x: event.clientX - rect.left + container.scrollLeft,
@@ -184,15 +323,38 @@ export function useReaderController(
     }
 
     container.addEventListener("click", handleReaderClick)
+    const handleReaderScroll = (): void => {
+      setSnapshot((current) => ({
+        ...current,
+        viewportOffset: {
+          x: container.scrollLeft,
+          y: container.scrollTop
+        }
+      }))
+    }
+    container.addEventListener("scroll", handleReaderScroll)
+    const storedPreferences = loadStoredGlobalReaderPreferences()
+    if (storedPreferences) {
+      void reader.restorePreferences(storedPreferences).then((settings) => {
+        syncPreferenceState(settings)
+        persistReaderPreferences({
+          preferences: reader.getPreferences()
+        })
+        syncSnapshot()
+      })
+    }
     syncSnapshot()
 
     return () => {
       container.removeEventListener("click", handleReaderClick)
+      container.removeEventListener("scroll", handleReaderScroll)
       offSearch()
       offTypography()
       offRendered()
       offRelocated()
       offOpened()
+      offPreferences()
+      syncSnapshotRef.current = null
       reader.destroy()
       readerRef.current = null
     }
@@ -208,15 +370,26 @@ export function useReaderController(
       ...current,
       metaText: "Opening EPUB..."
     }))
-    await reader.setTheme(THEMES[themeKey])
-    await reader.setTypography({ fontSize })
-    await reader.setMode(mode)
     await reader.open(file)
     await reader.render()
     await reader.goToLocation({
       spineIndex: 0,
       progressInSection: 0
     })
+    const publicationId = reader.getPublicationId()
+    const mergedPreferences = loadStoredReaderPreferences(publicationId ?? undefined)
+    if (mergedPreferences) {
+      const settings = await reader.restorePreferences(mergedPreferences)
+      syncPreferenceState(settings)
+      persistReaderPreferences({
+        preferences: reader.getPreferences(),
+        ...(publicationId ? { publicationId } : {})
+      })
+    }
+    const restoredBookmark = publicationId ? loadBookmark(publicationId) : null
+    setSavedBookmark(restoredBookmark)
+    setBookmarkStatus(restoredBookmark ? "Saved bookmark available" : "No bookmark saved")
+    setHighlightStatus("No highlights saved")
   }
 
   async function goToPage(page: number): Promise<void> {
@@ -244,6 +417,7 @@ export function useReaderController(
     if (nextResults.length === 0) {
       setResults([])
     }
+    syncSnapshotRef.current?.()
   }
 
   async function goToSearchResult(result: SearchResult): Promise<void> {
@@ -251,18 +425,59 @@ export function useReaderController(
   }
 
   async function handleThemeChange(nextThemeKey: ThemeKey): Promise<void> {
-    setThemeKey(nextThemeKey)
-    await readerRef.current?.setTheme(THEMES[nextThemeKey])
+    await readerRef.current?.submitPreferences({
+      theme: THEMES[nextThemeKey]
+    })
   }
 
   async function handleModeChange(nextMode: "scroll" | "paginated"): Promise<void> {
-    setMode(nextMode)
-    await readerRef.current?.setMode(nextMode)
+    await readerRef.current?.submitPreferences({
+      mode: nextMode
+    })
+  }
+
+  async function handlePublisherStylesChange(nextMode: PublisherStylesMode): Promise<void> {
+    await readerRef.current?.submitPreferences({
+      publisherStyles: nextMode
+    })
+  }
+
+  async function handleExperimentalRtlChange(enabled: boolean): Promise<void> {
+    await readerRef.current?.submitPreferences({
+      experimentalRtl: enabled
+    })
   }
 
   async function handleFontSizeChange(nextSize: number): Promise<void> {
-    setFontSize(nextSize)
-    await readerRef.current?.setTypography({ fontSize: nextSize })
+    await readerRef.current?.submitPreferences({
+      typography: {
+        fontSize: nextSize
+      }
+    })
+  }
+
+  async function handleFontFamilyChange(nextFamily: string): Promise<void> {
+    await readerRef.current?.submitPreferences({
+      typography: {
+        fontFamily: nextFamily
+      }
+    })
+  }
+
+  async function handleLetterSpacingChange(nextSpacing: number): Promise<void> {
+    await readerRef.current?.submitPreferences({
+      typography: {
+        letterSpacing: nextSpacing
+      }
+    })
+  }
+
+  async function handleWordSpacingChange(nextSpacing: number): Promise<void> {
+    await readerRef.current?.submitPreferences({
+      typography: {
+        wordSpacing: nextSpacing
+      }
+    })
   }
 
   async function goToPreviousPage(): Promise<void> {
@@ -280,8 +495,83 @@ export function useReaderController(
     await readerRef.current?.goToTocItem(id)
   }
 
+  async function saveBookmark(): Promise<void> {
+    const reader = readerRef.current
+    if (!reader) {
+      return
+    }
+
+    const bookmark = reader.createBookmark()
+    if (!bookmark) {
+      setBookmarkStatus("Bookmark save failed")
+      return
+    }
+
+    persistBookmark(bookmark)
+    setSavedBookmark(bookmark)
+    setBookmarkStatus(`Bookmark saved · ${new Date(bookmark.createdAt).toLocaleString()}`)
+  }
+
+  async function restoreSavedBookmark(): Promise<void> {
+    const reader = readerRef.current
+    if (!reader || !savedBookmark) {
+      return
+    }
+
+    const restored = await reader.restoreBookmark(savedBookmark)
+    const diagnostics = reader.getLastLocationRestoreDiagnostics()
+    syncSnapshotRef.current?.()
+    if (!restored) {
+      setBookmarkStatus(
+        `Bookmark restore failed${diagnostics?.reason ? ` · ${diagnostics.reason}` : ""}`
+      )
+      return
+    }
+
+    setBookmarkStatus(
+      diagnostics?.fallbackApplied
+        ? `Bookmark restored with fallback · ${diagnostics.resolvedPrecision ?? "progress"}`
+        : "Bookmark restored"
+    )
+  }
+
   function clearSearchResults(): void {
     setResults([])
+    readerRef.current?.clearDecorations("search-results")
+    syncSnapshotRef.current?.()
+  }
+
+  async function addHighlight(): Promise<void> {
+    const reader = readerRef.current
+    if (!reader) {
+      return
+    }
+
+    const searchTarget = reader
+      .getDecorations("search-results")
+      .map((decoration) => ({
+        locator: decoration.locator,
+        rects: reader.mapLocatorToViewport(decoration.locator)
+      }))
+      .find((entry) => entry.rects.length > 0)
+    const annotation = reader.createAnnotation({
+      ...(searchTarget ? { locator: searchTarget.locator } : {}),
+      color: "#2563eb"
+    })
+    if (!annotation) {
+      setHighlightStatus("Highlight save failed")
+      return
+    }
+
+    reader.addAnnotation(annotation)
+    setHighlightStatus(`Highlight saved · ${new Date(annotation.createdAt).toLocaleTimeString()}`)
+    syncSnapshotRef.current?.()
+  }
+
+  function clearHighlights(): void {
+    readerRef.current?.clearAnnotations()
+    setHighlightStatus("Highlights cleared")
+    syncSnapshotRef.current?.()
   }
 
   return {
@@ -289,11 +579,19 @@ export function useReaderController(
     results,
     themeKey,
     mode,
+    publisherStyles,
+    experimentalRtl,
     fontSize,
+    fontFamily,
+    letterSpacing,
+    wordSpacing,
     pageValue,
     activeTocId,
     expandedTocIds,
     lightbox,
+    hasSavedBookmark: Boolean(savedBookmark),
+    bookmarkStatus,
+    highlightStatus,
     setPageValue,
     setExpandedTocIds,
     setLightbox,
@@ -304,11 +602,150 @@ export function useReaderController(
     goToSearchResult,
     handleThemeChange,
     handleModeChange,
+    handlePublisherStylesChange,
+    handleExperimentalRtlChange,
     handleFontSizeChange,
+    handleFontFamilyChange,
+    handleLetterSpacingChange,
+    handleWordSpacingChange,
     goToPreviousPage,
     goToNextPage,
-    goToTocItem
+    goToTocItem,
+    saveBookmark,
+    restoreSavedBookmark,
+    addHighlight,
+    clearHighlights
   }
+}
+
+function buildSearchOverlays(reader: EpubReader): ReaderDecorationOverlay[] {
+  return reader.getDecorations("search-results").map((decoration) => {
+    const rects = reader.mapLocatorToViewport(decoration.locator)
+    return {
+      id: decoration.id,
+      label: decoration.locator.blockId ?? decoration.locator.anchorId ?? "search-hit",
+      style: "search-hit",
+      rects,
+      visible: rects.length > 0
+    }
+  })
+}
+
+function bookmarkStorageKey(publicationId: string): string {
+  return `pretext-epub:bookmark:${publicationId}`
+}
+
+function persistBookmark(bookmark: Bookmark): void {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  window.localStorage.setItem(bookmarkStorageKey(bookmark.publicationId), serializeBookmark(bookmark))
+}
+
+function loadBookmark(publicationId: string): Bookmark | null {
+  if (typeof window === "undefined") {
+    return null
+  }
+
+  return deserializeBookmark(window.localStorage.getItem(bookmarkStorageKey(publicationId)))
+}
+
+function persistReaderPreferences(input: {
+  preferences: ReaderPreferences
+  publicationId?: string
+}): void {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  const normalized = normalizeReaderPreferences(input.preferences)
+  const globalPreferences = pickGlobalReaderPreferences(normalized)
+  const bookPreferences = pickPublicationReaderPreferences(normalized)
+
+  window.localStorage.setItem(
+    DEMO_GLOBAL_PREFERENCES_STORAGE_KEY,
+    JSON.stringify(globalPreferences)
+  )
+
+  if (input.publicationId) {
+    window.localStorage.setItem(
+      readerPreferenceStorageKey(input.publicationId),
+      JSON.stringify(bookPreferences)
+    )
+  }
+}
+
+function loadStoredGlobalReaderPreferences(): ReaderPreferences | null {
+  if (typeof window === "undefined") {
+    return null
+  }
+
+  return deserializeReaderPreferences(
+    window.localStorage.getItem(DEMO_GLOBAL_PREFERENCES_STORAGE_KEY)
+  )
+}
+
+function loadStoredReaderPreferences(publicationId?: string): ReaderPreferences | null {
+  const globalPreferences = loadStoredGlobalReaderPreferences()
+  if (typeof window === "undefined" || !publicationId) {
+    return globalPreferences
+  }
+
+  const bookPreferences = deserializeReaderPreferences(
+    window.localStorage.getItem(readerPreferenceStorageKey(publicationId))
+  )
+  return mergeReaderPreferences(globalPreferences, bookPreferences)
+}
+
+function getInitialDemoPreferenceState(): DemoPreferenceState {
+  const settings = resolveReaderSettings(loadStoredGlobalReaderPreferences())
+  return {
+    themeKey: resolveThemeKey(settings.theme),
+    mode: settings.mode,
+    publisherStyles: settings.publisherStyles,
+    experimentalRtl: settings.experimentalRtl,
+    fontSize: settings.typography.fontSize,
+    fontFamily: settings.typography.fontFamily ?? defaultFontFamily(),
+    letterSpacing: settings.typography.letterSpacing ?? 0,
+    wordSpacing: settings.typography.wordSpacing ?? 0
+  }
+}
+
+function readerPreferenceStorageKey(publicationId: string): string {
+  return `pretext-epub:preferences:book:${publicationId}`
+}
+
+function pickGlobalReaderPreferences(preferences: ReaderPreferences): ReaderPreferences {
+  return normalizeReaderPreferences({
+    ...(preferences.theme ? { theme: preferences.theme } : {}),
+    ...(preferences.typography ? { typography: preferences.typography } : {})
+  })
+}
+
+function pickPublicationReaderPreferences(preferences: ReaderPreferences): ReaderPreferences {
+  return normalizeReaderPreferences({
+    ...(preferences.mode ? { mode: preferences.mode } : {}),
+    ...(preferences.publisherStyles ? { publisherStyles: preferences.publisherStyles } : {}),
+    ...(preferences.experimentalRtl !== undefined
+      ? { experimentalRtl: preferences.experimentalRtl }
+      : {}),
+    ...(preferences.spreadMode ? { spreadMode: preferences.spreadMode } : {})
+  })
+}
+
+function defaultFontFamily(): string {
+  return '"Iowan Old Style", "Palatino Linotype", serif'
+}
+
+function resolveThemeKey(theme: Theme): ThemeKey {
+  for (const [key, candidate] of Object.entries(THEMES) as Array<[ThemeKey, Theme]>) {
+    if (candidate.background === theme.background && candidate.color === theme.color) {
+      return key
+    }
+  }
+
+  return "paper"
 }
 
 function flattenBranchIds(items: TocItem[]): string[] {

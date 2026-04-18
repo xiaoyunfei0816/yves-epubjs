@@ -93,6 +93,7 @@ describe("paginated render plan", () => {
         paragraphSpacing: 12
       },
       highlightedBlockIds: new Set<string>(),
+      underlinedBlockIds: new Set<string>(),
       activeBlockId: undefined,
       resolveImageLoaded: () => true,
       resolveImageUrl: (src) => src,

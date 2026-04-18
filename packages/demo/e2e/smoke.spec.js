@@ -8,6 +8,10 @@ const SMOKE_BOOK_PATH = path.resolve(
   __dirname,
   "../../../test-fixtures/books/minimal-book/book.epub"
 )
+const FXL_SPREAD_BOOK_PATH = path.resolve(
+  __dirname,
+  "../../../test-fixtures/books/fxl-spread-smoke/book.epub"
+)
 
 test("demo shell renders", async ({ page }) => {
   await page.goto("/")
@@ -60,10 +64,72 @@ test("supports paginated next and previous navigation", async ({ page }) => {
   await expect(pageStatus).toContainText("Page 1 /")
 })
 
-async function openSmokeBook(page) {
-  await page.locator('input[type="file"]').setInputFiles(SMOKE_BOOK_PATH)
+test("shows locator and restore diagnostics after bookmark restoration", async ({ page }) => {
+  await page.goto("/")
+  await openSmokeBook(page)
 
-  await expect(page.locator(".reader-meta")).toContainText("Playwright Smoke Book")
+  const diagnostics = page.locator(".reader-diagnostics")
+  await expect(diagnostics).toContainText("Locator")
+  await expect(diagnostics).toContainText("s1 / progress:0.000")
+
+  await page.getByRole("button", { name: "Save Bookmark" }).click()
+  await page.getByRole("button", { name: "Chapter Two" }).click()
+  await expect(page.locator(".reader-meta")).toContainText("Chapter Two")
+
+  await page.getByRole("button", { name: "Restore Bookmark" }).click()
+
+  await expect(page.locator(".reader-bookmark-status")).toContainText("Bookmark restored")
+  await expect(page.locator(".reader-meta")).toContainText("Chapter One")
+  await expect(diagnostics).toContainText("s1 / block:heading-1 / progress:0.000")
+  await expect(diagnostics).toContainText("restored / cfi -> cfi")
+  await expect(diagnostics).toContainText("cfi / fallback:no")
+})
+
+test("renders search and annotation overlays inside a synthetic spread", async ({ page }) => {
+  await page.goto("/")
+  await openBook(page, FXL_SPREAD_BOOK_PATH, "FXL Spread Smoke Book")
+  await selectCustomOption(page, "Mode", "Paginated")
+
+  await expect(page.locator(".reader-meta")).toContainText("FXL Spread Smoke Book")
+  await expect(page.locator(".reader-root")).toHaveAttribute("data-synthetic-spread", "enabled")
+  await expect(page.locator(".reader-diagnostics")).toContainText("auto / synthetic-on")
+
+  await page.getByRole("searchbox").fill("Spread overlay target signal")
+  await page.getByRole("button", { name: "Search" }).click()
+
+  const searchResults = page.locator(".search-card")
+  await expect(searchResults).toHaveCount(1)
+  await expect(searchResults.first()).toContainText("page-3.xhtml")
+
+  await searchResults.first().click()
+
+  await expect(page.locator(".page-status")).toContainText("Page 2 / 2")
+  await expect(page.locator(".reader-meta")).toContainText("Right Match")
+  await expect(page.locator(".reader-viewport-overlay-rect.is-search-hit")).toHaveCount(1)
+
+  await page.getByRole("button", { name: "Add Highlight" }).click()
+
+  await expect(page.locator(".reader-highlight-status")).toContainText("Highlight saved")
+  await expect(page.locator(".reader-viewport-overlay-rect.is-search-hit")).toHaveCount(1)
+  await expect(page.locator(".reader-viewport-overlay-rect.is-annotation")).toHaveCount(1)
+
+  const searchBox = await page.locator(".reader-viewport-overlay-rect.is-search-hit").boundingBox()
+  const annotationBox = await page.locator(".reader-viewport-overlay-rect.is-annotation").boundingBox()
+
+  expect(searchBox).not.toBeNull()
+  expect(annotationBox).not.toBeNull()
+  expect(Math.abs(annotationBox.x - searchBox.x)).toBeLessThan(8)
+  expect(Math.abs(annotationBox.y - searchBox.y)).toBeLessThan(8)
+})
+
+async function openSmokeBook(page) {
+  await openBook(page, SMOKE_BOOK_PATH, "Playwright Smoke Book")
+}
+
+async function openBook(page, bookPath, title) {
+  await page.locator('input[type="file"]').setInputFiles(bookPath)
+
+  await expect(page.locator(".reader-meta")).toContainText(title)
 }
 
 async function selectCustomOption(page, label, option) {

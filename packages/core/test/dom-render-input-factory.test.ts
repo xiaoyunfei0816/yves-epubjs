@@ -57,6 +57,7 @@ describe("dom render input factory", () => {
       theme: THEME,
       typography: TYPOGRAPHY,
       fontFamily: "serif",
+      publisherStyles: "enabled",
       resolveDomResourceUrl: (path) => `asset:${path}`
     })
 
@@ -111,6 +112,7 @@ describe("dom render input factory", () => {
       theme: THEME,
       typography: TYPOGRAPHY,
       fontFamily: "serif",
+      publisherStyles: "enabled",
       resolveDomResourceUrl: (path) => `asset:${path}`
     })
 
@@ -141,11 +143,99 @@ describe("dom render input factory", () => {
       theme: THEME,
       typography: TYPOGRAPHY,
       fontFamily: "serif",
+      publisherStyles: "enabled",
       resolveDomResourceUrl: (path) => `asset:${path}`
     })
 
     expect(renderInput.presentationImageSrc).toBe("asset:OPS/images/plate.png")
     expect(renderInput.presentationImageAlt).toBe("Plate")
+  })
+
+  it("derives fixed-layout viewport sizing for pre-paginated sections", () => {
+    const content = `<?xml version="1.0"?>
+      <html>
+        <body>
+          <div class="page">Fixed layout page</div>
+        </body>
+      </html>`
+    const section: SectionDocument = {
+      ...createSection(content, "fxl-section", "OPS/fxl.xhtml"),
+      renditionLayout: "pre-paginated",
+      renditionViewport: {
+        width: 1200,
+        height: 1600
+      }
+    }
+    const input = createSharedChapterRenderInput({
+      href: section.href,
+      content
+    })
+
+    const renderInput = createDomChapterRenderInput({
+      book: null,
+      section,
+      input,
+      theme: THEME,
+      typography: TYPOGRAPHY,
+      fontFamily: "serif",
+      publisherStyles: "enabled",
+      availableWidth: 450,
+      availableHeight: 540,
+      resolveDomResourceUrl: (path) => `asset:${path}`
+    })
+
+    expect(renderInput.renditionLayout).toBe("pre-paginated")
+    expect(renderInput.fixedLayoutViewport).toEqual({
+      width: 1200,
+      height: 1600
+    })
+    expect(renderInput.fixedLayoutRenderWidth).toBe(405)
+    expect(renderInput.fixedLayoutRenderHeight).toBe(540)
+    expect(renderInput.fixedLayoutScale).toBe(0.3375)
+  })
+
+  it("suppresses linked stylesheet injection and inline styles when publisher styles are disabled", () => {
+    const content = `<?xml version="1.0"?>
+      <html>
+        <body>
+          <p>
+            <img src="images/photo.png" style="background-image: url('images/inline-bg.png')" />
+          </p>
+        </body>
+      </html>`
+    const section = createSection(content, "section-1", "OPS/chapter.xhtml")
+    const input = createSharedChapterRenderInput({
+      href: section.href,
+      content,
+      linkedStyleSheets: [
+        {
+          href: "OPS/styles/book.css",
+          mediaType: "text/css",
+          text: ".badge { color: red; }",
+          ast: parseCssStyleSheet(".badge { color: red; }")
+        }
+      ]
+    })
+
+    const renderInput = createDomChapterRenderInput({
+      book: null,
+      section,
+      input,
+      theme: THEME,
+      typography: TYPOGRAPHY,
+      fontFamily: "serif",
+      publisherStyles: "disabled",
+      resolveDomResourceUrl: (path) => `asset:${path}`
+    })
+
+    expect(renderInput.linkedStyleSheets).toBeUndefined()
+    expect(
+      renderInput.resolveAttributeValue?.({
+        tagName: "img",
+        attributeName: "style",
+        value: "background-image: url('images/inline-bg.png')"
+      })
+    ).toBe("")
   })
 })
 
