@@ -8,6 +8,7 @@ import type {
 } from "../model/types"
 import type { DomChapterRenderInput } from "../renderer/dom-chapter-renderer"
 import type { SharedChapterRenderInput } from "./chapter-render-input"
+import { sanitizeEmbeddedResourceUrl } from "./external-boundary"
 import { stripPublisherStylesFromPreprocessedNodes } from "./publisher-styles"
 
 type DomRenderInputFactoryOptions = {
@@ -164,8 +165,13 @@ function resolveDomAttributeValue(input: {
     return input.value
   }
 
+  const sanitizedResourceValue = sanitizeEmbeddedResourceUrl(input.value)
+  if (sanitizedResourceValue !== input.value.trim()) {
+    return sanitizedResourceValue
+  }
+
   if (isExternalResourceValue(input.value)) {
-    return input.value
+    return sanitizedResourceValue
   }
 
   return input.resolveDomResourceUrl(resolveResourcePath(input.sectionHref, input.value))
@@ -209,7 +215,9 @@ function resolveDomCssUrlValues(
     /url\(\s*(['"]?)([^)"']+)\1\s*\)/gi,
     (match, quote: string, path: string) => {
       if (!path || isExternalResourceValue(path)) {
-        return match
+        const sanitized = sanitizeEmbeddedResourceUrl(path)
+        const wrappedQuote = quote || '"'
+        return `url(${wrappedQuote}${sanitized}${wrappedQuote})`
       }
 
       const resolved = resolveDomResourceUrl(resolveResourcePath(sectionHref, path))

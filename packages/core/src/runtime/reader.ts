@@ -35,6 +35,7 @@ import type {
   Point,
   PublisherStylesMode,
   PublicationAccessibilitySnapshot,
+  ReadingMode,
   RenderMetrics,
   RenderDiagnostics,
   ReaderEvent,
@@ -44,12 +45,16 @@ import type {
   ReadingSpreadContext,
   ReaderOptions,
   ReaderPreferences,
+  ReaderSelectionHighlightState,
   ReaderSettings,
   ReaderSpreadMode,
+  ReaderTextSelectionSnapshot,
+  Rect,
   SectionAccessibilitySnapshot,
   SectionDocument,
   SerializedLocator,
   SearchResult,
+  TextRangeSelector,
   Theme,
   TypographyOptions,
   VisibleSectionDiagnostics,
@@ -94,6 +99,11 @@ import {
   resolveReaderSettings,
   serializeReaderPreferences
 } from "./preferences";
+import {
+  collectBlockIdsInReadingOrder,
+  normalizeTextRangeSelector,
+  toTransparentHighlightColor
+} from "./reader-domain";
 import { stripPublisherStylesFromSection } from "./publisher-styles";
 import {
   resolveReadingLanguageContext,
@@ -112,8 +122,10 @@ import { applyDomDecorations } from "./dom-decoration";
 import {
   findDomHitTargetAtPoint,
   mapDomLocatorToViewport,
+  mapDomTextRangeToViewport,
   mapDomPointToLocator
 } from "./dom-viewport-mapper";
+import { classifyNavigationHref } from "./external-boundary";
 import { resolveDomClickInteraction } from "./dom-interaction-model";
 import { findRenderedSearchResultTarget } from "./dom-search-result-target";
 import { resolveRenderBackendCapabilities } from "./render-backend-capabilities";
@@ -161,6 +173,8 @@ type PaginatedSpread = {
   slots: PaginatedSpreadSlot[];
 };
 
+type ReaderTextSelection = Omit<ReaderTextSelectionSnapshot, "rects" | "visible">;
+
 export class EpubReader {
   private readonly parser = new BookParser();
   private readonly events = new EventEmitter<ReaderEventMap>();
@@ -187,6 +201,7 @@ export class EpubReader {
   private publisherStyles: PublisherStylesMode;
   private experimentalRtl: boolean;
   private spreadMode: ReaderSpreadMode;
+  private debugMode = false;
   private theme: Theme;
   private typography: TypographyOptions;
   private currentSectionIndex = 0;
@@ -213,6 +228,11 @@ export class EpubReader {
   private lastChapterRenderDecision: ChapterRenderDecision | null = null;
   private lastLocatorRestoreDiagnostics: LocatorRestoreDiagnostics | null = null;
   private lastFixedLayoutRenderSignature: string | null = null;
+  private textSelectionSnapshot: ReaderTextSelectionSnapshot | null = null;
+  private pinnedTextSelectionSnapshot: ReaderTextSelectionSnapshot | null = null;
+  private readonly handleDocumentSelectionChange = (): void => {
+    this.syncTextSelectionState();
+  };
 
   private static readonly SCROLL_WINDOW_RADIUS = 1;
   private static readonly SCROLL_SLICE_OVERSCAN_MULTIPLIER = 0.75;
@@ -277,6 +297,7 @@ export class EpubReader {
     this.attachScrollListener();
     this.attachPointerListener();
     this.attachKeyboardListener();
+    this.attachSelectionChangeListener();
   }
 
   async open(input: EpubInput): Promise<Book> {
@@ -326,6 +347,7 @@ export class EpubReader {
     this.lastChapterRenderDecision = null;
     this.lastLocatorRestoreDiagnostics = null;
     this.lastFixedLayoutRenderSignature = null;
+    this.updateTextSelectionSnapshot(null);
     this.decorationManager.clearAll();
     this.scrollCoordinator.reset();
     if (this.options.container) {
@@ -637,8 +659,22 @@ export class EpubReader {
       : this.decorationManager.getAll()
   }
 
+  setDebugMode(enabled: boolean): void {
+    const nextDebugMode = Boolean(enabled)
+    if (this.debugMode === nextDebugMode) {
+      return
+    }
+
+    this.debugMode = nextDebugMode
+    this.syncDerivedDecorationGroups()
+    if (this.book) {
+      this.renderCurrentSection("preserve")
+    }
+  }
+
   createAnnotation(input: {
     locator?: Locator
+    textRange?: TextRangeSelector
     quote?: string
     note?: string
     color?: string
@@ -658,10 +694,224 @@ export class EpubReader {
       publicationId,
       locator,
       book: this.book,
+      ...(input.textRange ? { textRange: input.textRange } : {}),
       ...(quote ? { quote } : {}),
       ...(input.note ? { note: input.note } : {}),
       ...(input.color ? { color: input.color } : {})
     })
+  }
+
+  createAnnotationFromSelection(input: {
+    note?: string
+    color?: string
+  } = {}): Annotation | null {
+    const selection = this.getCurrentTextSelectionSnapshot()
+    if (!selection) {
+      return null
+    }
+
+    return this.createAnnotation({
+      locator: selection.locator,
+      quote: selection.text,
+      ...(selection.textRange ? { textRange: selection.textRange } : {}),
+      ...(input.note ? { note: input.note } : {}),
+      ...(input.color ? { color: input.color } : {})
+    })
+  }
+
+  getCurrentTextSelection(): ReaderTextSelection | null {
+    const selection = this.getCurrentTextSelectionSnapshot()
+    if (!selection) {
+      return null
+    }
+
+    return {
+      text: selection.text,
+      locator: { ...selection.locator },
+      sectionId: selection.sectionId,
+      ...(selection.blockId ? { blockId: selection.blockId } : {})
+    }
+  }
+
+  getCurrentTextSelectionSnapshot(): ReaderTextSelectionSnapshot | null {
+    const selection = this.resolveCurrentTextSelectionSnapshot()
+    this.updateTextSelectionSnapshot(selection)
+    return cloneReaderTextSelectionSnapshot(selection)
+  }
+
+  getCurrentSelectionHighlightState(): ReaderSelectionHighlightState | null {
+    const selection = this.getCurrentTextSelectionSnapshot()
+    if (!selection) {
+      return null
+    }
+
+    return this.resolveSelectionHighlightState(selection)
+  }
+
+  applyCurrentSelectionHighlightAction(input: {
+    note?: string
+    color?: string
+  } = {}): {
+    mode: "highlight" | "remove-highlight"
+    changedCount: number
+  } | null {
+    if (!this.book) {
+      return null
+    }
+
+    const selection = this.getCurrentTextSelectionSnapshot()
+    if (!selection) {
+      return null
+    }
+
+    const state = this.resolveSelectionHighlightState(selection)
+    if (!selection.textRange) {
+      if (state.mode !== "highlight") {
+        return {
+          mode: state.mode,
+          changedCount: 0
+        }
+      }
+
+      const annotation = this.createAnnotation({
+        locator: selection.locator,
+        quote: selection.text,
+        ...(input.note ? { note: input.note } : {}),
+        ...(input.color ? { color: input.color } : {})
+      })
+      if (!annotation) {
+        return {
+          mode: state.mode,
+          changedCount: 0
+        }
+      }
+
+      this.addAnnotation(annotation)
+      return {
+        mode: state.mode,
+        changedCount: 1
+      }
+    }
+
+    const section = this.book.sections[selection.locator.spineIndex]
+    if (!section) {
+      return null
+    }
+
+    const context = this.createSectionTextRangeContext(section)
+    const selectionRange = this.normalizeTextRangeForSection(selection.locator.spineIndex, selection.textRange)
+    if (!selectionRange) {
+      return null
+    }
+
+    if (state.mode === "remove-highlight") {
+      const matchingAnnotations = this.resolveAnnotationRangesForSection(selection.locator.spineIndex)
+      const nextAnnotations: Annotation[] = []
+      let changedCount = 0
+
+      for (const annotation of this.annotations) {
+        const resolved = matchingAnnotations.find((entry) => entry.annotation.id === annotation.id)
+        if (!resolved) {
+          nextAnnotations.push(annotation)
+          continue
+        }
+
+        const flattenedAnnotation = flattenTextRange(resolved.range, context)
+        const flattenedSelection = flattenTextRange(selectionRange, context)
+        if (!flattenedAnnotation || !flattenedSelection) {
+          nextAnnotations.push(annotation)
+          continue
+        }
+
+        const remaining = subtractFlattenedRange(flattenedAnnotation, flattenedSelection)
+        if (
+          remaining.length === 1 &&
+          remaining[0]!.start === flattenedAnnotation.start &&
+          remaining[0]!.end === flattenedAnnotation.end
+        ) {
+          nextAnnotations.push(annotation)
+          continue
+        }
+
+        changedCount += 1
+        for (const piece of remaining) {
+          const range = inflateFlattenedTextRange(piece, context)
+          if (!range) {
+            continue
+          }
+
+          const rebuilt = this.createAnnotationForResolvedRange({
+            annotation,
+            locator: resolved.locator,
+            range,
+            section,
+            ...(annotation.color ? { color: annotation.color } : {}),
+            ...(annotation.note ? { note: annotation.note } : {})
+          })
+          if (rebuilt) {
+            nextAnnotations.push(rebuilt)
+          }
+        }
+      }
+
+      this.setAnnotations(nextAnnotations)
+      return {
+        mode: state.mode,
+        changedCount
+      }
+    }
+
+    const flattenedSelection = flattenTextRange(selectionRange, context)
+    if (!flattenedSelection) {
+      return null
+    }
+
+    let remainingRanges = [flattenedSelection]
+    for (const resolved of this.resolveAnnotationRangesForSection(selection.locator.spineIndex)) {
+      const flattened = flattenTextRange(resolved.range, context)
+      if (!flattened) {
+        continue
+      }
+
+      remainingRanges = remainingRanges.flatMap((range) => subtractFlattenedRange(range, flattened))
+      if (remainingRanges.length === 0) {
+        break
+      }
+    }
+
+    const addedAnnotations = remainingRanges
+      .map((range) => inflateFlattenedTextRange(range, context))
+      .flatMap((range) => {
+        if (!range) {
+          return []
+        }
+
+        const annotation = this.createAnnotationForResolvedRange({
+          locator: selection.locator,
+          range,
+          section,
+          ...(input.color ? { color: input.color } : {}),
+          ...(input.note ? { note: input.note } : {})
+        })
+        return annotation ? [annotation] : []
+      })
+
+    for (const annotation of addedAnnotations) {
+      this.addAnnotation(annotation)
+    }
+
+    return {
+      mode: state.mode,
+      changedCount: addedAnnotations.length
+    }
+  }
+
+  clearCurrentTextSelection(): void {
+    if (typeof window !== "undefined" && typeof window.getSelection === "function") {
+      window.getSelection()?.removeAllRanges()
+    }
+    this.pinnedTextSelectionSnapshot = null
+    this.updateTextSelectionSnapshot(null)
   }
 
   addAnnotation(annotation: Annotation): void {
@@ -697,7 +947,7 @@ export class EpubReader {
         book,
         locator: annotation.locator
       }).locator
-      const rects = restored ? this.mapLocatorToViewport(restored) : []
+      const rects = restored ? this.resolveAnnotationViewportRects(annotation, restored) : []
 
       return {
         annotation: {
@@ -990,6 +1240,9 @@ export class EpubReader {
 
   destroy(): void {
     this.events.removeAllListeners();
+    if (typeof document !== "undefined") {
+      document.removeEventListener("selectionchange", this.handleDocumentSelectionChange);
+    }
     this.book = null;
     this.resources = null;
     this.chapterRenderInputs = [];
@@ -1003,6 +1256,7 @@ export class EpubReader {
     this.lastInteractionRegions = [];
     this.lastRenderedSectionIds = [];
     this.lastScrollRenderWindows.clear();
+    this.textSelectionSnapshot = null;
     this.lastRenderMetrics = {
       backend: "canvas",
       visibleSectionCount: 0,
@@ -1180,14 +1434,44 @@ export class EpubReader {
       return;
     }
 
-    if (/^[a-z]+:\/\//i.test(href)) {
-      return;
-    }
-
     const locator = this.resolveHrefLocator(href);
     if (locator) {
       await this.goToLocation(locator);
     }
+  }
+
+  private async activateLink(input: {
+    href: string
+    source: "dom" | "canvas"
+    text?: string
+    sectionId?: string
+    blockId?: string
+  }): Promise<void> {
+    const resolved = classifyNavigationHref(input.href)
+    if (resolved.kind === "internal") {
+      await this.goToHref(input.href)
+      return
+    }
+
+    if (resolved.kind === "external-safe") {
+      const payload = {
+        href: input.href,
+        scheme: resolved.scheme,
+        source: input.source,
+        ...(input.text ? { text: input.text } : {}),
+        ...(input.sectionId ? { sectionId: input.sectionId } : {}),
+        ...(input.blockId ? { blockId: input.blockId } : {})
+      } satisfies ReaderEventMap["externalLinkActivated"]
+      this.events.emit("externalLinkActivated", payload)
+      await this.options.onExternalLink?.(payload)
+      return
+    }
+
+    this.events.emit("externalLinkBlocked", {
+      href: input.href,
+      scheme: resolved.scheme,
+      reason: "unsafe-scheme"
+    })
   }
 
   private resolveHrefLocator(href: string): Locator | null {
@@ -1453,9 +1737,11 @@ export class EpubReader {
     this.domChapterRenderer.render(this.options.container, domRenderInput);
     const domSection = this.options.container.querySelector<HTMLElement>(".epub-dom-section")
     if (domSection) {
+      annotateDomSectionWithBlockIds(section, domSection)
       applyDomDecorations({
         container: this.options.container,
         sectionElement: domSection,
+        mode: this.mode,
         decorations: this.decorationManager.getForSpineIndex(this.currentSectionIndex)
       })
     }
@@ -1520,9 +1806,11 @@ export class EpubReader {
         (section) => section.id === renderedSection.sectionId
       )
       if (domSection && sectionIndex >= 0) {
+        annotateDomSectionWithBlockIds(this.book.sections[sectionIndex]!, domSection)
         applyDomDecorations({
           container: this.options.container,
           sectionElement: domSection,
+          mode: this.mode,
           decorations: this.decorationManager.getForSpineIndex(sectionIndex)
         })
       }
@@ -1756,7 +2044,7 @@ export class EpubReader {
     this.lastVisibleBounds = result.bounds;
     this.lastRenderedSectionIds = [section.id];
     const highlightedDrawOpCount = displayList.ops.filter(
-      (op) => op.kind === "text" && Boolean(op.highlightColor)
+      (op) => op.kind === "text" && (Boolean(op.highlightColor) || Boolean(op.highlightSegments?.length))
     ).length;
     this.lastRenderMetrics = {
       backend: "canvas",
@@ -1813,6 +2101,7 @@ export class EpubReader {
           resolveImageLoaded: (src) => this.isImageResourceReady(src),
           resolveImageUrl: (src) => this.resolveCanvasResourceUrl(src),
           highlightedBlockIds: this.getHighlightedCanvasBlockIdsForSection(index),
+          highlightRangesByBlock: this.getHighlightedCanvasTextRangesForSection(index),
           underlinedBlockIds: this.getUnderlinedCanvasBlockIdsForSection(index),
           activeBlockId: this.getActiveCanvasBlockIdForSection(index)
         })
@@ -1858,9 +2147,11 @@ export class EpubReader {
           : sectionWrapper?.querySelector<HTMLElement>(".epub-dom-section")
       const sectionIndex = this.getSectionIndexById(entry.sectionId)
       if (domSection && sectionIndex >= 0) {
+        annotateDomSectionWithBlockIds(this.book.sections[sectionIndex]!, domSection)
         applyDomDecorations({
           container: this.options.container,
           sectionElement: domSection,
+          mode: this.mode,
           decorations: this.decorationManager.getForSpineIndex(sectionIndex)
         })
       }
@@ -1869,7 +2160,9 @@ export class EpubReader {
     this.lastRenderedSectionIds = sectionsToRender.map((entry) => entry.sectionId);
     const highlightedDrawOpCount = sectionsToRender
       .flatMap((entry) => entry.displayList?.ops ?? [])
-      .filter((op) => op.kind === "text" && Boolean(op.highlightColor)).length;
+      .filter(
+        (op) => op.kind === "text" && (Boolean(op.highlightColor) || Boolean(op.highlightSegments?.length))
+      ).length;
     const currentDecision = this.resolveChapterRenderDecision(this.currentSectionIndex);
     this.lastRenderMetrics = {
       backend: currentDecision.mode,
@@ -1892,6 +2185,7 @@ export class EpubReader {
       theme: this.theme,
       typography: this.typography,
       highlightedBlockIds: this.getHighlightedCanvasBlockIdsForSection(page.spineIndex),
+      highlightRangesByBlock: this.getHighlightedCanvasTextRangesForSection(page.spineIndex),
       underlinedBlockIds: this.getUnderlinedCanvasBlockIdsForSection(page.spineIndex),
       activeBlockId: this.getActiveCanvasBlockIdForSection(page.spineIndex),
       resolveImageLoaded: (src) => this.isImageResourceReady(src),
@@ -2225,7 +2519,18 @@ export class EpubReader {
 
     this.options.container.addEventListener("scroll", () => {
       this.scrollCoordinator.handleScrollEvent(this.mode);
+      if (this.textSelectionSnapshot) {
+        this.syncTextSelectionState();
+      }
     });
+  }
+
+  private attachSelectionChangeListener(): void {
+    if (typeof document === "undefined") {
+      return
+    }
+
+    document.addEventListener("selectionchange", this.handleDocumentSelectionChange)
   }
 
   private attachPointerListener(): void {
@@ -2235,6 +2540,10 @@ export class EpubReader {
 
     this.options.container.addEventListener("click", (event) => {
       const target = event.target;
+      if (hasActiveTextSelection(this.options.container)) {
+        return
+      }
+
       if (target instanceof HTMLElement && target.closest(".epub-dom-section")) {
         this.handleDomClick(event);
         return;
@@ -2247,6 +2556,17 @@ export class EpubReader {
       const point = this.getContainerRelativePoint(event)
       if (!point) {
         return
+      }
+
+      const annotationSelection = this.resolveAnnotationSelectionAtPoint(point)
+      if (annotationSelection) {
+        event.preventDefault()
+        this.setPinnedTextSelectionSnapshot(annotationSelection)
+        return
+      }
+
+      if (this.pinnedTextSelectionSnapshot) {
+        this.setPinnedTextSelectionSnapshot(null)
       }
 
       const hit = this.hitTest(point);
@@ -2270,7 +2590,13 @@ export class EpubReader {
 
       if (hit.kind === "link") {
         event.preventDefault();
-        void this.goToHref(hit.href);
+        void this.activateLink({
+          href: hit.href,
+          source: "canvas",
+          ...(hit.text ? { text: hit.text } : {}),
+          sectionId: hit.sectionId,
+          blockId: hit.blockId
+        });
         return;
       }
 
@@ -2327,7 +2653,7 @@ export class EpubReader {
       return;
     }
 
-    if (hasActiveTextSelection()) {
+    if (hasActiveTextSelection(this.options.container)) {
       return;
     }
 
@@ -2352,6 +2678,17 @@ export class EpubReader {
     const point = this.getContainerRelativePoint(event);
     if (!point) {
       return;
+    }
+
+    const annotationSelection = this.resolveAnnotationSelectionAtPoint(point)
+    if (annotationSelection) {
+      event.preventDefault()
+      this.setPinnedTextSelectionSnapshot(annotationSelection)
+      return
+    }
+
+    if (this.pinnedTextSelectionSnapshot) {
+      this.setPinnedTextSelectionSnapshot(null)
     }
 
     const section = this.book.sections[sectionIndex];
@@ -2389,7 +2726,11 @@ export class EpubReader {
 
     if (interaction.kind === "link") {
       event.preventDefault();
-      void this.goToHref(interaction.href);
+      void this.activateLink({
+        href: interaction.href,
+        source: "dom",
+        sectionId: section.id
+      });
       return;
     }
 
@@ -2959,7 +3300,7 @@ export class EpubReader {
   }
 
   private syncDerivedDecorationGroups(): void {
-    if (!this.locator) {
+    if (!this.locator || !this.debugMode) {
       this.decorationManager.clearDerivedGroup("current-location")
     } else {
       this.decorationManager.setDerivedGroup("current-location", [
@@ -2986,7 +3327,11 @@ export class EpubReader {
     return new Set(
       this.decorationManager
         .getForSpineIndex(sectionIndex)
-        .filter((decoration) => decoration.style === "highlight" || decoration.style === "search-hit")
+        .filter(
+          (decoration) =>
+            (decoration.style === "highlight" || decoration.style === "search-hit") &&
+            !decoration.extras?.textRange
+        )
         .map((decoration) =>
           decoration.locator.blockId
             ? resolveRenderableBlockId(section.blocks, decoration.locator.blockId) ?? decoration.locator.blockId
@@ -2994,6 +3339,78 @@ export class EpubReader {
         )
         .filter((blockId): blockId is string => Boolean(blockId))
     )
+  }
+
+  private getHighlightedCanvasTextRangesForSection(
+    sectionIndex: number
+  ): Map<string, Array<{ start: number; end: number; color: string }>> {
+    if (!this.book) {
+      return new Map()
+    }
+
+    const section = this.book.sections[sectionIndex]
+    if (!section) {
+      return new Map()
+    }
+
+    const rangesByBlock = new Map<string, Array<{ start: number; end: number; color: string }>>()
+    const defaultColor = toTransparentHighlightColor(
+      buildReadingStyleProfile({
+        theme: this.theme,
+        typography: this.typography
+      }).highlight.mark
+    )
+
+    for (const decoration of this.decorationManager.getForSpineIndex(sectionIndex)) {
+      const textRange = decoration.extras?.textRange
+      if (decoration.style !== "highlight" || !textRange) {
+        continue
+      }
+
+      const normalizedRange = normalizeTextRangeSelector(textRange)
+      const blockIds = collectBlockIdsInReadingOrder(section.blocks)
+      const startIndex = blockIds.indexOf(normalizedRange.start.blockId)
+      const endIndex = blockIds.indexOf(normalizedRange.end.blockId)
+      if (startIndex < 0 || endIndex < 0 || endIndex < startIndex) {
+        continue
+      }
+
+      for (let blockIndex = startIndex; blockIndex <= endIndex; blockIndex += 1) {
+        const blockId = blockIds[blockIndex]
+        if (!blockId) {
+          continue
+        }
+
+        const renderableBlockId = resolveRenderableBlockId(section.blocks, blockId)
+        if (!renderableBlockId || renderableBlockId !== blockId) {
+          continue
+        }
+
+        const block = findBlockById(section.blocks, blockId)
+        const blockTextLength = block ? Array.from(this.extractBlockText(block)).length : 0
+        const start =
+          blockId === normalizedRange.start.blockId
+            ? Math.max(0, Math.min(blockTextLength, normalizedRange.start.inlineOffset))
+            : 0
+        const end =
+          blockId === normalizedRange.end.blockId
+            ? Math.max(start, Math.min(blockTextLength, normalizedRange.end.inlineOffset))
+            : blockTextLength
+        if (end <= start) {
+          continue
+        }
+
+        const entry = rangesByBlock.get(blockId) ?? []
+        entry.push({
+          start,
+          end,
+          color: toTransparentHighlightColor(decoration.color ?? defaultColor)
+        })
+        rangesByBlock.set(blockId, entry)
+      }
+    }
+
+    return rangesByBlock
   }
 
   private getActiveCanvasBlockIdForSection(sectionIndex: number): string | undefined {
@@ -3827,6 +4244,596 @@ export class EpubReader {
 
     return this.book.sections.length - 1;
   }
+
+  private resolveSelectionTarget(node: Node | null): {
+    element: HTMLElement
+    locator: Locator
+    sectionId: string
+    blockId?: string
+  } | null {
+    if (!this.book || !this.options.container || !node) {
+      return null
+    }
+
+    const element = node instanceof HTMLElement ? node : node.parentElement
+    if (!(element instanceof HTMLElement) || !this.options.container.contains(element)) {
+      return null
+    }
+
+    const canvasTextRun = element.closest<HTMLElement>(".epub-text-run")
+    if (canvasTextRun) {
+      const sectionId = canvasTextRun.dataset.readerSectionId?.trim()
+      const blockId = canvasTextRun.dataset.readerBlockId?.trim()
+      const sectionIndex = sectionId ? this.getSectionIndexById(sectionId) : -1
+      const section = sectionIndex >= 0 ? this.book.sections[sectionIndex] : null
+      if (sectionId && section && blockId) {
+        return {
+          element: canvasTextRun,
+          locator: createBlockLocator({
+            section,
+            spineIndex: sectionIndex,
+            blockId
+          }),
+          sectionId,
+          blockId
+        }
+      }
+    }
+
+    const domSection = element.closest<HTMLElement>(".epub-dom-section")
+    if (!(domSection instanceof HTMLElement)) {
+      return null
+    }
+
+    const sectionId = domSection.dataset.sectionId?.trim()
+    const sectionIndex = sectionId ? this.getSectionIndexById(sectionId) : -1
+    const section = sectionIndex >= 0 ? this.book.sections[sectionIndex] : null
+    if (!sectionId || !section) {
+      return null
+    }
+
+    const identifiedElement = element.closest<HTMLElement>("[id], [data-reader-block-id]")
+    const blockId =
+      identifiedElement?.dataset.readerBlockId?.trim() || identifiedElement?.id?.trim()
+    if (blockId) {
+      return {
+        element: identifiedElement ?? domSection,
+        locator: createBlockLocator({
+          section,
+          spineIndex: sectionIndex,
+          blockId
+        }),
+        sectionId,
+        blockId
+      }
+    }
+
+    return {
+      element: domSection,
+      locator: normalizeLocator({
+        spineIndex: sectionIndex,
+        progressInSection:
+          this.locator?.spineIndex === sectionIndex ? this.locator.progressInSection ?? 0 : 0
+      }),
+      sectionId
+    }
+  }
+
+  private resolveSelectionEndpoint(input: {
+    node: Node | null
+    offset: number
+  }): {
+    element: HTMLElement
+    locator: Locator
+    sectionId: string
+    blockId?: string
+    inlineOffset?: number
+  } | null {
+    const target = this.resolveSelectionTarget(input.node)
+    if (!target || !target.blockId) {
+      return target
+    }
+
+    const clampedOffset = Math.max(0, Math.trunc(input.offset))
+    const canvasTextRun = target.element.closest<HTMLElement>(".epub-text-run")
+    if (canvasTextRun) {
+      const inlineStart = Number.parseInt(canvasTextRun.dataset.readerInlineStart ?? "0", 10) || 0
+      const inlineEnd =
+        Number.parseInt(canvasTextRun.dataset.readerInlineEnd ?? `${inlineStart}`, 10) || inlineStart
+      const inlineOffset = Math.max(inlineStart, Math.min(inlineEnd, inlineStart + clampedOffset))
+      return {
+        ...target,
+        locator: normalizeLocator({
+          ...target.locator,
+          inlineOffset
+        }),
+        inlineOffset
+      }
+    }
+
+    const inlineOffset = resolveDomTextOffsetWithinBlock(target.element, input.node, clampedOffset)
+    return {
+      ...target,
+      locator: normalizeLocator({
+        ...target.locator,
+        inlineOffset
+      }),
+      inlineOffset
+    }
+  }
+
+  private resolveCurrentTextSelectionSnapshot(): ReaderTextSelectionSnapshot | null {
+    if (!this.book || !this.options.container) {
+      return null
+    }
+
+    const selection = getScopedTextSelectionRecord(this.options.container)
+    if (!selection) {
+      return cloneReaderTextSelectionSnapshot(this.pinnedTextSelectionSnapshot)
+    }
+
+    const startTarget = this.resolveSelectionEndpoint({
+      node: selection.startNode,
+      offset: selection.range?.startOffset ?? 0
+    })
+    const endTarget = this.resolveSelectionEndpoint({
+      node: selection.endNode,
+      offset: selection.range?.endOffset ?? 0
+    })
+    const target = resolveLeadingSelectionTarget(startTarget, endTarget) ?? startTarget ?? endTarget
+    if (!target) {
+      return null
+    }
+
+    const rects = measureSelectionRectsWithinContainer({
+      container: this.options.container,
+      selection: selection.selection,
+      fallbackElement: target.element,
+      mode: this.mode
+    })
+
+    return {
+      text: selection.text,
+      locator: normalizeLocator({
+        ...target.locator,
+        ...(target.inlineOffset !== undefined ? { inlineOffset: target.inlineOffset } : {})
+      }),
+      sectionId: target.sectionId,
+      ...(target.blockId ? { blockId: target.blockId } : {}),
+      ...(startTarget && endTarget && startTarget.sectionId === endTarget.sectionId && startTarget.blockId && endTarget.blockId
+        ? {
+            textRange: normalizeTextRangeSelector({
+              start: {
+                blockId: startTarget.blockId,
+                inlineOffset: startTarget.inlineOffset ?? 0
+              },
+              end: {
+                blockId: endTarget.blockId,
+                inlineOffset: endTarget.inlineOffset ?? startTarget.inlineOffset ?? 0
+              }
+            })
+          }
+        : {}),
+      rects,
+      visible: rects.length > 0
+    }
+  }
+
+  private setPinnedTextSelectionSnapshot(selection: ReaderTextSelectionSnapshot | null): void {
+    this.pinnedTextSelectionSnapshot = cloneReaderTextSelectionSnapshot(selection)
+    this.updateTextSelectionSnapshot(selection)
+  }
+
+  private resolveSelectionHighlightState(
+    selection: ReaderTextSelectionSnapshot
+  ): ReaderSelectionHighlightState {
+    if (!this.book || !selection.textRange) {
+      return {
+        mode: "highlight",
+        disabled: false
+      }
+    }
+
+    const section = this.book.sections[selection.locator.spineIndex]
+    if (!section) {
+      return {
+        mode: "highlight",
+        disabled: false
+      }
+    }
+
+    const context = this.createSectionTextRangeContext(section)
+    const selectionRange = this.normalizeTextRangeForSection(selection.locator.spineIndex, selection.textRange)
+    if (!selectionRange) {
+      return {
+        mode: "highlight",
+        disabled: false
+      }
+    }
+
+    const flattenedSelection = flattenTextRange(selectionRange, context)
+    if (!flattenedSelection) {
+      return {
+        mode: "highlight",
+        disabled: false
+      }
+    }
+
+    let remainingRanges = [flattenedSelection]
+    for (const resolved of this.resolveAnnotationRangesForSection(selection.locator.spineIndex)) {
+      const flattened = flattenTextRange(resolved.range, context)
+      if (!flattened) {
+        continue
+      }
+
+      remainingRanges = remainingRanges.flatMap((range) => subtractFlattenedRange(range, flattened))
+      if (remainingRanges.length === 0) {
+        return {
+          mode: "remove-highlight",
+          disabled: false
+        }
+      }
+    }
+
+    return {
+      mode: "highlight",
+      disabled: false
+    }
+  }
+
+  private resolveAnnotationRangesForSection(spineIndex: number): ResolvedAnnotationRange[] {
+    return this.annotations
+      .map((annotation) => this.resolveAnnotationRange(annotation))
+      .filter(
+        (entry): entry is ResolvedAnnotationRange => Boolean(entry && entry.spineIndex === spineIndex)
+      )
+  }
+
+  private resolveAnnotationRange(annotation: Annotation): ResolvedAnnotationRange | null {
+    const book = this.book
+    if (!book) {
+      return null
+    }
+
+    const locator = restoreLocatorWithDiagnostics({
+      book,
+      locator: annotation.locator
+    }).locator
+    if (!locator) {
+      return null
+    }
+
+    const section = book.sections[locator.spineIndex]
+    if (!section) {
+      return null
+    }
+
+    const range = annotation.textRange
+      ? this.normalizeTextRangeForSection(locator.spineIndex, annotation.textRange)
+      : this.resolveFullBlockTextRange(section, locator.blockId)
+    if (!range) {
+      return null
+    }
+
+    return {
+      annotation,
+      locator,
+      spineIndex: locator.spineIndex,
+      sectionId: section.id,
+      range
+    }
+  }
+
+  private createSectionTextRangeContext(section: SectionDocument): SectionTextRangeContext {
+    const blocks = collectSelectableBlocksInReadingOrder(section.blocks)
+    const blockIds: string[] = []
+    const blockTexts = new Map<string, string>()
+    const blockTextLengths = new Map<string, number>()
+    const blockOffsets = new Map<string, number>()
+    let cursor = 0
+
+    for (const block of blocks) {
+      if (blockTexts.has(block.id)) {
+        continue
+      }
+
+      const text = this.extractBlockText(block)
+      blockIds.push(block.id)
+      blockTexts.set(block.id, text)
+      blockTextLengths.set(block.id, Array.from(text).length)
+      blockOffsets.set(block.id, cursor)
+      cursor += Array.from(text).length
+    }
+
+    return {
+      blockIds,
+      blockTexts,
+      blockTextLengths,
+      blockOffsets,
+      totalLength: cursor
+    }
+  }
+
+  private normalizeTextRangeForSection(
+    spineIndex: number,
+    textRange: TextRangeSelector
+  ): TextRangeSelector | null {
+    const section = this.book?.sections[spineIndex]
+    if (!section) {
+      return null
+    }
+
+    const context = this.createSectionTextRangeContext(section)
+    return normalizeTextRangeForContext({
+      textRange,
+      context,
+      resolveBlockId: (blockId) => resolveRenderableBlockId(section.blocks, blockId) ?? blockId
+    })
+  }
+
+  private resolveFullBlockTextRange(
+    section: SectionDocument,
+    blockId: string | undefined
+  ): TextRangeSelector | null {
+    const normalizedBlockId = blockId?.trim()
+    if (!normalizedBlockId) {
+      return null
+    }
+
+    const renderableBlockId = resolveRenderableBlockId(section.blocks, normalizedBlockId) ?? normalizedBlockId
+    const block = findBlockById(section.blocks, renderableBlockId)
+    if (!block) {
+      return null
+    }
+
+    const blockTextLength = Array.from(this.extractBlockText(block)).length
+    return {
+      start: {
+        blockId: renderableBlockId,
+        inlineOffset: 0
+      },
+      end: {
+        blockId: renderableBlockId,
+        inlineOffset: blockTextLength
+      }
+    }
+  }
+
+  private createAnnotationForResolvedRange(input: {
+    annotation?: Annotation
+    locator: Locator
+    range: TextRangeSelector
+    section: SectionDocument
+    color?: string
+    note?: string
+  }): Annotation | null {
+    const publicationId = input.annotation?.publicationId ?? this.getPublicationId()
+    if (!publicationId) {
+      return null
+    }
+
+    const rangeLocator = normalizeLocator({
+      spineIndex: input.locator.spineIndex,
+      blockId: input.range.start.blockId,
+      inlineOffset: input.range.start.inlineOffset,
+      progressInSection: input.locator.progressInSection ?? 0
+    })
+    const quote = this.resolveTextRangeQuote(input.section, input.range)
+
+    return createReaderAnnotation({
+      publicationId,
+      locator: rangeLocator,
+      ...(this.book ? { book: this.book } : {}),
+      textRange: input.range,
+      ...(quote ? { quote } : {}),
+      ...(input.note ? { note: input.note } : {}),
+      ...(input.color ? { color: input.color } : {}),
+      ...(input.annotation ? { createdAt: input.annotation.createdAt } : {}),
+      ...(input.annotation ? { updatedAt: new Date().toISOString() } : {})
+    })
+  }
+
+  private resolveTextRangeQuote(section: SectionDocument, textRange: TextRangeSelector): string | undefined {
+    const context = this.createSectionTextRangeContext(section)
+    const normalizedRange = normalizeTextRangeForContext({
+      textRange,
+      context
+    })
+    if (!normalizedRange) {
+      return undefined
+    }
+
+    const startIndex = context.blockIds.indexOf(normalizedRange.start.blockId)
+    const endIndex = context.blockIds.indexOf(normalizedRange.end.blockId)
+    if (startIndex < 0 || endIndex < 0 || endIndex < startIndex) {
+      return undefined
+    }
+
+    const segments: string[] = []
+    for (let index = startIndex; index <= endIndex; index += 1) {
+      const blockId = context.blockIds[index]
+      if (!blockId) {
+        continue
+      }
+
+      const characters = Array.from(context.blockTexts.get(blockId) ?? "")
+      const start = blockId === normalizedRange.start.blockId ? normalizedRange.start.inlineOffset : 0
+      const end =
+        blockId === normalizedRange.end.blockId
+          ? normalizedRange.end.inlineOffset
+          : characters.length
+      if (end <= start) {
+        continue
+      }
+
+      segments.push(characters.slice(start, end).join(""))
+    }
+
+    const text = segments.join("")
+    return text.trim() ? text : undefined
+  }
+
+  private resolveAnnotationViewportRects(annotation: Annotation, locator: Locator): VisibleDrawBounds {
+    if (!this.book || !this.options.container) {
+      return []
+    }
+
+    const section = this.book.sections[locator.spineIndex]
+    if (!section) {
+      return []
+    }
+
+    const textRange = annotation.textRange
+      ? this.normalizeTextRangeForSection(locator.spineIndex, annotation.textRange)
+      : this.resolveFullBlockTextRange(section, locator.blockId)
+    if (!textRange) {
+      return this.mapLocatorToViewport(locator)
+    }
+
+    const sectionElement = this.getSectionElement(section.id)
+    if (sectionElement && isRenderedDomSectionElement(sectionElement)) {
+      const rects = mapDomTextRangeToViewport({
+        container: this.options.container,
+        mode: this.mode,
+        sectionElement,
+        textRange
+      })
+      if (rects.length > 0) {
+        return rects
+      }
+    }
+
+    const canvasRects = this.resolveCanvasTextRangeViewportRects(section.id, textRange)
+    return canvasRects.length > 0 ? canvasRects : this.mapLocatorToViewport(locator)
+  }
+
+  private resolveCanvasTextRangeViewportRects(
+    sectionId: string,
+    textRange: TextRangeSelector
+  ): VisibleDrawBounds {
+    if (!this.options.container) {
+      return []
+    }
+
+    const startPosition = resolveCanvasTextPosition({
+      container: this.options.container,
+      sectionId,
+      blockId: textRange.start.blockId,
+      inlineOffset: textRange.start.inlineOffset,
+      bias: "start"
+    })
+    const endPosition = resolveCanvasTextPosition({
+      container: this.options.container,
+      sectionId,
+      blockId: textRange.end.blockId,
+      inlineOffset: textRange.end.inlineOffset,
+      bias: "end"
+    })
+    if (!startPosition || !endPosition) {
+      return []
+    }
+
+    const range = document.createRange()
+    range.setStart(startPosition.node, startPosition.offset)
+    range.setEnd(endPosition.node, endPosition.offset)
+    const containerRect = this.options.container.getBoundingClientRect()
+    return Array.from(range.getClientRects())
+      .filter((rect) => rect.width > 0 && rect.height > 0)
+      .map((rect) => ({
+        x: rect.left - containerRect.left + this.options.container!.scrollLeft,
+        y:
+          this.mode === "scroll"
+            ? rect.top - containerRect.top + this.options.container!.scrollTop
+            : rect.top - containerRect.top,
+        width: rect.width,
+        height: rect.height
+      }))
+  }
+
+  private resolveAnnotationSelectionAtPoint(point: Point): ReaderTextSelectionSnapshot | null {
+    if (!this.book) {
+      return null
+    }
+
+    for (let index = this.annotations.length - 1; index >= 0; index -= 1) {
+      const annotation = this.annotations[index]
+      if (!annotation) {
+        continue
+      }
+
+      const resolved = this.resolveAnnotationRange(annotation)
+      if (!resolved) {
+        continue
+      }
+
+      const rects = this.resolveAnnotationViewportRects(annotation, resolved.locator)
+      const hit = rects.some(
+        (rect) =>
+          point.x >= rect.x &&
+          point.x <= rect.x + rect.width &&
+          point.y >= rect.y &&
+          point.y <= rect.y + rect.height
+      )
+      if (!hit) {
+        continue
+      }
+
+      const text = annotation.quote ?? this.resolveTextRangeQuote(this.book.sections[resolved.spineIndex]!, resolved.range)
+      return {
+        text: text ?? "",
+        locator: normalizeLocator({
+          ...resolved.locator,
+          blockId: resolved.range.start.blockId,
+          inlineOffset: resolved.range.start.inlineOffset
+        }),
+        sectionId: resolved.sectionId,
+        blockId: resolved.range.start.blockId,
+        textRange: cloneTextRangeSelector(resolved.range),
+        rects,
+        visible: rects.length > 0
+      }
+    }
+
+    return null
+  }
+
+  private syncTextSelectionState(): void {
+    this.updateTextSelectionSnapshot(this.resolveCurrentTextSelectionSnapshot())
+  }
+
+  private updateTextSelectionSnapshot(selection: ReaderTextSelectionSnapshot | null): void {
+    if (readerTextSelectionSnapshotsEqual(this.textSelectionSnapshot, selection)) {
+      return
+    }
+
+    this.textSelectionSnapshot = cloneReaderTextSelectionSnapshot(selection)
+    const payload = {
+      selection: cloneReaderTextSelectionSnapshot(this.textSelectionSnapshot)
+    } satisfies ReaderEventMap["textSelectionChanged"]
+    this.events.emit("textSelectionChanged", payload)
+    void this.options.onTextSelectionChanged?.(payload)
+  }
+}
+
+type ResolvedAnnotationRange = {
+  annotation: Annotation
+  locator: Locator
+  spineIndex: number
+  sectionId: string
+  range: TextRangeSelector
+}
+
+type SectionTextRangeContext = {
+  blockIds: string[]
+  blockTexts: Map<string, string>
+  blockTextLengths: Map<string, number>
+  blockOffsets: Map<string, number>
+  totalLength: number
+}
+
+type FlattenedTextRange = {
+  start: number
+  end: number
 }
 
 function cloneReaderPreferences(preferences: ReaderPreferences): ReaderPreferences {
@@ -3859,13 +4866,438 @@ function typographyEqual(left: TypographyOptions, right: TypographyOptions): boo
   )
 }
 
-function hasActiveTextSelection(): boolean {
+function hasActiveTextSelection(scope?: Node | null): boolean {
   if (typeof window === "undefined" || typeof window.getSelection !== "function") {
     return false;
   }
 
   const selection = window.getSelection();
-  return Boolean(selection && selection.toString().trim());
+  if (!selection || !selection.toString().trim()) {
+    return false
+  }
+
+  if (!scope) {
+    return true
+  }
+
+  const anchorNode = selection.anchorNode
+  const focusNode = selection.focusNode
+  return Boolean(
+    (anchorNode && scope.contains(anchorNode)) || (focusNode && scope.contains(focusNode))
+  )
+}
+
+function resolveDomTextOffsetWithinBlock(
+  blockElement: HTMLElement,
+  node: Node | null,
+  offset: number
+): number {
+  const safeOffset = Math.max(0, Math.trunc(offset))
+  const textNodes = collectTextNodes(blockElement)
+  if (textNodes.length === 0) {
+    return safeOffset
+  }
+
+  let cursor = 0
+  for (const textNode of textNodes) {
+    const length = textNode.textContent?.length ?? 0
+    if (textNode === node) {
+      return cursor + Math.min(length, safeOffset)
+    }
+    cursor += length
+  }
+
+  const ownerTextNode = node?.nodeType === Node.TEXT_NODE ? node : node?.firstChild
+  if (ownerTextNode && ownerTextNode.nodeType === Node.TEXT_NODE) {
+    const matchingIndex = textNodes.indexOf(ownerTextNode as Text)
+    if (matchingIndex >= 0) {
+      const priorLength = textNodes
+        .slice(0, matchingIndex)
+        .reduce((total, textNode) => total + (textNode.textContent?.length ?? 0), 0)
+      const localLength = ownerTextNode.textContent?.length ?? 0
+      return priorLength + Math.min(localLength, safeOffset)
+    }
+  }
+
+  return Math.min(
+    cursor,
+    safeOffset
+  )
+}
+
+function collectTextNodes(root: Node): Text[] {
+  if (typeof document === "undefined") {
+    return []
+  }
+
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  const textNodes: Text[] = []
+  let current = walker.nextNode()
+  while (current) {
+    if (current instanceof Text) {
+      textNodes.push(current)
+    }
+    current = walker.nextNode()
+  }
+  return textNodes
+}
+
+function getScopedTextSelectionRecord(scope: Node): {
+  selection: Selection
+  range: Range | null
+  text: string
+  startNode: Node | null
+  endNode: Node | null
+} | null {
+  if (typeof window === "undefined" || typeof window.getSelection !== "function") {
+    return null
+  }
+
+  const selection = window.getSelection()
+  const text = selection?.toString().trim()
+  if (!selection || !text) {
+    return null
+  }
+
+  const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null
+  const startNode = range?.startContainer ?? selection.anchorNode
+  const endNode = range?.endContainer ?? selection.focusNode
+  if (
+    !((startNode && scope.contains(startNode)) || (endNode && scope.contains(endNode)))
+  ) {
+    return null
+  }
+
+  return {
+    selection,
+    range,
+    text,
+    startNode: startNode ?? null,
+    endNode: endNode ?? null
+  }
+}
+
+function measureSelectionRectsWithinContainer(input: {
+  container: HTMLElement
+  selection: Selection
+  fallbackElement?: HTMLElement | null
+  mode: ReadingMode
+}): VisibleDrawBounds {
+  const rangeRects =
+    input.selection.rangeCount > 0
+      ? Array.from(input.selection.getRangeAt(0).getClientRects())
+      : []
+  const rects = rangeRects
+    .map((rect) => projectClientRectIntoContainer(rect, input.container, input.mode))
+    .filter((rect): rect is Rect => Boolean(rect))
+
+  if (rects.length > 0) {
+    return rects
+  }
+
+  if (!input.fallbackElement) {
+    return []
+  }
+
+  const fallbackRect = projectClientRectIntoContainer(
+    input.fallbackElement.getBoundingClientRect(),
+    input.container,
+    input.mode
+  )
+  return fallbackRect ? [fallbackRect] : []
+}
+
+function projectClientRectIntoContainer(
+  rect: DOMRect | DOMRectReadOnly,
+  container: HTMLElement,
+  mode: ReadingMode
+): Rect | null {
+  if (rect.width <= 0 || rect.height <= 0) {
+    return null
+  }
+
+  const containerRect = container.getBoundingClientRect()
+  return {
+    x: rect.left - containerRect.left + container.scrollLeft,
+    y:
+      mode === "scroll"
+        ? rect.top - containerRect.top + container.scrollTop
+        : rect.top - containerRect.top,
+    width: rect.width,
+    height: rect.height
+  }
+}
+
+function cloneReaderTextSelectionSnapshot(
+  selection: ReaderTextSelectionSnapshot | null
+): ReaderTextSelectionSnapshot | null {
+  if (!selection) {
+    return null
+  }
+
+  return {
+    text: selection.text,
+    locator: { ...selection.locator },
+    sectionId: selection.sectionId,
+    ...(selection.blockId ? { blockId: selection.blockId } : {}),
+    ...(selection.textRange ? { textRange: cloneTextRangeSelector(selection.textRange) } : {}),
+    rects: selection.rects.map((rect) => ({ ...rect })),
+    visible: selection.visible
+  }
+}
+
+function readerTextSelectionSnapshotsEqual(
+  left: ReaderTextSelectionSnapshot | null,
+  right: ReaderTextSelectionSnapshot | null
+): boolean {
+  if (!left || !right) {
+    return left === right
+  }
+
+  if (
+    left.text !== right.text ||
+    left.sectionId !== right.sectionId ||
+    left.blockId !== right.blockId ||
+    left.visible !== right.visible
+  ) {
+    return false
+  }
+
+  if (!locatorsEqual(left.locator, right.locator) || left.rects.length !== right.rects.length) {
+    return false
+  }
+
+  if (!textRangesEqual(left.textRange, right.textRange)) {
+    return false
+  }
+
+  return left.rects.every((rect, index) => rectsEqual(rect, right.rects[index] ?? null))
+}
+
+function locatorsEqual(left: Locator, right: Locator): boolean {
+  return (
+    left.spineIndex === right.spineIndex &&
+    left.blockId === right.blockId &&
+    left.anchorId === right.anchorId &&
+    left.inlineOffset === right.inlineOffset &&
+    left.cfi === right.cfi &&
+    left.progressInSection === right.progressInSection
+  )
+}
+
+function rectsEqual(left: Rect, right: Rect | null): boolean {
+  if (!right) {
+    return false
+  }
+
+  return (
+    left.x === right.x &&
+    left.y === right.y &&
+    left.width === right.width &&
+    left.height === right.height
+  )
+}
+
+function textRangesEqual(
+  left: TextRangeSelector | undefined,
+  right: TextRangeSelector | undefined
+): boolean {
+  if (!left || !right) {
+    return left === right
+  }
+
+  return (
+    left.start.blockId === right.start.blockId &&
+    left.start.inlineOffset === right.start.inlineOffset &&
+    left.end.blockId === right.end.blockId &&
+    left.end.inlineOffset === right.end.inlineOffset
+  )
+}
+
+function cloneTextRangeSelector(textRange: TextRangeSelector): TextRangeSelector {
+  return {
+    start: {
+      blockId: textRange.start.blockId,
+      inlineOffset: textRange.start.inlineOffset
+    },
+    end: {
+      blockId: textRange.end.blockId,
+      inlineOffset: textRange.end.inlineOffset
+    }
+  }
+}
+
+function normalizeTextRangeForContext(input: {
+  textRange: TextRangeSelector
+  context: SectionTextRangeContext
+  resolveBlockId?: (blockId: string) => string
+}): TextRangeSelector | null {
+  const normalizePoint = (point: TextRangeSelector["start"]): TextRangeSelector["start"] | null => {
+    const blockId = input.resolveBlockId?.(point.blockId) ?? point.blockId
+    if (!input.context.blockTextLengths.has(blockId)) {
+      return null
+    }
+
+    const length = input.context.blockTextLengths.get(blockId) ?? 0
+    return {
+      blockId,
+      inlineOffset: Math.max(0, Math.min(length, Math.trunc(point.inlineOffset)))
+    }
+  }
+
+  const start = normalizePoint(input.textRange.start)
+  const end = normalizePoint(input.textRange.end)
+  if (!start || !end) {
+    return null
+  }
+
+  const normalized = normalizeTextRangeSelector({
+    start,
+    end
+  })
+  const flattened = flattenTextRange(normalized, input.context)
+  if (!flattened) {
+    return null
+  }
+
+  return inflateFlattenedTextRange(flattened, input.context)
+}
+
+function flattenTextRange(
+  textRange: TextRangeSelector,
+  context: SectionTextRangeContext
+): FlattenedTextRange | null {
+  const startBlockOffset = context.blockOffsets.get(textRange.start.blockId)
+  const endBlockOffset = context.blockOffsets.get(textRange.end.blockId)
+  if (startBlockOffset === undefined || endBlockOffset === undefined) {
+    return null
+  }
+
+  const start = startBlockOffset + textRange.start.inlineOffset
+  const end = endBlockOffset + textRange.end.inlineOffset
+  const normalizedStart = Math.max(0, Math.min(start, end))
+  const normalizedEnd = Math.max(normalizedStart, Math.max(start, end))
+  return {
+    start: normalizedStart,
+    end: normalizedEnd
+  }
+}
+
+function inflateFlattenedTextRange(
+  flattened: FlattenedTextRange,
+  context: SectionTextRangeContext
+): TextRangeSelector | null {
+  const start = resolveTextRangePointFromAbsoluteOffset(flattened.start, context, "start")
+  const end = resolveTextRangePointFromAbsoluteOffset(flattened.end, context, "end")
+  if (!start || !end) {
+    return null
+  }
+
+  return {
+    start,
+    end
+  }
+}
+
+function resolveTextRangePointFromAbsoluteOffset(
+  absoluteOffset: number,
+  context: SectionTextRangeContext,
+  bias: "start" | "end"
+): TextRangeSelector["start"] | null {
+  const clampedOffset = Math.max(0, Math.min(context.totalLength, Math.trunc(absoluteOffset)))
+  for (let index = 0; index < context.blockIds.length; index += 1) {
+    const blockId = context.blockIds[index]
+    if (!blockId) {
+      continue
+    }
+
+    const blockStart = context.blockOffsets.get(blockId) ?? 0
+    const blockLength = context.blockTextLengths.get(blockId) ?? 0
+    const blockEnd = blockStart + blockLength
+    const isLastBlock = index === context.blockIds.length - 1
+
+    if (clampedOffset < blockEnd || (isLastBlock && clampedOffset <= blockEnd)) {
+      return {
+        blockId,
+        inlineOffset: clampedOffset - blockStart
+      }
+    }
+
+    if (clampedOffset === blockEnd && bias === "end") {
+      return {
+        blockId,
+        inlineOffset: blockLength
+      }
+    }
+  }
+
+  const lastBlockId = context.blockIds.at(-1)
+  if (!lastBlockId) {
+    return null
+  }
+
+  return {
+    blockId: lastBlockId,
+    inlineOffset: context.blockTextLengths.get(lastBlockId) ?? 0
+  }
+}
+
+function subtractFlattenedRange(
+  source: FlattenedTextRange,
+  subtractor: FlattenedTextRange
+): FlattenedTextRange[] {
+  const overlapStart = Math.max(source.start, subtractor.start)
+  const overlapEnd = Math.min(source.end, subtractor.end)
+  if (overlapEnd <= overlapStart) {
+    return [source]
+  }
+
+  const remaining: FlattenedTextRange[] = []
+  if (source.start < overlapStart) {
+    remaining.push({
+      start: source.start,
+      end: overlapStart
+    })
+  }
+  if (overlapEnd < source.end) {
+    remaining.push({
+      start: overlapEnd,
+      end: source.end
+    })
+  }
+  return remaining
+}
+
+function resolveLeadingSelectionTarget<TTarget extends { element: HTMLElement }>(
+  left: TTarget | null,
+  right: TTarget | null
+): TTarget | null {
+  if (left && !right) {
+    return left
+  }
+
+  if (right && !left) {
+    return right
+  }
+
+  if (!left || !right) {
+    return null
+  }
+
+  if (left.element === right.element) {
+    return left
+  }
+
+  const position = left.element.compareDocumentPosition(right.element)
+  if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
+    return left
+  }
+
+  if (position & Node.DOCUMENT_POSITION_PRECEDING) {
+    return right
+  }
+
+  return left
 }
 
 function clampProgress(value: number): number {
@@ -3874,6 +5306,71 @@ function clampProgress(value: number): number {
   }
 
   return Math.max(0, Math.min(value, 1));
+}
+
+function resolveCanvasTextPosition(input: {
+  container: HTMLElement
+  sectionId: string
+  blockId: string
+  inlineOffset: number
+  bias: "start" | "end"
+}): { node: Text; offset: number } | null {
+  const selectorValue = escapeAttributeSelectorValue(input.blockId)
+  const runs = Array.from(
+    input.container.querySelectorAll<HTMLElement>(
+      `.epub-text-run[data-reader-section-id="${escapeAttributeSelectorValue(
+        input.sectionId
+      )}"][data-reader-block-id="${selectorValue}"]`
+    )
+  )
+  if (runs.length === 0) {
+    return null
+  }
+
+  const clampedOffset = Math.max(0, Math.trunc(input.inlineOffset))
+  for (let index = 0; index < runs.length; index += 1) {
+    const run = runs[index]
+    if (!run) {
+      continue
+    }
+
+    const runStart = Number.parseInt(run.dataset.readerInlineStart ?? "0", 10) || 0
+    const fallbackTextLength = Array.from(run.textContent ?? "").length
+    const runEnd =
+      Number.parseInt(run.dataset.readerInlineEnd ?? `${runStart + fallbackTextLength}`, 10) ||
+      runStart + fallbackTextLength
+    const isBoundary = clampedOffset === runEnd
+    const matches =
+      clampedOffset < runEnd ||
+      (clampedOffset === runStart && input.bias === "start") ||
+      (isBoundary && (input.bias === "end" || index === runs.length - 1))
+    if (!matches) {
+      continue
+    }
+
+    const textNode = run.firstChild
+    if (!(textNode instanceof Text)) {
+      return null
+    }
+
+    const localOffset =
+      input.bias === "end" && clampedOffset >= runEnd
+        ? textNode.textContent?.length ?? 0
+        : Math.max(0, Math.min(textNode.textContent?.length ?? 0, clampedOffset - runStart))
+    return {
+      node: textNode,
+      offset: localOffset
+    }
+  }
+
+  const lastRun = runs.at(-1)
+  const textNode = lastRun?.firstChild
+  return textNode instanceof Text
+    ? {
+        node: textNode,
+        offset: textNode.textContent?.length ?? 0
+      }
+    : null
 }
 
 function getRenderedSectionHeight(element: HTMLElement): number {
@@ -3905,6 +5402,133 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return Boolean(target.closest("input, textarea, select, button, [contenteditable='true']"))
 }
 
+function annotateDomSectionWithBlockIds(
+  section: SectionDocument,
+  sectionElement: HTMLElement
+): void {
+  for (const element of sectionElement.querySelectorAll<HTMLElement>("[data-reader-block-id]")) {
+    delete element.dataset.readerBlockId
+  }
+
+  const elements = collectDomReadableBlockElements(sectionElement)
+  const blocks = collectSelectableBlocksInReadingOrder(section.blocks).map((block) => ({
+    id: block.id,
+    text: normalizeBlockMatchText(collectBlockText(block))
+  }))
+
+  let searchStartIndex = 0
+  for (const element of elements) {
+    if (element.id.trim()) {
+      element.dataset.readerBlockId = element.id.trim()
+      continue
+    }
+
+    const elementText = normalizeBlockMatchText(element.textContent ?? "")
+    if (!elementText) {
+      continue
+    }
+
+    const matchIndex = findMatchingSelectableBlockIndex(blocks, elementText, searchStartIndex)
+    if (matchIndex < 0) {
+      continue
+    }
+
+    element.dataset.readerBlockId = blocks[matchIndex]!.id
+    searchStartIndex = matchIndex + 1
+  }
+}
+
+function collectDomReadableBlockElements(sectionElement: HTMLElement): HTMLElement[] {
+  return Array.from(
+    sectionElement.querySelectorAll<HTMLElement>(
+      "p, li, pre, h1, h2, h3, h4, h5, h6, td, th, dt, dd, figcaption"
+    )
+  )
+}
+
+function collectSelectableBlocksInReadingOrder(blocks: BlockNode[]): BlockNode[] {
+  const collected: BlockNode[] = []
+
+  for (const block of blocks) {
+    switch (block.kind) {
+      case "heading":
+      case "text":
+      case "code":
+        collected.push(block)
+        break
+      case "quote":
+      case "aside":
+      case "nav":
+        collected.push(...collectSelectableBlocksInReadingOrder(block.blocks))
+        break
+      case "figure":
+        collected.push(...collectSelectableBlocksInReadingOrder(block.blocks))
+        if (block.caption) {
+          collected.push(...collectSelectableBlocksInReadingOrder(block.caption))
+        }
+        break
+      case "list":
+        for (const item of block.items) {
+          collected.push(...collectSelectableBlocksInReadingOrder(item.blocks))
+        }
+        break
+      case "table":
+        if (block.caption) {
+          collected.push(...collectSelectableBlocksInReadingOrder(block.caption))
+        }
+        for (const row of block.rows) {
+          for (const cell of row.cells) {
+            collected.push(...collectSelectableBlocksInReadingOrder(cell.blocks))
+          }
+        }
+        break
+      case "definition-list":
+        for (const item of block.items) {
+          collected.push(...collectSelectableBlocksInReadingOrder(item.term))
+          for (const description of item.descriptions) {
+            collected.push(...collectSelectableBlocksInReadingOrder(description))
+          }
+        }
+        break
+      default:
+        break
+    }
+  }
+
+  return collected
+}
+
+function normalizeBlockMatchText(value: string): string {
+  return value.replace(/\s+/g, " ").trim()
+}
+
+function findMatchingSelectableBlockIndex(
+  blocks: Array<{ id: string; text: string }>,
+  elementText: string,
+  searchStartIndex: number
+): number {
+  for (let index = searchStartIndex; index < blocks.length; index += 1) {
+    const candidate = blocks[index]
+    if (!candidate?.text) {
+      continue
+    }
+
+    if (candidate.text === elementText) {
+      return index
+    }
+
+    const shortestLength = Math.min(candidate.text.length, elementText.length)
+    if (
+      shortestLength >= 12 &&
+      (candidate.text.includes(elementText) || elementText.includes(candidate.text))
+    ) {
+      return index
+    }
+  }
+
+  return -1
+}
+
 function findBlockById(blocks: BlockNode[], blockId: string): BlockNode | null {
   for (const block of blocks) {
     if (block.id === blockId) {
@@ -3918,6 +5542,10 @@ function findBlockById(blocks: BlockNode[], blockId: string): BlockNode | null {
   }
 
   return null
+}
+
+function escapeAttributeSelectorValue(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')
 }
 
 function resolveRenderableBlockId(blocks: BlockNode[], blockId: string): string | undefined {

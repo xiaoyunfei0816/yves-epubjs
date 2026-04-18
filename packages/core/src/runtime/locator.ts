@@ -1,5 +1,4 @@
 import type {
-  BlockNode,
   Book,
   Locator,
   LocatorRestoreDiagnostics,
@@ -7,6 +6,7 @@ import type {
   SectionDocument,
   SerializedLocator
 } from "../model/types"
+import { collectBlockIdsInReadingOrder } from "./reader-domain"
 
 export function normalizeLocator(locator: Locator): Locator {
   const normalized: Locator = {
@@ -47,7 +47,9 @@ export function serializeLocator(input: {
   const href = input.book?.sections[normalized.spineIndex]?.href
   const cfi =
     normalized.cfi ??
-    (input.generateCfi && input.book ? buildLocatorCfi({ book: input.book, locator: normalized }) : undefined)
+    (input.generateCfi && input.book && shouldGenerateSyntheticCfi(normalized)
+      ? buildLocatorCfi({ book: input.book, locator: normalized })
+      : undefined)
 
   return {
     ...normalized,
@@ -435,6 +437,10 @@ function buildLocatorCfi(input: {
   return `epubcfi(/6/${spineStep}!/${blockStep}${qualifier}${offset})`
 }
 
+function shouldGenerateSyntheticCfi(locator: Locator): boolean {
+  return Boolean(locator.blockId || locator.anchorId)
+}
+
 function resolveCfiGenerationTarget(
   section: SectionDocument,
   blockIds: string[],
@@ -596,52 +602,5 @@ function extractCfiSteps(path: string): number[] {
 }
 
 function escapeCfiQualifier(value: string): string {
-  return value.replace(/[\[\]]/g, "")
-}
-
-function collectBlockIdsInReadingOrder(blocks: BlockNode[]): string[] {
-  const orderedIds: string[] = []
-
-  for (const block of blocks) {
-    orderedIds.push(block.id)
-    switch (block.kind) {
-      case "quote":
-      case "figure":
-      case "aside":
-      case "nav":
-        orderedIds.push(...collectBlockIdsInReadingOrder(block.blocks))
-        break
-      case "list":
-        for (const item of block.items) {
-          orderedIds.push(item.id)
-          orderedIds.push(...collectBlockIdsInReadingOrder(item.blocks))
-        }
-        break
-      case "table":
-        if (block.caption) {
-          orderedIds.push(...collectBlockIdsInReadingOrder(block.caption))
-        }
-        for (const row of block.rows) {
-          orderedIds.push(row.id)
-          for (const cell of row.cells) {
-            orderedIds.push(cell.id)
-            orderedIds.push(...collectBlockIdsInReadingOrder(cell.blocks))
-          }
-        }
-        break
-      case "definition-list":
-        for (const item of block.items) {
-          orderedIds.push(item.id)
-          orderedIds.push(...collectBlockIdsInReadingOrder(item.term))
-          for (const description of item.descriptions) {
-            orderedIds.push(...collectBlockIdsInReadingOrder(description))
-          }
-        }
-        break
-      default:
-        break
-    }
-  }
-
-  return orderedIds
+  return value.replace(/\[|\]/g, "")
 }

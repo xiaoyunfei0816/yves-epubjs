@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LayoutEngine } from "../src/layout/layout-engine";
+import { LayoutEngine, type LayoutPretextBlock } from "../src/layout/layout-engine";
 import type { Book, SectionDocument } from "../src/model/types";
 import { parseCssStyleSheet } from "../src/parser/css-ast-adapter";
 import { parseXhtmlDocument } from "../src/parser/xhtml-parser";
@@ -116,6 +116,33 @@ describe("pretext layout integration", () => {
     expect(layout.blocks[0]?.type === "pretext" && layout.blocks[0].lines.length).toBeGreaterThanOrEqual(2)
   })
 
+  it("carries measured fragment widths through pretext layout output", () => {
+    const engine = new LayoutEngine()
+    const section = createSection()
+
+    const layout = engine.layout(
+      {
+        section,
+        spineIndex: 0,
+        viewportWidth: 220,
+        viewportHeight: 600,
+        typography,
+        fontFamily: "serif"
+      },
+      "scroll"
+    )
+
+    const paragraphBlock = layout.blocks[1]
+    expect(paragraphBlock?.type).toBe("pretext")
+    const firstTextFragment =
+      paragraphBlock?.type === "pretext"
+        ? paragraphBlock.lines.flatMap((line) => line.fragments).find((fragment) => fragment.text.length > 0)
+        : undefined
+
+    expect(typeof firstTextFragment?.width).toBe("number")
+    expect(firstTextFragment?.width ?? 0).toBeGreaterThan(0)
+  })
+
   it("renders pretext-driven content with the canvas backend by default", async () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", {
@@ -154,6 +181,11 @@ describe("pretext layout integration", () => {
     await reader.render();
 
     expect(container.querySelector("canvas.epub-canvas-section")).toBeTruthy();
+    const textRuns = Array.from(
+      container.querySelectorAll(".epub-text-layer .epub-text-run")
+    ).map((node) => node.textContent ?? "");
+    expect(textRuns.length).toBeGreaterThan(1);
+    expect(textRuns.some((text) => text.trim().length > 0)).toBe(true);
     expect(reader.getRenderMetrics().backend).toBe("canvas");
     expect(reader.getVisibleDrawBounds().length).toBeGreaterThan(1);
   });
@@ -288,6 +320,69 @@ describe("pretext layout integration", () => {
     expect(textOps.length).toBeGreaterThan(0)
     expect(textOps.every((op) => op.color === "#884400")).toBe(true)
     expect(textOps[0]?.x ?? 0).toBeGreaterThan(20)
+  })
+
+  it("preserves measured pretext fragment widths in canvas draw ops", () => {
+    const section: SectionDocument = {
+      id: "section-pretext-fragment-width",
+      href: "OPS/pretext-fragment-width.xhtml",
+      title: "Measured Widths",
+      anchors: {},
+      blocks: []
+    }
+
+    const pretextBlock: LayoutPretextBlock = {
+      type: "pretext",
+      id: "text-pretext-fragment-width",
+      kind: "text",
+      lineHeight: 28,
+      textAlign: "start",
+      paddingTop: 0,
+      paddingBottom: 0,
+      paddingLeft: 0,
+      paddingRight: 0,
+      lines: [
+        {
+          width: 250,
+          height: 28,
+          fragments: [
+            {
+              text: "在C#中，StringBuilder",
+              font: '400 18px "Iowan Old Style", "Palatino Linotype", serif',
+              gapBefore: 0,
+              width: 200
+            },
+            {
+              text: " tail",
+              font: '400 18px "Iowan Old Style", "Palatino Linotype", serif',
+              gapBefore: 0,
+              width: 50
+            }
+          ]
+        }
+      ],
+      estimatedHeight: 28
+    }
+
+    const displayList = new DisplayListBuilder().buildSection({
+      section,
+      width: 360,
+      viewportHeight: 600,
+      blocks: [pretextBlock],
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography,
+      activeBlockId: undefined
+    })
+
+    const textOps = displayList.ops.filter((op): op is TextRunDrawOp => op.kind === "text")
+    expect(textOps).toHaveLength(2)
+    expect(textOps[0]?.width).toBe(200)
+    expect(textOps[0]?.rect.width).toBe(200)
+    expect(textOps[1]?.x).toBe((textOps[0]?.x ?? 0) + (textOps[0]?.width ?? 0))
+    expect(textOps[1]?.width).toBe(50)
   })
 
   it("respects linked stylesheet inline image sizing and margins on the canvas path", () => {
@@ -537,6 +632,70 @@ describe("pretext layout integration", () => {
     expect(rects.length).toBeGreaterThan(0);
     expect(rects[0]?.height).toBeGreaterThan(0);
   });
+
+  it("renders text-range annotation highlights in canvas mode", async () => {
+    const container = document.createElement("div")
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 280
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 320
+    })
+    document.body.appendChild(container)
+
+    const reader = new EpubReader({
+      container,
+      mode: "paginated"
+    })
+    const section = createSection()
+    ;(reader as unknown as { book: Book; sourceName: string | null }).book = {
+      metadata: { title: "Canvas Highlights", identifier: "urn:test:canvas-highlights" },
+      manifest: [],
+      spine: [
+        {
+          idref: "item-1",
+          href: section.href,
+          linear: true
+        }
+      ],
+      toc: [],
+      sections: [section]
+    }
+    ;(reader as unknown as { book: Book; sourceName: string | null }).sourceName = "sample.epub"
+
+    reader.setAnnotations([
+      {
+        id: "annotation-1",
+        publicationId: "identifier:urn:test:canvas-highlights",
+        locator: {
+          spineIndex: 0,
+          blockId: "text-1",
+          progressInSection: 0.2
+        },
+        textRange: {
+          start: {
+            blockId: "text-1",
+            inlineOffset: 5
+          },
+          end: {
+            blockId: "text-1",
+            inlineOffset: 18
+          }
+        },
+        quote: "paragraph is",
+        color: "#3b82f6",
+        createdAt: "2026-04-19T00:00:00.000Z",
+        updatedAt: "2026-04-19T00:00:00.000Z"
+      }
+    ])
+
+    await reader.render()
+
+    expect(reader.getRenderMetrics().backend).toBe("canvas")
+    expect(reader.getRenderMetrics().highlightedDrawOpCount).toBeGreaterThan(0)
+  })
 
   it("maps viewport points back to locators in canvas mode", async () => {
     const container = document.createElement("div");

@@ -1,7 +1,6 @@
 import type {
   BlockNode,
   FigureBlock,
-  InlineNode,
   ListBlock,
   Locator,
   Rect,
@@ -26,9 +25,20 @@ import {
   type ReadingStyleProfile
 } from "./reading-style-profile";
 import { resolveImageLayout } from "../utils/image-layout";
-import { wrapPreformattedText } from "../utils/preformatted-text";
+import { wrapPreformattedTextWithOffsets } from "../utils/preformatted-text";
 import { extractBlockText } from "../utils/block-text";
-import { approximateTextWidth, extractFontSize, wrapText } from "../utils/text-wrap";
+import {
+  approximateTextWidth,
+  extractFontSize,
+  wrapText,
+  wrapTextWithOffsets
+} from "../utils/text-wrap";
+
+type BlockHighlightRange = {
+  start: number;
+  end: number;
+  color: string;
+};
 
 type BuilderOptions = {
   section: SectionDocument;
@@ -41,6 +51,7 @@ type BuilderOptions = {
   resolveImageLoaded?: (src: string) => boolean;
   resolveImageUrl?: (src: string) => string;
   highlightedBlockIds?: Set<string>;
+  highlightRangesByBlock?: Map<string, BlockHighlightRange[]>;
   underlinedBlockIds?: Set<string>;
   activeBlockId: string | undefined;
 };
@@ -79,6 +90,7 @@ export class DisplayListBuilder {
             resolveImageLoaded: options.resolveImageLoaded,
             resolveImageUrl: options.resolveImageUrl,
             highlighted: options.highlightedBlockIds?.has(block.id) ?? false,
+            highlightRanges: options.highlightRangesByBlock?.get(block.id) ?? [],
             underlined: options.underlinedBlockIds?.has(block.id) ?? false,
             active: options.activeBlockId === block.id
           })
@@ -96,6 +108,7 @@ export class DisplayListBuilder {
             resolveImageLoaded: options.resolveImageLoaded,
             resolveImageUrl: options.resolveImageUrl,
             highlighted: options.highlightedBlockIds?.has(block.id) ?? false,
+            highlightRanges: options.highlightRangesByBlock?.get(block.id) ?? [],
             underlined: options.underlinedBlockIds?.has(block.id) ?? false,
             active: options.activeBlockId === block.id
           });
@@ -129,6 +142,7 @@ export class DisplayListBuilder {
     resolveImageLoaded: ((src: string) => boolean) | undefined;
     resolveImageUrl: ((src: string) => string) | undefined;
     highlighted: boolean;
+    highlightRanges: BlockHighlightRange[];
     underlined: boolean;
     active: boolean;
   }): {
@@ -192,6 +206,7 @@ export class DisplayListBuilder {
     });
 
     let lineTop = contentRect.y
+    let blockTextOffset = 0
     input.block.lines.forEach((line) => {
       const lineWidth = Math.max(0, line.width);
       const startX = this.resolveLineStartX(
@@ -207,7 +222,7 @@ export class DisplayListBuilder {
         cursorX += fragment.gapBefore;
         const fragmentWidth = fragment.image
           ? fragment.image.marginLeft + fragment.image.width + fragment.image.marginRight
-          : approximateTextWidth(fragment.text, fragment.font);
+          : (fragment.width ?? approximateTextWidth(fragment.text, fragment.font));
         const baselineShift = fragment.baselineShift ?? 0
         if (fragment.image) {
           const imageRect = {
@@ -250,29 +265,38 @@ export class DisplayListBuilder {
           width: fragmentWidth,
           height: lineHeight
         };
+        const fragmentTextLength = Array.from(fragment.text).length
+        const highlightSegments = resolveLineHighlightSegments(
+          input.highlightRanges,
+          blockTextOffset,
+          blockTextOffset + fragmentTextLength
+        )
         ops.push({
           kind: "text",
           sectionId: input.section.id,
           sectionHref: input.section.href,
           blockId: input.block.id,
           locator: input.locator,
-        rect,
-        text: fragment.text,
-        x: cursorX,
-        y: lineTop + baselineShift,
-        width: fragmentWidth,
-        font: fragment.font,
-        color: fragment.href
-          ? input.styleProfile.link.color
-          : (fragment.color ?? input.block.color ?? input.theme.color),
-        backgroundColor: fragment.backgroundColor,
-        highlightColor: input.highlighted
-          ? input.styleProfile.highlight.search
-          : input.active
-            ? input.styleProfile.highlight.active
-            : fragment.mark
-              ? input.styleProfile.highlight.mark
-              : undefined,
+          rect,
+          text: fragment.text,
+          textStart: blockTextOffset,
+          textEnd: blockTextOffset + fragmentTextLength,
+          x: cursorX,
+          y: lineTop + baselineShift,
+          width: fragmentWidth,
+          font: fragment.font,
+          color: fragment.href
+            ? input.styleProfile.link.color
+            : (fragment.color ?? input.block.color ?? input.theme.color),
+          backgroundColor: fragment.backgroundColor,
+          highlightColor: input.highlighted
+            ? input.styleProfile.highlight.search
+            : input.active
+              ? input.styleProfile.highlight.active
+              : fragment.mark
+                ? input.styleProfile.highlight.mark
+                : undefined,
+          ...(highlightSegments.length ? { highlightSegments } : {}),
           underline: Boolean(fragment.href) || input.underlined,
           href: fragment.href
         } satisfies TextRunDrawOp);
@@ -290,6 +314,7 @@ export class DisplayListBuilder {
         }
 
         cursorX += fragmentWidth;
+        blockTextOffset += fragmentTextLength
       }
 
       lineTop += lineHeight
@@ -316,6 +341,7 @@ export class DisplayListBuilder {
     resolveImageLoaded: ((src: string) => boolean) | undefined;
     resolveImageUrl: ((src: string) => string) | undefined;
     highlighted: boolean;
+    highlightRanges: BlockHighlightRange[];
     underlined: boolean;
     active: boolean;
   }): {
@@ -467,6 +493,7 @@ export class DisplayListBuilder {
             color: blockStyle.color,
             textAlign: blockStyle.textAlign,
             highlighted: input.highlighted,
+            highlightRanges: input.highlightRanges,
             underlined: input.underlined,
             active: input.active,
             styleProfile: input.styleProfile
@@ -498,6 +525,7 @@ export class DisplayListBuilder {
             color: blockStyle.color,
             textAlign: blockStyle.textAlign,
             highlighted: input.highlighted,
+            highlightRanges: input.highlightRanges,
             underlined: input.underlined,
             active: input.active,
             styleProfile: input.styleProfile
@@ -544,6 +572,7 @@ export class DisplayListBuilder {
             color: blockStyle.color,
             textAlign: blockStyle.textAlign,
             highlighted: input.highlighted,
+            highlightRanges: input.highlightRanges,
             underlined: input.underlined,
             active: input.active,
             styleProfile: input.styleProfile
@@ -633,6 +662,7 @@ export class DisplayListBuilder {
             color: blockStyle.color,
             textAlign: blockStyle.textAlign,
             highlighted: input.highlighted,
+            highlightRanges: input.highlightRanges,
             underlined: input.underlined,
             active: input.active,
             styleProfile: input.styleProfile
@@ -661,20 +691,26 @@ export class DisplayListBuilder {
     color: string;
     textAlign: TextAlign;
     highlighted: boolean;
+    highlightRanges: BlockHighlightRange[];
     underlined: boolean;
     active: boolean;
     styleProfile: ReadingStyleProfile;
   }): TextRunDrawOp[] {
     const fontSize = extractFontSize(input.font);
     const lineHeight = Math.max(fontSize * 1.45, 18);
-    const lines = wrapText(input.text || "", input.width, input.font);
+    const lines = wrapTextWithOffsets(input.text || "", input.width, input.font);
     return lines.map((line, index) => {
-      const lineWidth = approximateTextWidth(line, input.font)
+      const lineWidth = approximateTextWidth(line.text, input.font)
       const lineX = this.resolveTextLineStartX(
         input.textAlign,
         input.x,
         input.width,
         lineWidth
+      )
+      const highlightSegments = resolveLineHighlightSegments(
+        input.highlightRanges,
+        line.start,
+        line.end
       )
       return {
         kind: "text",
@@ -688,7 +724,9 @@ export class DisplayListBuilder {
           width: lineWidth,
           height: lineHeight
         },
-        text: line,
+        text: line.text,
+        textStart: line.start,
+        textEnd: line.end,
         x: lineX,
         y: input.top + index * lineHeight,
         width: lineWidth,
@@ -700,6 +738,7 @@ export class DisplayListBuilder {
           : input.active
             ? input.styleProfile.highlight.active
             : undefined,
+        ...(highlightSegments.length ? { highlightSegments } : {}),
         underline: input.underlined || undefined,
         href: undefined
       }
@@ -719,20 +758,26 @@ export class DisplayListBuilder {
     color: string;
     textAlign: TextAlign;
     highlighted: boolean;
+    highlightRanges: BlockHighlightRange[];
     underlined: boolean;
     active: boolean;
     styleProfile: ReadingStyleProfile;
   }): TextRunDrawOp[] {
     const fontSize = extractFontSize(input.font)
     const lineHeight = Math.max(fontSize * 1.45, 18)
-    const lines = wrapPreformattedText(input.text || "", input.width, input.font)
+    const lines = wrapPreformattedTextWithOffsets(input.text || "", input.width, input.font)
     return lines.map((line, index) => {
-      const lineWidth = approximateTextWidth(line, input.font)
+      const lineWidth = approximateTextWidth(line.text, input.font)
       const lineX = this.resolveTextLineStartX(
         input.textAlign,
         input.x,
         input.width,
         lineWidth
+      )
+      const highlightSegments = resolveLineHighlightSegments(
+        input.highlightRanges,
+        line.start,
+        line.end
       )
       return {
         kind: "text",
@@ -746,7 +791,9 @@ export class DisplayListBuilder {
           width: lineWidth,
           height: lineHeight
         },
-        text: line,
+        text: line.text,
+        textStart: line.start,
+        textEnd: line.end,
         x: lineX,
         y: input.top + index * lineHeight,
         width: lineWidth,
@@ -758,6 +805,7 @@ export class DisplayListBuilder {
           : input.active
             ? input.styleProfile.highlight.active
             : undefined,
+        ...(highlightSegments.length ? { highlightSegments } : {}),
         underline: input.underlined || undefined,
         href: undefined
       }
@@ -1231,4 +1279,27 @@ function resolveImageIntrinsicSize(image: {
     ...(typeof width === "number" && width > 0 ? { width } : {}),
     ...(typeof height === "number" && height > 0 ? { height } : {})
   };
+}
+
+function resolveLineHighlightSegments(
+  ranges: BlockHighlightRange[],
+  lineStart: number,
+  lineEnd: number
+): BlockHighlightRange[] {
+  if (!ranges.length || lineEnd < lineStart) {
+    return []
+  }
+
+  return ranges
+    .map((range) => ({
+      start: Math.max(lineStart, range.start),
+      end: Math.min(lineEnd, range.end),
+      color: range.color
+    }))
+    .filter((range) => range.end > range.start)
+    .map((range) => ({
+      start: range.start - lineStart,
+      end: range.end - lineStart,
+      color: range.color
+    }))
 }

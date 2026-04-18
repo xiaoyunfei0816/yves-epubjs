@@ -9,9 +9,17 @@ export type DrawOpBase = {
   rect: Rect;
 };
 
+export type TextHighlightSegment = {
+  start: number;
+  end: number;
+  color: string;
+};
+
 export type TextRunDrawOp = DrawOpBase & {
   kind: "text";
   text: string;
+  textStart?: number;
+  textEnd?: number;
   x: number;
   y: number;
   width: number;
@@ -19,6 +27,7 @@ export type TextRunDrawOp = DrawOpBase & {
   color: string;
   backgroundColor: string | undefined;
   highlightColor: string | undefined;
+  highlightSegments?: TextHighlightSegment[];
   underline: boolean | undefined;
   href: string | undefined;
 };

@@ -3,6 +3,7 @@ import type {
   AnnotationViewportSnapshot,
   Locator,
   LocatorRestoreDiagnostics,
+  ReaderTextSelectionSnapshot,
   ReadingLanguageContext,
   ReadingNavigationContext,
   ReadingSpreadContext,
@@ -10,8 +11,16 @@ import type {
   RenderDiagnostics,
   TocItem,
   VisibleSectionDiagnostics
-} from "../../core/src/index"
-import type { ReaderDecorationOverlay } from "./use-reader-controller"
+} from "@pretext-epub/core"
+import type { ReaderDecorationOverlay } from "./reader-overlays"
+
+export type ReaderSelectionToolbarAction = {
+  id: string
+  label: string
+  disabled?: boolean
+  tone?: "primary" | "secondary"
+  onSelect: () => void | Promise<void>
+}
 
 export function SearchResultsPanel(props: {
   query: string
@@ -119,31 +128,39 @@ export function ReaderToolbar(props: {
 }): JSX.Element {
   return (
     <div className="reader-toolbar">
-      <ToolbarButton onClick={props.onPrevious}>Previous</ToolbarButton>
-      <ToolbarButton onClick={props.onNext}>Next</ToolbarButton>
-      <label className="page-jump">
-        <span>Page</span>
-        <input
-          type="number"
-          min="1"
-          max={props.totalPages}
-          value={props.pageValue}
-          onChange={(event) => props.onPageValueChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              void props.onGoToPage(Number(props.pageValue))
-            }
-          }}
-          className="field-input page-input"
-        />
-      </label>
-      <ToolbarButton onClick={() => props.onGoToPage(Number(props.pageValue))}>Go</ToolbarButton>
-      <ToolbarButton onClick={props.onSaveBookmark}>Save Bookmark</ToolbarButton>
-      <ToolbarButton disabled={!props.hasSavedBookmark} onClick={props.onRestoreBookmark}>
-        Restore Bookmark
-      </ToolbarButton>
-      <ToolbarButton onClick={props.onAddHighlight}>Add Highlight</ToolbarButton>
-      <ToolbarButton onClick={props.onClearHighlights}>Clear Highlights</ToolbarButton>
+      <div className="reader-toolbar-group">
+        <ToolbarButton onClick={props.onPrevious}>Previous</ToolbarButton>
+        <ToolbarButton onClick={props.onNext}>Next</ToolbarButton>
+      </div>
+      <div className="reader-toolbar-group reader-toolbar-group-page">
+        <label className="page-jump">
+          <span>Page</span>
+          <input
+            type="number"
+            min="1"
+            max={props.totalPages}
+            value={props.pageValue}
+            onChange={(event) => props.onPageValueChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                void props.onGoToPage(Number(props.pageValue))
+              }
+            }}
+            className="field-input page-input"
+          />
+        </label>
+        <ToolbarButton onClick={() => props.onGoToPage(Number(props.pageValue))}>Go</ToolbarButton>
+      </div>
+      <div className="reader-toolbar-group">
+        <ToolbarButton onClick={props.onSaveBookmark}>Save</ToolbarButton>
+        <ToolbarButton disabled={!props.hasSavedBookmark} onClick={props.onRestoreBookmark}>
+          Restore
+        </ToolbarButton>
+      </div>
+      <div className="reader-toolbar-group">
+        <ToolbarButton onClick={props.onAddHighlight}>Highlight</ToolbarButton>
+        <ToolbarButton onClick={props.onClearHighlights}>Clear</ToolbarButton>
+      </div>
     </div>
   )
 }
@@ -191,6 +208,55 @@ export function ReaderViewportOverlay(props: {
   )
 }
 
+export function ReaderSelectionToolbar(props: {
+  selection: ReaderTextSelectionSnapshot | null
+  viewportOffset: {
+    x: number
+    y: number
+  }
+  actions: ReaderSelectionToolbarAction[]
+}): JSX.Element | null {
+  if (!props.selection?.visible || props.selection.rects.length === 0 || props.actions.length === 0) {
+    return null
+  }
+
+  const anchor = resolveSelectionToolbarAnchor(props.selection.rects, props.viewportOffset)
+  return (
+    <div
+      className="reader-selection-toolbar"
+      style={{
+        left: `${anchor.x}px`,
+        top: `${anchor.y}px`
+      }}
+      onMouseDown={(event) => {
+        event.preventDefault()
+      }}
+    >
+      {props.actions.map((action) => (
+        <button
+          key={action.id}
+          type="button"
+          className={`reader-selection-toolbar-button${
+            action.tone === "secondary" ? " is-secondary" : ""
+          }`}
+          disabled={action.disabled}
+          onMouseDown={(event) => {
+            event.preventDefault()
+          }}
+          onClick={() => {
+            if (action.disabled) {
+              return
+            }
+            void action.onSelect()
+          }}
+        >
+          {action.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export function ReaderDiagnosticsPanel(props: {
   renderBackend: "canvas" | "dom" | null
   publisherStyles: "enabled" | "disabled"
@@ -204,7 +270,7 @@ export function ReaderDiagnosticsPanel(props: {
 }): JSX.Element {
   return (
     <div className="reader-diagnostics" data-render-backend={props.renderBackend ?? "none"}>
-      <div className="reader-diagnostics-header">Chapter Diagnostics</div>
+      <div className="reader-diagnostics-header">Debug Panel</div>
       <div className="reader-diagnostics-grid">
         <span>Backend</span>
         <strong>{props.renderBackend ?? "none"}</strong>
@@ -457,6 +523,39 @@ function OverlayRect(props: {
       data-label={props.label}
     />
   )
+}
+
+function resolveSelectionToolbarAnchor(
+  rects: Rect[],
+  viewportOffset: {
+    x: number
+    y: number
+  }
+): {
+  x: number
+  y: number
+} {
+  const bounds = rects.reduce(
+    (accumulator, rect) => ({
+      left: Math.min(accumulator.left, rect.x),
+      top: Math.min(accumulator.top, rect.y),
+      right: Math.max(accumulator.right, rect.x + rect.width),
+      bottom: Math.max(accumulator.bottom, rect.y + rect.height)
+    }),
+    {
+      left: Number.POSITIVE_INFINITY,
+      top: Number.POSITIVE_INFINITY,
+      right: Number.NEGATIVE_INFINITY,
+      bottom: Number.NEGATIVE_INFINITY
+    }
+  )
+
+  const centerX = (bounds.left + bounds.right) / 2 - viewportOffset.x
+  const top = bounds.top - viewportOffset.y
+  return {
+    x: centerX,
+    y: Math.max(12, top - 18)
+  }
 }
 
 function TocTree(props: {

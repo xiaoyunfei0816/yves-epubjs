@@ -237,6 +237,67 @@ describe("dom render input factory", () => {
       })
     ).toBe("")
   })
+
+  it("sanitizes remote dom resources while keeping internal resource resolution", () => {
+    const section = createSection(
+      `<?xml version="1.0"?>
+      <html>
+        <body>
+          <p>
+            <img src="https://cdn.example.com/photo.png" style="background-image: url('https://cdn.example.com/inline-bg.png')">
+          </p>
+        </body>
+      </html>`,
+      "section-remote",
+      "OPS/chapter.xhtml"
+    )
+    const input = createSharedChapterRenderInput({
+      href: section.href,
+      content: `<?xml version="1.0"?>
+      <html>
+        <body>
+          <p>
+            <img src="https://cdn.example.com/photo.png" style="background-image: url('https://cdn.example.com/inline-bg.png')">
+          </p>
+        </body>
+      </html>`,
+      linkedStyleSheets: [
+        {
+          href: "OPS/styles/book.css",
+          mediaType: "text/css",
+          text: "body { background-image: url('https://cdn.example.com/paper.png'); }",
+          ast: parseCssStyleSheet("body { background-image: url('https://cdn.example.com/paper.png'); }")
+        }
+      ]
+    })
+
+    const renderInput = createDomChapterRenderInput({
+      book: null,
+      section,
+      input,
+      theme: THEME,
+      typography: TYPOGRAPHY,
+      fontFamily: "serif",
+      publisherStyles: "enabled",
+      resolveDomResourceUrl: (path) => `asset:${path}`
+    })
+
+    expect(renderInput.linkedStyleSheets?.[0]?.text).toContain("url('data:,')")
+    expect(
+      renderInput.resolveAttributeValue?.({
+        tagName: "img",
+        attributeName: "src",
+        value: "https://cdn.example.com/photo.png"
+      })
+    ).toBe("data:,")
+    expect(
+      renderInput.resolveAttributeValue?.({
+        tagName: "img",
+        attributeName: "style",
+        value: "background-image: url('https://cdn.example.com/inline-bg.png')"
+      })
+    ).toContain("url('data:,')")
+  })
 })
 
 function createSection(content: string, id: string, href: string): SectionDocument {

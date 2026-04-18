@@ -56,7 +56,7 @@ describe("DomChapterRenderer", () => {
       linkedStyleSheets: [
         {
           href: "OPS/styles/chapter.css",
-          text: ".badge { height: 1.1em; }"
+          text: "@font-face { font-family: Demo; src: url(fonts/demo.woff2); } .badge { height: 1.1em; }"
         }
       ],
       theme: {
@@ -82,7 +82,9 @@ describe("DomChapterRenderer", () => {
     const sourceStyle = container.querySelector("style[data-epub-dom-source='OPS/styles/chapter.css']");
     const normalizationStyle = container.querySelector("style[data-epub-dom-normalization='true']");
 
-    expect(sourceStyle?.textContent).toContain(".badge { height: 1.1em; }");
+    expect(sourceStyle?.textContent).toContain(".epub-dom-section .badge");
+    expect(sourceStyle?.textContent).toContain("height:1.1em");
+    expect(sourceStyle?.textContent).not.toContain("@font-face");
     expect(sourceStyle?.compareDocumentPosition(normalizationStyle!)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     );
@@ -91,6 +93,48 @@ describe("DomChapterRenderer", () => {
 
     expect(container.querySelector("style[data-epub-dom-source]")).toBeFalsy();
   });
+
+  it("scopes inline style tags to the rendered chapter root", () => {
+    const renderer = new DomChapterRenderer()
+
+    const markup = renderer.createMarkup({
+      sectionId: "section-1",
+      sectionHref: "OPS/chapter.xhtml",
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography: {
+        fontSize: 18,
+        lineHeight: 1.6,
+        paragraphSpacing: 12
+      },
+      fontFamily: '"Iowan Old Style", serif',
+      nodes: [
+        {
+          kind: "element",
+          tagName: "style",
+          attributes: {},
+          children: [
+            {
+              kind: "text",
+              text: "@import url('theme.css'); body > main { margin: 0; } @media (min-width: 600px) { h2 { color: red; } }"
+            }
+          ]
+        },
+        {
+          kind: "element",
+          tagName: "main",
+          attributes: {},
+          children: [{ kind: "text", text: "Hello" }]
+        }
+      ]
+    })
+
+    expect(markup).not.toContain("@import")
+    expect(markup).toContain(".epub-dom-section>main{margin:0}")
+    expect(markup).toContain("@media (min-width:600px){.epub-dom-section h2{color:red}}")
+  })
 
   it("builds normalized css for theme and typography constraints", () => {
     const css = buildDomChapterNormalizationCss({

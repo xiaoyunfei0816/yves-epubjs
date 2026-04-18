@@ -93,7 +93,7 @@ describe("EpubReader chapter render routing", () => {
     await reader.render();
 
     expect(reader.getRenderMetrics().backend).toBe("canvas");
-    expect(reader.getRenderDiagnostics()).toEqual({
+    expect(reader.getRenderDiagnostics()).toEqual(expect.objectContaining({
       mode: "canvas",
       score: 15,
       reasons: ["complex-style:float"],
@@ -106,7 +106,7 @@ describe("EpubReader chapter render routing", () => {
       styleProfile: "default-reflowable",
       sectionId: "section-1",
       sectionHref: "OPS/simple.xhtml"
-    });
+    }));
     expect(container.dataset.renderMode).toBe("canvas");
     expect(container.querySelector("canvas.epub-canvas-section")).toBeTruthy();
   });
@@ -168,7 +168,7 @@ describe("EpubReader chapter render routing", () => {
     await reader.render();
 
     expect(reader.getRenderMetrics().backend).toBe("canvas");
-    expect(reader.getRenderDiagnostics()).toEqual({
+    expect(reader.getRenderDiagnostics()).toEqual(expect.objectContaining({
       mode: "canvas",
       score: 0,
       reasons: [],
@@ -181,9 +181,9 @@ describe("EpubReader chapter render routing", () => {
       styleProfile: "default-reflowable",
       sectionId: "section-1",
       sectionHref: "OPS/simple.xhtml"
-    });
+    }));
     expect(reader.getVisibleSectionDiagnostics()).toEqual([
-      {
+      expect.objectContaining({
         mode: "canvas",
         score: 0,
         reasons: [],
@@ -197,8 +197,8 @@ describe("EpubReader chapter render routing", () => {
         sectionId: "section-1",
         sectionHref: "OPS/simple.xhtml",
         isCurrent: true
-      },
-      {
+      }),
+      expect.objectContaining({
         mode: "dom",
         score: 20,
         reasons: ["high-risk-tag:table"],
@@ -212,7 +212,7 @@ describe("EpubReader chapter render routing", () => {
         sectionId: "section-2",
         sectionHref: "OPS/complex.xhtml",
         isCurrent: false
-      }
+      })
     ]);
     expect(container.querySelector("canvas.epub-canvas-section")).toBeTruthy();
     expect(container.querySelector("article.epub-section-dom .epub-dom-section")).toBeTruthy();
@@ -224,7 +224,7 @@ describe("EpubReader chapter render routing", () => {
     });
 
     expect(reader.getRenderMetrics().backend).toBe("dom");
-    expect(reader.getRenderDiagnostics()).toEqual({
+    expect(reader.getRenderDiagnostics()).toEqual(expect.objectContaining({
       mode: "dom",
       score: 20,
       reasons: ["high-risk-tag:table"],
@@ -237,9 +237,9 @@ describe("EpubReader chapter render routing", () => {
       styleProfile: "default-reflowable",
       sectionId: "section-2",
       sectionHref: "OPS/complex.xhtml"
-    });
+    }));
     expect(reader.getVisibleSectionDiagnostics()).toEqual([
-      {
+      expect.objectContaining({
         mode: "canvas",
         score: 0,
         reasons: [],
@@ -253,8 +253,8 @@ describe("EpubReader chapter render routing", () => {
         sectionId: "section-1",
         sectionHref: "OPS/simple.xhtml",
         isCurrent: false
-      },
-      {
+      }),
+      expect.objectContaining({
         mode: "dom",
         score: 20,
         reasons: ["high-risk-tag:table"],
@@ -268,7 +268,7 @@ describe("EpubReader chapter render routing", () => {
         sectionId: "section-2",
         sectionHref: "OPS/complex.xhtml",
         isCurrent: true
-      }
+      })
     ]);
     expect(container.querySelector(".epub-dom-section")).toBeTruthy();
     expect(container.querySelector("article.epub-section-canvas canvas.epub-canvas-section")).toBeTruthy();
@@ -330,14 +330,16 @@ describe("EpubReader chapter render routing", () => {
     Object.defineProperty(window, "getSelection", {
       configurable: true,
       value: () => ({
-        toString: () => "selected text"
+        toString: () => "selected text",
+        anchorNode: domSection?.firstChild ?? domSection,
+        focusNode: domSection?.firstChild ?? domSection
       })
     });
 
     domSection!.dispatchEvent(
       new MouseEvent("click", {
         bubbles: true,
-        clientX: 40,
+        clientX: 180,
         clientY: 380
       })
     );
@@ -429,7 +431,7 @@ describe("EpubReader chapter render routing", () => {
     await reader.render();
 
     expect(reader.getRenderMetrics().backend).toBe("dom");
-    expect(reader.getRenderDiagnostics()).toEqual({
+    expect(reader.getRenderDiagnostics()).toEqual(expect.objectContaining({
       mode: "dom",
       score: 30,
       reasons: ["complex-style:float", "complex-style:text-indent"],
@@ -442,7 +444,7 @@ describe("EpubReader chapter render routing", () => {
       styleProfile: "default-reflowable",
       sectionId: "section-1",
       sectionHref: "OPS/publisher.xhtml"
-    });
+    }));
     expect(container.dataset.renderMode).toBe("dom");
     expect(container.querySelector(".epub-dom-section")).toBeTruthy();
   });

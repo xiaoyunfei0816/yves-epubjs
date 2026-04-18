@@ -200,6 +200,7 @@ export function buildPageDisplayList(options: {
   theme: Theme
   typography: TypographyOptions
   highlightedBlockIds: Set<string>
+  highlightRangesByBlock?: Map<string, Array<{ start: number; end: number; color: string }>>
   underlinedBlockIds: Set<string>
   activeBlockId: string | undefined
   resolveImageLoaded: (src: string) => boolean
@@ -214,6 +215,7 @@ export function buildPageDisplayList(options: {
     typography: TypographyOptions
     locatorMap: Map<string, Locator>
     highlightedBlockIds: Set<string>
+    highlightRangesByBlock?: Map<string, Array<{ start: number; end: number; color: string }>>
     underlinedBlockIds: Set<string>
     activeBlockId: string | undefined
     resolveImageLoaded: (src: string) => boolean
@@ -264,6 +266,7 @@ export function buildPageDisplayList(options: {
     typography: options.typography,
     locatorMap,
     highlightedBlockIds: options.highlightedBlockIds,
+    ...(options.highlightRangesByBlock ? { highlightRangesByBlock: options.highlightRangesByBlock } : {}),
     underlinedBlockIds: options.underlinedBlockIds,
     activeBlockId: options.activeBlockId,
     resolveImageLoaded: options.resolveImageLoaded,

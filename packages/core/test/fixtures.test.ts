@@ -18,8 +18,8 @@ describe("test fixtures", () => {
     };
 
     expect(fixture.id).toBe("minimal-book");
-    expect(fixture.title).toBe("Minimal Book Fixture");
-    expect(fixture.status).toBe("placeholder");
+    expect(fixture.title).toBe("Playwright Smoke Book");
+    expect(fixture.status).toBe("active");
   });
 
   it("reads the reflowable compatibility fixture metadata", () => {

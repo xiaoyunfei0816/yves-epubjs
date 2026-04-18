@@ -411,6 +411,16 @@ export type LocatorPrecision =
   | "anchor"
   | "cfi";
 
+export type TextRangePoint = {
+  blockId: string;
+  inlineOffset: number;
+};
+
+export type TextRangeSelector = {
+  start: TextRangePoint;
+  end: TextRangePoint;
+};
+
 export type DecorationStyle = "highlight" | "underline" | "search-hit" | "active";
 
 export type DecorationRenderHint = "margin-marker" | "note-icon";
@@ -418,6 +428,7 @@ export type DecorationRenderHint = "margin-marker" | "note-icon";
 export type DecorationExtras = {
   renderHint?: DecorationRenderHint;
   label?: string;
+  textRange?: TextRangeSelector;
 };
 
 export type Decoration = {
@@ -442,6 +453,7 @@ export type Annotation = {
   id: string;
   publicationId: string;
   locator: SerializedLocator;
+  textRange?: TextRangeSelector;
   quote?: string;
   note?: string;
   color?: string;
@@ -454,6 +466,23 @@ export type AnnotationViewportSnapshot = {
   resolvedLocator: Locator | null;
   rects: VisibleDrawBounds;
   visible: boolean;
+};
+
+export type ReaderTextSelectionSnapshot = {
+  text: string;
+  locator: Locator;
+  sectionId: string;
+  blockId?: string;
+  textRange?: TextRangeSelector;
+  rects: VisibleDrawBounds;
+  visible: boolean;
+};
+
+export type SelectionHighlightActionMode = "highlight" | "remove-highlight";
+
+export type ReaderSelectionHighlightState = {
+  mode: SelectionHighlightActionMode;
+  disabled: boolean;
 };
 
 export type AccessibilityEntry = {
@@ -605,6 +634,22 @@ export type ReaderEventMap = {
   opened: { book: Book };
   rendered: { mode: ReadingMode };
   relocated: { locator: Locator | null };
+  textSelectionChanged: {
+    selection: ReaderTextSelectionSnapshot | null;
+  };
+  externalLinkActivated: {
+    href: string;
+    scheme: string;
+    source: "dom" | "canvas";
+    text?: string;
+    sectionId?: string;
+    blockId?: string;
+  };
+  externalLinkBlocked: {
+    href: string;
+    scheme: string;
+    reason: "unsafe-scheme";
+  };
   preferencesChanged: {
     preferences: ReaderPreferences;
     settings: ReaderSettings;
@@ -623,4 +668,8 @@ export type ReaderOptions = {
   mode?: ReadingMode;
   theme?: Partial<Theme>;
   typography?: Partial<TypographyOptions>;
+  onTextSelectionChanged?: (
+    input: ReaderEventMap["textSelectionChanged"]
+  ) => void | Promise<void>;
+  onExternalLink?: (input: ReaderEventMap["externalLinkActivated"]) => void | Promise<void>;
 };

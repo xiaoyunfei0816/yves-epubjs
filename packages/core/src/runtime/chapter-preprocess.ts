@@ -75,6 +75,10 @@ function preprocessChapterNode(node: HtmlDomNode): PreprocessedChapterNode | nul
     return null;
   }
 
+  if (isUnsafeChapterTag(getHtmlTagName(node))) {
+    return null
+  }
+
   return {
     kind: "element",
     tagName: getHtmlTagName(node),
@@ -87,6 +91,10 @@ function normalizeAttributes(attributes: Record<string, string>): Record<string,
   const normalized: Record<string, string> = {};
 
   for (const [name, value] of Object.entries(attributes)) {
+    if (isUnsafeAttributeName(name)) {
+      continue
+    }
+
     const trimmedValue = value.trim();
     if (!trimmedValue) {
       continue;
@@ -96,4 +104,12 @@ function normalizeAttributes(attributes: Record<string, string>): Record<string,
   }
 
   return normalized;
+}
+
+function isUnsafeChapterTag(tagName: string): boolean {
+  return tagName.trim().toLowerCase() === "script"
+}
+
+function isUnsafeAttributeName(attributeName: string): boolean {
+  return attributeName.trim().toLowerCase().startsWith("on")
 }

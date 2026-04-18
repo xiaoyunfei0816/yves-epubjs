@@ -8,39 +8,40 @@ import {
 } from "react"
 import {
   type AnnotationViewportSnapshot,
-  deserializeReaderPreferences,
-  deserializeBookmark,
+  type Bookmark,
   EpubReader,
   type Locator,
   type LocatorRestoreDiagnostics,
-  mergeReaderPreferences,
-  normalizeReaderPreferences,
   type ReadingLanguageContext,
   type ReadingNavigationContext,
   type ReadingSpreadContext,
-  resolveReaderSettings,
-  type ReaderPreferences,
   type ReaderSettings,
   type PublisherStylesMode,
-  serializeBookmark,
-  type Bookmark,
+  type ReaderSelectionHighlightState,
+  type ReaderTextSelectionSnapshot,
   type PaginationInfo,
   type RenderDiagnostics,
+  resolveReaderSettings,
   type SearchResult,
   type Theme,
   type TocItem,
-  type VisibleDrawBounds,
   type VisibleSectionDiagnostics
-} from "../../core/src/index"
+} from "@pretext-epub/core"
+import { openExternalLink, readViewportOffset } from "./reader-host-actions"
+import {
+  buildAnnotationOverlays,
+  buildSearchOverlays,
+  type ReaderDecorationOverlay
+} from "./reader-overlays"
+import {
+  defaultFontFamily,
+  loadBookmark,
+  loadStoredGlobalReaderPreferences,
+  loadStoredReaderPreferences,
+  persistBookmark,
+  persistReaderPreferences
+} from "./reader-storage"
 import { findActiveTocId } from "./toc-active"
-
-export type ReaderDecorationOverlay = {
-  id: string
-  label: string
-  style: "search-hit" | "annotation"
-  rects: VisibleDrawBounds
-  visible: boolean
-}
 
 export type ReaderSnapshot = {
   metaText: string
@@ -56,6 +57,8 @@ export type ReaderSnapshot = {
   visibleSectionDiagnostics: VisibleSectionDiagnostics[]
   searchOverlays: ReaderDecorationOverlay[]
   annotationOverlays: AnnotationViewportSnapshot[]
+  textSelection: ReaderTextSelectionSnapshot | null
+  selectionHighlightState: ReaderSelectionHighlightState | null
   viewportOffset: {
     x: number
     y: number
@@ -107,14 +110,13 @@ const INITIAL_SNAPSHOT: ReaderSnapshot = {
   visibleSectionDiagnostics: [],
   searchOverlays: [],
   annotationOverlays: [],
+  textSelection: null,
+  selectionHighlightState: null,
   viewportOffset: {
     x: 0,
     y: 0
   }
 }
-
-const DEMO_GLOBAL_PREFERENCES_STORAGE_KEY = "pretext-epub:preferences:global"
-
 export function useReaderController(
   containerRef: RefObject<HTMLDivElement | null>
 ): {
@@ -139,6 +141,7 @@ export function useReaderController(
   setExpandedTocIds: Dispatch<SetStateAction<Set<string>>>
   setLightbox: Dispatch<SetStateAction<{ src: string; alt: string } | null>>
   clearSearchResults: () => void
+  clearTextSelection: () => void
   openFile: (file: File) => Promise<void>
   goToPage: (page: number) => Promise<void>
   performSearch: (query: string) => Promise<void>
@@ -157,6 +160,8 @@ export function useReaderController(
   saveBookmark: () => Promise<void>
   restoreSavedBookmark: () => Promise<void>
   addHighlight: () => Promise<void>
+  applySelectionHighlightAction: () => Promise<boolean>
+  setDebugMode: (enabled: boolean) => void
   clearHighlights: () => void
 } {
   const readerRef = useRef<EpubReader | null>(null)
@@ -207,7 +212,12 @@ export function useReaderController(
       return
     }
 
-    const reader = new EpubReader({ container })
+    const reader = new EpubReader({
+      container,
+      onExternalLink: ({ href }) => {
+        openExternalLink(href)
+      }
+    })
     readerRef.current = reader
 
     const syncSnapshot = (): void => {
@@ -221,11 +231,10 @@ export function useReaderController(
       const diagnostics = reader.getRenderDiagnostics()
       const visibleSectionDiagnostics = reader.getVisibleSectionDiagnostics()
       const searchOverlays = buildSearchOverlays(reader)
-      const annotationOverlays = reader.getAnnotationViewportSnapshots()
-      const viewportOffset = {
-        x: container.scrollLeft,
-        y: container.scrollTop
-      }
+      const annotationOverlays = buildAnnotationOverlays(reader)
+      const textSelection = reader.getCurrentTextSelectionSnapshot()
+      const selectionHighlightState = reader.getCurrentSelectionHighlightState()
+      const viewportOffset = readViewportOffset(container)
       const baseSnapshot = {
         pagination: reader.getPaginationInfo(),
         toc: book?.toc ?? [],
@@ -239,6 +248,8 @@ export function useReaderController(
         visibleSectionDiagnostics,
         searchOverlays,
         annotationOverlays,
+        textSelection,
+        selectionHighlightState,
         viewportOffset
       } satisfies Omit<ReaderSnapshot, "metaText">
 
@@ -297,6 +308,13 @@ export function useReaderController(
     })
     const offRelocated = reader.on("relocated", syncSnapshot)
     const offRendered = reader.on("rendered", syncSnapshot)
+    const offTextSelectionChanged = reader.on("textSelectionChanged", ({ selection }) => {
+      setSnapshot((current) => ({
+        ...current,
+        textSelection: selection,
+        selectionHighlightState: reader.getCurrentSelectionHighlightState()
+      }))
+    })
     const offTypography = reader.on("typographyChanged", syncSnapshot)
     const offSearch = reader.on("searchCompleted", ({ results: nextResults }) => {
       setResults(nextResults)
@@ -326,10 +344,7 @@ export function useReaderController(
     const handleReaderScroll = (): void => {
       setSnapshot((current) => ({
         ...current,
-        viewportOffset: {
-          x: container.scrollLeft,
-          y: container.scrollTop
-        }
+        viewportOffset: readViewportOffset(container)
       }))
     }
     container.addEventListener("scroll", handleReaderScroll)
@@ -350,6 +365,7 @@ export function useReaderController(
       container.removeEventListener("scroll", handleReaderScroll)
       offSearch()
       offTypography()
+      offTextSelectionChanged()
       offRendered()
       offRelocated()
       offOpened()
@@ -541,9 +557,29 @@ export function useReaderController(
     syncSnapshotRef.current?.()
   }
 
+  function clearTextSelection(): void {
+    readerRef.current?.clearCurrentTextSelection()
+  }
+
   async function addHighlight(): Promise<void> {
     const reader = readerRef.current
     if (!reader) {
+      return
+    }
+
+    if (await applySelectionHighlightAction()) {
+      return
+    }
+
+    const selectionAnnotation = reader.createAnnotationFromSelection({
+      color: "#3b82f6"
+    })
+    if (selectionAnnotation) {
+      reader.addAnnotation(selectionAnnotation)
+      syncSnapshotRef.current?.()
+      setHighlightStatus(
+        `Highlight saved from selection · ${new Date(selectionAnnotation.createdAt).toLocaleTimeString()}`
+      )
       return
     }
 
@@ -565,6 +601,39 @@ export function useReaderController(
 
     reader.addAnnotation(annotation)
     setHighlightStatus(`Highlight saved · ${new Date(annotation.createdAt).toLocaleTimeString()}`)
+    syncSnapshotRef.current?.()
+  }
+
+  async function applySelectionHighlightAction(): Promise<boolean> {
+    const reader = readerRef.current
+    if (!reader || !reader.getCurrentTextSelectionSnapshot()) {
+      return false
+    }
+
+    const result = reader.applyCurrentSelectionHighlightAction({
+      color: "#3b82f6"
+    })
+    syncSnapshotRef.current?.()
+    if (!result) {
+      setHighlightStatus("Highlight action failed")
+      return true
+    }
+
+    if (result.mode === "remove-highlight") {
+      setHighlightStatus(
+        result.changedCount > 0 ? "Highlight removed from selection" : "Selection was not changed"
+      )
+      return true
+    }
+
+    setHighlightStatus(
+      result.changedCount > 0 ? "Highlight saved from selection" : "Selection already highlighted"
+    )
+    return true
+  }
+
+  function setDebugMode(enabled: boolean): void {
+    readerRef.current?.setDebugMode(enabled)
     syncSnapshotRef.current?.()
   }
 
@@ -596,6 +665,7 @@ export function useReaderController(
     setExpandedTocIds,
     setLightbox,
     clearSearchResults,
+    clearTextSelection,
     openFile,
     goToPage,
     performSearch,
@@ -614,88 +684,10 @@ export function useReaderController(
     saveBookmark,
     restoreSavedBookmark,
     addHighlight,
+    applySelectionHighlightAction,
+    setDebugMode,
     clearHighlights
   }
-}
-
-function buildSearchOverlays(reader: EpubReader): ReaderDecorationOverlay[] {
-  return reader.getDecorations("search-results").map((decoration) => {
-    const rects = reader.mapLocatorToViewport(decoration.locator)
-    return {
-      id: decoration.id,
-      label: decoration.locator.blockId ?? decoration.locator.anchorId ?? "search-hit",
-      style: "search-hit",
-      rects,
-      visible: rects.length > 0
-    }
-  })
-}
-
-function bookmarkStorageKey(publicationId: string): string {
-  return `pretext-epub:bookmark:${publicationId}`
-}
-
-function persistBookmark(bookmark: Bookmark): void {
-  if (typeof window === "undefined") {
-    return
-  }
-
-  window.localStorage.setItem(bookmarkStorageKey(bookmark.publicationId), serializeBookmark(bookmark))
-}
-
-function loadBookmark(publicationId: string): Bookmark | null {
-  if (typeof window === "undefined") {
-    return null
-  }
-
-  return deserializeBookmark(window.localStorage.getItem(bookmarkStorageKey(publicationId)))
-}
-
-function persistReaderPreferences(input: {
-  preferences: ReaderPreferences
-  publicationId?: string
-}): void {
-  if (typeof window === "undefined") {
-    return
-  }
-
-  const normalized = normalizeReaderPreferences(input.preferences)
-  const globalPreferences = pickGlobalReaderPreferences(normalized)
-  const bookPreferences = pickPublicationReaderPreferences(normalized)
-
-  window.localStorage.setItem(
-    DEMO_GLOBAL_PREFERENCES_STORAGE_KEY,
-    JSON.stringify(globalPreferences)
-  )
-
-  if (input.publicationId) {
-    window.localStorage.setItem(
-      readerPreferenceStorageKey(input.publicationId),
-      JSON.stringify(bookPreferences)
-    )
-  }
-}
-
-function loadStoredGlobalReaderPreferences(): ReaderPreferences | null {
-  if (typeof window === "undefined") {
-    return null
-  }
-
-  return deserializeReaderPreferences(
-    window.localStorage.getItem(DEMO_GLOBAL_PREFERENCES_STORAGE_KEY)
-  )
-}
-
-function loadStoredReaderPreferences(publicationId?: string): ReaderPreferences | null {
-  const globalPreferences = loadStoredGlobalReaderPreferences()
-  if (typeof window === "undefined" || !publicationId) {
-    return globalPreferences
-  }
-
-  const bookPreferences = deserializeReaderPreferences(
-    window.localStorage.getItem(readerPreferenceStorageKey(publicationId))
-  )
-  return mergeReaderPreferences(globalPreferences, bookPreferences)
 }
 
 function getInitialDemoPreferenceState(): DemoPreferenceState {
@@ -710,32 +702,6 @@ function getInitialDemoPreferenceState(): DemoPreferenceState {
     letterSpacing: settings.typography.letterSpacing ?? 0,
     wordSpacing: settings.typography.wordSpacing ?? 0
   }
-}
-
-function readerPreferenceStorageKey(publicationId: string): string {
-  return `pretext-epub:preferences:book:${publicationId}`
-}
-
-function pickGlobalReaderPreferences(preferences: ReaderPreferences): ReaderPreferences {
-  return normalizeReaderPreferences({
-    ...(preferences.theme ? { theme: preferences.theme } : {}),
-    ...(preferences.typography ? { typography: preferences.typography } : {})
-  })
-}
-
-function pickPublicationReaderPreferences(preferences: ReaderPreferences): ReaderPreferences {
-  return normalizeReaderPreferences({
-    ...(preferences.mode ? { mode: preferences.mode } : {}),
-    ...(preferences.publisherStyles ? { publisherStyles: preferences.publisherStyles } : {}),
-    ...(preferences.experimentalRtl !== undefined
-      ? { experimentalRtl: preferences.experimentalRtl }
-      : {}),
-    ...(preferences.spreadMode ? { spreadMode: preferences.spreadMode } : {})
-  })
-}
-
-function defaultFontFamily(): string {
-  return '"Iowan Old Style", "Palatino Linotype", serif'
 }
 
 function resolveThemeKey(theme: Theme): ThemeKey {

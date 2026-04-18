@@ -25,6 +25,7 @@ import { normalizePreformattedText } from "../utils/preformatted-text"
 import type { CssAstStyleSheet } from "./css-ast-adapter"
 import { resolveElementStyle, resolveElementTextStyle } from "./style-resolver"
 import { parseXhtmlDomDocument } from "./xhtml-dom-parser"
+import { classifyNavigationHref } from "../runtime/external-boundary"
 
 function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ")
@@ -198,7 +199,7 @@ function parseInlineNodes(
         const hrefAttribute = getHtmlElementAttribute(node, "href")
         const linkNode: InlineNode = {
           kind: "link",
-          href: hrefAttribute ? resolveResourcePath(sectionHref, hrefAttribute) : "",
+          href: hrefAttribute ? resolveInlineLinkHref(sectionHref, hrefAttribute) : "",
           children: parseInlineNodes(childNodes, sectionHref, stylesheets),
           ...getInlineNodeMetadata(node, stylesheets)
         }
@@ -261,6 +262,20 @@ function parseInlineNodes(
   }
 
   return inlines
+}
+
+function resolveInlineLinkHref(sectionHref: string, href: string): string {
+  const normalizedHref = href.trim()
+  if (!normalizedHref) {
+    return ""
+  }
+
+  const resolution = classifyNavigationHref(normalizedHref)
+  if (resolution.kind !== "internal") {
+    return normalizedHref
+  }
+
+  return resolveResourcePath(sectionHref, normalizedHref)
 }
 
 class XhtmlBlockParser {

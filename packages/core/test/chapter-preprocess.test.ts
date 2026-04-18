@@ -93,4 +93,37 @@ describe("chapter preprocess", () => {
       ]
     } satisfies PreprocessedChapter);
   });
+
+  it("drops script nodes and inline event handler attributes from DOM preprocessing", () => {
+    const chapter = preprocessChapterDocument({
+      href: "OPS/unsafe.xhtml",
+      content: `<?xml version="1.0" encoding="utf-8"?>
+        <html xmlns="http://www.w3.org/1999/xhtml">
+          <body>
+            <section onclick="window.__hostLeak = true">
+              <script>window.__hostLeak = true</script>
+              <a href="#note" onmouseover="alert(1)">Safe link</a>
+            </section>
+          </body>
+        </html>`
+    })
+
+    expect(chapter.nodes).toEqual([
+      {
+        kind: "element",
+        tagName: "section",
+        attributes: {},
+        children: [
+          {
+            kind: "element",
+            tagName: "a",
+            attributes: {
+              href: "#note"
+            },
+            children: [{ kind: "text", text: "Safe link" }]
+          }
+        ]
+      }
+    ] satisfies PreprocessedChapter["nodes"])
+  })
 });

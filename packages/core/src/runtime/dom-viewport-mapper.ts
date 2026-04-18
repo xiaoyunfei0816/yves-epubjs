@@ -3,6 +3,7 @@ import type {
   Point,
   ReadingMode,
   Rect,
+  TextRangeSelector,
   SectionDocument
 } from "../model/types"
 import { normalizeLocator } from "./locator"
@@ -23,6 +24,13 @@ type DomPointLocatorInput = {
   section: SectionDocument
   spineIndex: number
   point: Point
+}
+
+type DomTextRangeViewportInput = {
+  container: HTMLElement
+  mode: ReadingMode
+  sectionElement: HTMLElement
+  textRange: TextRangeSelector
 }
 
 export type DomPointHitTarget = {
@@ -49,6 +57,37 @@ export function mapDomLocatorToViewport(input: DomLocatorViewportInput): Rect[] 
       progressInSection: input.locator.progressInSection ?? 0
     })
   ]
+}
+
+export function mapDomTextRangeToViewport(input: DomTextRangeViewportInput): Rect[] {
+  const startElement = findRenderedBlockTarget(input.sectionElement, input.textRange.start.blockId)
+  const endElement = findRenderedBlockTarget(input.sectionElement, input.textRange.end.blockId)
+  if (!startElement || !endElement) {
+    return []
+  }
+
+  const startPosition = resolveTextNodePosition(startElement, input.textRange.start.inlineOffset)
+  const endPosition = resolveTextNodePosition(endElement, input.textRange.end.inlineOffset)
+  if (!startPosition || !endPosition) {
+    return []
+  }
+
+  const range = document.createRange()
+  range.setStart(startPosition.node, startPosition.offset)
+  range.setEnd(endPosition.node, endPosition.offset)
+  const containerRect = input.container.getBoundingClientRect()
+
+  return Array.from(range.getClientRects())
+    .filter((rect) => rect.width > 0 && rect.height > 0)
+    .map((rect) => ({
+      x: rect.left - containerRect.left + input.container.scrollLeft,
+      y:
+        input.mode === "scroll"
+          ? rect.top - containerRect.top + input.container.scrollTop
+          : rect.top - containerRect.top,
+      width: rect.width,
+      height: rect.height
+    }))
 }
 
 export function mapDomPointToLocator(input: DomPointLocatorInput): Locator {
@@ -173,6 +212,7 @@ function findRenderedBlockTarget(
   const selectorValue = escapeAttributeSelectorValue(normalizedBlockId)
   return (
     sectionElement.querySelector<HTMLElement>(`[id="${selectorValue}"]`) ??
+    sectionElement.querySelector<HTMLElement>(`[data-reader-block-id="${selectorValue}"]`) ??
     null
   )
 }
@@ -194,6 +234,52 @@ function measureElementRectWithinContainer(
     width: elementRect.width,
     height: elementRect.height
   }
+}
+
+function resolveTextNodePosition(
+  root: HTMLElement,
+  inlineOffset: number
+): {
+  node: Text
+  offset: number
+} | null {
+  const textNodes = collectTextNodes(root)
+  if (textNodes.length === 0) {
+    return null
+  }
+
+  let remaining = Math.max(0, Math.trunc(inlineOffset))
+  for (const textNode of textNodes) {
+    const length = textNode.textContent?.length ?? 0
+    if (remaining <= length) {
+      return {
+        node: textNode,
+        offset: remaining
+      }
+    }
+    remaining -= length
+  }
+
+  const last = textNodes.at(-1)
+  return last
+    ? {
+        node: last,
+        offset: last.textContent?.length ?? 0
+      }
+    : null
+}
+
+function collectTextNodes(root: Node): Text[] {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  const nodes: Text[] = []
+  let current = walker.nextNode()
+  while (current) {
+    if (current instanceof Text) {
+      nodes.push(current)
+    }
+    current = walker.nextNode()
+  }
+  return nodes
 }
 
 function findDomTargetContainingPoint(input: {
@@ -244,7 +330,7 @@ function findDomTargetContainingPoint(input: {
 }
 
 function collectDomGeometryTargets(sectionRoot: HTMLElement): HTMLElement[] {
-  const targets = sectionRoot.querySelectorAll<HTMLElement>("[id], a[name]")
+  const targets = sectionRoot.querySelectorAll<HTMLElement>("[id], [data-reader-block-id], a[name]")
   const elements = Array.from(targets)
 
   if (sectionRoot.id || sectionRoot.getAttribute("name")) {
@@ -256,7 +342,7 @@ function collectDomGeometryTargets(sectionRoot: HTMLElement): HTMLElement[] {
 
 function collectDomHitTargets(sectionRoot: HTMLElement): HTMLElement[] {
   const targets = sectionRoot.querySelectorAll<HTMLElement>(
-    'a[href], img, image, [id], [name]'
+    'a[href], img, image, [id], [data-reader-block-id], [name]'
   )
   const elements = Array.from(targets)
 
@@ -298,8 +384,9 @@ function resolveBlockIdForElement(
   element: HTMLElement,
   sectionRoot: HTMLElement
 ): string | undefined {
-  const identifiedTarget = element.closest<HTMLElement>("[id]")
-  const blockId = identifiedTarget?.id?.trim()
+  const identifiedTarget = element.closest<HTMLElement>("[id], [data-reader-block-id]")
+  const blockId =
+    identifiedTarget?.dataset.readerBlockId?.trim() || identifiedTarget?.id?.trim()
   if (blockId) {
     return blockId
   }

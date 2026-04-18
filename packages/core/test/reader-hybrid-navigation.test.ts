@@ -550,7 +550,7 @@ describe("EpubReader hybrid navigation", () => {
         new MouseEvent("click", {
           bubbles: true,
           cancelable: true,
-          clientX: 24,
+          clientX: 180,
           clientY: 244
         })
       );

@@ -32,6 +32,7 @@ export type LayoutInlineFragment = {
   text: string;
   font: string;
   gapBefore: number;
+  width?: number;
   color?: string;
   backgroundColor?: string;
   image?: {
@@ -375,7 +376,12 @@ export class LayoutEngine {
         const options = sourceToFragmentOptions(sources[fragment.itemIndex]);
         return this.createSourceFragment(
           options.image ? "" : fragment.text,
-          options,
+          options.image
+            ? options
+            : {
+                ...options,
+                width: Math.max(0, fragment.occupiedWidth)
+              },
           fragment.gapBefore
         );
       })
@@ -949,6 +955,7 @@ export class LayoutEngine {
     text: string,
     options: {
       font: string;
+      width?: number;
       color?: string;
       backgroundColor?: string;
       href?: string;
@@ -972,6 +979,7 @@ export class LayoutEngine {
       text,
       font: options.font,
       gapBefore,
+      ...(typeof options.width === "number" ? { width: options.width } : {}),
       ...(options.color ? { color: options.color } : {}),
       ...(options.backgroundColor
         ? { backgroundColor: options.backgroundColor }
@@ -1017,6 +1025,7 @@ export class LayoutEngine {
 
 function sourceToFragmentOptions(source: RichInlineSource | undefined): {
   font: string;
+  width?: number;
   color?: string;
   backgroundColor?: string;
   href?: string;
@@ -1042,6 +1051,7 @@ function sourceToFragmentOptions(source: RichInlineSource | undefined): {
 
   return {
     font: source.font,
+    ...(typeof source.width === "number" ? { width: source.width } : {}),
     ...(source.color ? { color: source.color } : {}),
     ...(source.backgroundColor
       ? { backgroundColor: source.backgroundColor }

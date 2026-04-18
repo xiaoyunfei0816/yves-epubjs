@@ -193,7 +193,7 @@ describe("parseXhtmlDocument", () => {
             <img src="Image00122.jpg" width="644" height="219" />
           </p>
           <p align="center">
-            <font size="2" color="#663300"><b>图1.3　简历中描述项目的STAR模型</b></font>
+            <font size="2" color="#663300"><b>图1.3 简历中描述项目的STAR模型</b></font>
           </p>
         </body>
       </html>`
@@ -362,6 +362,31 @@ describe("parseXhtmlDocument", () => {
     expect(section.blocks[1]).toMatchObject({ kind: "aside" });
     expect(section.anchors["fn-1"]).toBe("aside-2");
   });
+
+  it("preserves external anchor hrefs instead of rewriting them as book-relative paths", () => {
+    const xml = `<?xml version="1.0"?>
+      <html>
+        <body>
+          <p><a href="https://example.com/docs">Docs</a><a href="mailto:reader@example.com">Mail</a></p>
+        </body>
+      </html>`
+
+    const section = parseXhtmlDocument(xml, "OPS/chapter.xhtml")
+
+    expect(section.blocks[0]).toMatchObject({
+      kind: "text",
+      inlines: [
+        {
+          kind: "link",
+          href: "https://example.com/docs"
+        },
+        {
+          kind: "link",
+          href: "mailto:reader@example.com"
+        }
+      ]
+    })
+  })
 
   it("falls back unknown block tags to child content and preserves supported inline style metadata", () => {
     const xml = `<?xml version="1.0"?>

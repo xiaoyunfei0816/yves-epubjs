@@ -77,6 +77,20 @@ function normalizeDecorations(group: string, decorations: Decoration[]): Decorat
 function normalizeDecorationExtras(extras: NonNullable<Decoration["extras"]>): NonNullable<Decoration["extras"]> {
   return {
     ...(extras.renderHint ? { renderHint: extras.renderHint } : {}),
-    ...(extras.label?.trim() ? { label: extras.label.trim() } : {})
+    ...(extras.label?.trim() ? { label: extras.label.trim() } : {}),
+    ...(extras.textRange
+      ? {
+          textRange: {
+            start: {
+              blockId: extras.textRange.start.blockId.trim(),
+              inlineOffset: Math.max(0, Math.trunc(extras.textRange.start.inlineOffset))
+            },
+            end: {
+              blockId: extras.textRange.end.blockId.trim(),
+              inlineOffset: Math.max(0, Math.trunc(extras.textRange.end.inlineOffset))
+            }
+          }
+        }
+      : {})
   }
 }

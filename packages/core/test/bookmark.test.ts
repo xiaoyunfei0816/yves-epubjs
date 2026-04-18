@@ -90,4 +90,42 @@ describe("bookmark helpers", () => {
     })
     expect(deserializeBookmark(serializeBookmark(bookmark))).toEqual(bookmark)
   })
+
+  it("does not synthesize a cfi for progress-only bookmarks", () => {
+    const section: SectionDocument = {
+      id: "section-1",
+      href: "OPS/chapter-1.xhtml",
+      title: "Chapter 1",
+      anchors: {},
+      blocks: [
+        {
+          id: "text-1",
+          kind: "text",
+          inlines: [{ kind: "text", text: "Alpha" }]
+        },
+        {
+          id: "text-2",
+          kind: "text",
+          inlines: [{ kind: "text", text: "Beta" }]
+        }
+      ]
+    }
+    const book = createBook(section)
+
+    const bookmark = createBookmark({
+      publicationId: derivePublicationId({ book }),
+      locator: {
+        spineIndex: 0,
+        progressInSection: 0.25
+      },
+      book,
+      createdAt: "2026-04-18T10:00:00.000Z"
+    })
+
+    expect(bookmark.locator).toEqual({
+      spineIndex: 0,
+      href: "OPS/chapter-1.xhtml",
+      progressInSection: 0.25
+    })
+  })
 })

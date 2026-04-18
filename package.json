@@ -8,10 +8,11 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "ci:check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
+    "check:boundaries": "node scripts/check-package-boundaries.mjs",
+    "ci:check": "pnpm typecheck && pnpm check:boundaries && pnpm lint && pnpm test && pnpm build",
     "dev": "pnpm --filter @pretext-epub/demo dev",
     "typecheck": "pnpm -r typecheck",
-    "lint": "eslint . --ext .ts",
+    "lint": "eslint . --ext .ts,.tsx,.js,.mjs,.cjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

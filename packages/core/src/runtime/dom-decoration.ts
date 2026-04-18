@@ -1,7 +1,10 @@
 import type { Decoration } from "../model/types"
+import { mapDomTextRangeToViewport } from "./dom-viewport-mapper"
 import { findRenderedAnchorTarget } from "./navigation-target"
+import { toTransparentHighlightColor } from "./reader-domain"
 
 const DECORATION_STYLE_TAG_SELECTOR = "style[data-epub-dom-decorations='true']"
+const DECORATION_OVERLAY_LAYER_SELECTOR = "[data-epub-dom-decoration-layer='true']"
 const DECORATION_CLASSES = [
   "epub-dom-decoration-highlight",
   "epub-dom-decoration-underline",
@@ -14,6 +17,7 @@ const DECORATION_CLASSES = [
 export function applyDomDecorations(input: {
   container: HTMLElement
   sectionElement: HTMLElement
+  mode?: "scroll" | "paginated"
   decorations: Decoration[]
 }): void {
   clearDomDecorations(input.container, input.sectionElement)
@@ -23,6 +27,18 @@ export function applyDomDecorations(input: {
 
   ensureDomDecorationStyleTag(input.container)
   for (const decoration of input.decorations) {
+    if (decoration.style === "highlight" && decoration.extras?.textRange) {
+      const rendered = renderPreciseTextRangeDecoration(
+        input.container,
+        input.sectionElement,
+        input.mode ?? "paginated",
+        decoration
+      )
+      if (rendered) {
+        continue
+      }
+    }
+
     const target = resolveDomDecorationTarget(input.sectionElement, decoration)
     target.classList.add(toDomDecorationClass(decoration.style))
     const hintClass = toDomDecorationHintClass(decoration)
@@ -37,6 +53,9 @@ export function applyDomDecorations(input: {
 
 export function clearDomDecorations(container: HTMLElement, sectionElement?: HTMLElement): void {
   const scope = sectionElement ?? container
+  scope
+    .querySelectorAll<HTMLElement>(DECORATION_OVERLAY_LAYER_SELECTOR)
+    .forEach((element) => element.remove())
   for (const className of DECORATION_CLASSES) {
     scope
       .querySelectorAll<HTMLElement>(`.${className}`)
@@ -55,6 +74,21 @@ function ensureDomDecorationStyleTag(container: HTMLElement): void {
   const style = document.createElement("style")
   style.dataset.epubDomDecorations = "true"
   style.textContent = `
+    .epub-dom-section {
+      position: relative;
+    }
+    .epub-dom-decoration-overlay-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 8;
+    }
+    .epub-dom-decoration-overlay-rect {
+      position: absolute;
+      border-radius: 0.18em;
+      background: rgba(59, 130, 246, 0.22);
+      pointer-events: none;
+    }
     .epub-dom-decoration-highlight {
       background: rgba(59, 130, 246, 0.14);
       border-radius: 0.2em;
@@ -98,14 +132,73 @@ function resolveDomDecorationTarget(
   }
 
   if (decoration.locator.blockId) {
-    const selectorValue = escapeAttributeSelectorValue(decoration.locator.blockId)
-    const blockTarget = sectionElement.querySelector<HTMLElement>(`[id="${selectorValue}"]`)
+    const blockTarget = findBlockElement(sectionElement, decoration.locator.blockId)
     if (blockTarget) {
       return blockTarget
     }
   }
 
   return sectionElement
+}
+
+function renderPreciseTextRangeDecoration(
+  container: HTMLElement,
+  sectionElement: HTMLElement,
+  mode: "scroll" | "paginated",
+  decoration: Decoration
+): boolean {
+  const textRange = decoration.extras?.textRange
+  if (!textRange) {
+    return false
+  }
+
+  const rects = mapDomTextRangeToViewport({
+    container,
+    mode,
+    sectionElement,
+    textRange
+  })
+  if (rects.length === 0) {
+    return false
+  }
+
+  const layer = ensureDomDecorationOverlayLayer(sectionElement)
+  for (const rect of rects) {
+    const overlay = document.createElement("span")
+    overlay.className = "epub-dom-decoration-overlay-rect"
+    const sectionRect = sectionElement.getBoundingClientRect()
+    const containerRect = container.getBoundingClientRect()
+    const localX = rect.x - container.scrollLeft - (sectionRect.left - containerRect.left)
+    const localY = rect.y - container.scrollTop - (sectionRect.top - containerRect.top)
+    overlay.style.left = `${localX}px`
+    overlay.style.top = `${localY}px`
+    overlay.style.width = `${rect.width}px`
+    overlay.style.height = `${rect.height}px`
+    overlay.style.background = toTransparentHighlightColor(decoration.color)
+    layer.appendChild(overlay)
+  }
+  return true
+}
+
+function ensureDomDecorationOverlayLayer(sectionElement: HTMLElement): HTMLElement {
+  const existing = sectionElement.querySelector<HTMLElement>(DECORATION_OVERLAY_LAYER_SELECTOR)
+  if (existing) {
+    return existing
+  }
+
+  const layer = document.createElement("div")
+  layer.className = "epub-dom-decoration-overlay-layer"
+  layer.dataset.epubDomDecorationLayer = "true"
+  sectionElement.prepend(layer)
+  return layer
+}
+
+function findBlockElement(sectionElement: HTMLElement, blockId: string): HTMLElement | null {
+  const selectorValue = escapeAttributeSelectorValue(blockId)
+  return (
+    sectionElement.querySelector<HTMLElement>(`[id="${selectorValue}"]`) ??
+    sectionElement.querySelector<HTMLElement>(`[data-reader-block-id="${selectorValue}"]`)
+  )
 }
 
 function toDomDecorationClass(style: Decoration["style"]): (typeof DECORATION_CLASSES)[number] {

@@ -1,7 +1,9 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   CustomSelect,
   ReaderDiagnosticsPanel,
+  ReaderSelectionToolbar,
+  type ReaderSelectionToolbarAction,
   ReaderSidebar,
   ReaderToolbar,
   ReaderViewportOverlay,
@@ -10,11 +12,14 @@ import {
 } from "./reader-ui"
 import { THEMES, useReaderController } from "./use-reader-controller"
 
+type DrawerPanel = "contents" | "search" | "settings" | "diagnostics"
+const DEFAULT_READING_TITLE = "Open a local EPUB"
+
 export function App(): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedFileName, setSelectedFileName] = useState("No file selected")
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [activeDrawer, setActiveDrawer] = useState<DrawerPanel | null>(null)
   const {
     snapshot,
     results,
@@ -37,6 +42,7 @@ export function App(): JSX.Element {
     setExpandedTocIds,
     setLightbox,
     clearSearchResults,
+    clearTextSelection,
     openFile,
     goToPage,
     performSearch,
@@ -55,301 +61,399 @@ export function App(): JSX.Element {
     saveBookmark,
     restoreSavedBookmark,
     addHighlight,
+    applySelectionHighlightAction,
+    setDebugMode,
     clearHighlights
   } = useReaderController(containerRef)
 
+  const readingTitle = resolveReadingTitle(selectedFileName, snapshot.metaText)
+  const selectionToolbarActions: ReaderSelectionToolbarAction[] = snapshot.textSelection
+    ? [
+        {
+          id: "highlight",
+          label:
+            snapshot.selectionHighlightState?.mode === "remove-highlight"
+              ? "Remove Highlight"
+              : "Highlight",
+          ...(snapshot.selectionHighlightState?.disabled ? { disabled: true } : {}),
+          onSelect: async () => {
+            await applySelectionHighlightAction()
+            clearTextSelection()
+          }
+        },
+        {
+          id: "copy",
+          label: "Copy",
+          tone: "secondary",
+          onSelect: async () => {
+            const text = snapshot.textSelection?.text.trim()
+            if (
+              text &&
+              typeof navigator !== "undefined" &&
+              navigator.clipboard &&
+              typeof navigator.clipboard.writeText === "function"
+            ) {
+              await navigator.clipboard.writeText(text)
+            }
+            clearTextSelection()
+          }
+        }
+      ]
+    : []
+
+  useEffect(() => {
+    setDebugMode(activeDrawer === "diagnostics")
+  }, [activeDrawer, setDebugMode])
+
+  function toggleDrawer(panel: DrawerPanel): void {
+    setActiveDrawer((current) => (current === panel ? null : panel))
+  }
+
   return (
-    <main className="shell">
-      <section className="hero">
-        <div>
+    <main className="reading-shell">
+      <header className="reading-topbar">
+        <div className="reading-topbar-brand">
           <p className="eyebrow">Pretext EPUB Reader</p>
-          <h1>
-              Open an EPUB and read it in the browser.
-          </h1>
-          <p className="hero-copy">
-            This demo runs the parser/runtime pipeline with pretext-backed text layout:
-            ZIP -&gt; container.xml -&gt; OPF -&gt; NAV/NCX -&gt; XHTML sections -&gt; pretext
-            line layout -&gt; reader UI.
-          </p>
-          <SearchResultsPanel
-            query={searchQuery}
-            results={results}
-            onSelect={async (index) => {
-              await goToSearchResult(results[index]!)
-            }}
-          />
+          <h1 title={readingTitle}>{readingTitle}</h1>
+          <div className="reading-topbar-facts">
+            <span className="reading-fact-chip">{mode}</span>
+            <span className="reading-fact-chip">
+              {snapshot.renderBackend ?? "no-backend"} / page {snapshot.pagination.currentPage} of{" "}
+              {snapshot.pagination.totalPages}
+            </span>
+          </div>
         </div>
+        <label className="file-picker file-picker-topbar">
+          <span className="sr-only">Select EPUB</span>
+          <span className="file-picker-shell">
+            <span className="file-picker-button">Choose File</span>
+            <input
+              type="file"
+              accept=".epub,application/epub+zip"
+              className="file-picker-input"
+              onChange={async (event) => {
+                const file = event.target.files?.[0]
+                setSelectedFileName(file?.name ?? "No file selected")
+                if (file) {
+                  await openFile(file)
+                }
+              }}
+            />
+          </span>
+        </label>
+      </header>
 
-        <div className="hero-panel">
-            <label className="file-picker">
-              <span>Select EPUB</span>
-              <span className="file-picker-shell">
-                <span className="file-picker-button">Choose File</span>
-                <span className="file-picker-name">{selectedFileName}</span>
-                <input
-                  type="file"
-                  accept=".epub,application/epub+zip"
-                  className="file-picker-input"
-                  onChange={async (event) => {
-                    const file = event.target.files?.[0];
-                    setSelectedFileName(file?.name ?? "No file selected")
-                    if (file) {
-                      await openFile(file)
-                    }
-                  }}
-                />
-              </span>
-            </label>
-
-            <div className="controls-stack">
-              <label className="field-shell controls-search-row">
-                <span className="field-label">Search</span>
-                <div className="search-bar">
-                  <input
-                    type="search"
-                    value={searchQuery}
-                    onChange={(event) => setSearchQuery(event.target.value)}
-                    onKeyDown={async (event) => {
-                      if (event.key === "Enter") {
-                        await performSearch(searchQuery);
-                      }
-                    }}
-                    placeholder="Search current book"
-                    className="field-input search-input"
-                  />
-                  <button
-                    type="button"
-                    className="search-submit"
-                    onClick={() => {
-                      void performSearch(searchQuery);
-                    }}
-                  >
-                    Search
-                  </button>
-                  <button
-                    type="button"
-                    className="search-clear"
-                    onClick={() => {
-                      setSearchQuery("")
-                      clearSearchResults()
-                    }}
-                  >
-                    Clear
-                  </button>
-                </div>
-              </label>
-              <div className="controls-grid controls-settings-row">
-                <label className="field-shell">
-                  <span className="field-label">Theme</span>
-                  <CustomSelect
-                    value={themeKey}
-                    options={[
-                      { value: "paper", label: "Paper" },
-                      { value: "night", label: "Night" },
-                      { value: "sage", label: "Sage" }
-                    ]}
-                    onChange={async (value) => {
-                      await handleThemeChange(value as keyof typeof THEMES)
-                    }}
-                  />
-                </label>
-                <label className="field-shell">
-                  <span className="field-label">Mode</span>
-                  <CustomSelect
-                    value={mode}
-                    options={[
-                      { value: "scroll", label: "Scroll" },
-                      { value: "paginated", label: "Paginated" }
-                    ]}
-                    onChange={async (value) => {
-                      await handleModeChange(value as "scroll" | "paginated")
-                    }}
-                  />
-                </label>
-                <label className="field-shell">
-                  <span className="field-label">Publisher Styles</span>
-                  <CustomSelect
-                    value={publisherStyles}
-                    options={[
-                      { value: "enabled", label: "Enabled" },
-                      { value: "disabled", label: "Disabled" }
-                    ]}
-                    onChange={async (value) => {
-                      await handlePublisherStylesChange(
-                        value as "enabled" | "disabled"
-                      )
-                    }}
-                  />
-                </label>
-                <label className="field-shell">
-                  <span className="field-label">Experimental RTL</span>
-                  <CustomSelect
-                    value={experimentalRtl ? "enabled" : "disabled"}
-                    options={[
-                      { value: "disabled", label: "Disabled" },
-                      { value: "enabled", label: "Enabled" }
-                    ]}
-                    onChange={async (value) => {
-                      await handleExperimentalRtlChange(value === "enabled")
-                    }}
-                  />
-                </label>
-                <label className="field-shell">
-                  <span className="field-label">Font Family</span>
-                  <CustomSelect
-                    value={fontFamily}
-                    options={[
-                      {
-                        value: '"Iowan Old Style", "Palatino Linotype", serif',
-                        label: "Iowan"
-                      },
-                      {
-                        value: 'Georgia, "Times New Roman", serif',
-                        label: "Georgia"
-                      },
-                      {
-                        value: '"Source Han Serif SC", "Noto Serif SC", serif',
-                        label: "Source Han Serif"
-                      }
-                    ]}
-                    onChange={async (value) => {
-                      await handleFontFamilyChange(value)
-                    }}
-                  />
-                </label>
-                <label className="field-shell">
-                  <span className="field-label">Font Size</span>
-                  <input
-                    type="range"
-                    min="14"
-                    max="28"
-                    value={fontSize}
-                    onChange={async (event) =>
-                      handleFontSizeChange(Number(event.target.value))
-                    }
-                    className="accent-amber-500"
-                  />
-                </label>
-                <label className="field-shell">
-                  <span className="field-label">Letter Spacing</span>
-                  <input
-                    type="range"
-                    min="-1"
-                    max="4"
-                    step="0.5"
-                    value={letterSpacing}
-                    onChange={async (event) =>
-                      handleLetterSpacingChange(Number(event.target.value))
-                    }
-                    className="accent-amber-500"
-                  />
-                </label>
-                <label className="field-shell">
-                  <span className="field-label">Word Spacing</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="12"
-                    step="1"
-                    value={wordSpacing}
-                    onChange={async (event) =>
-                      handleWordSpacingChange(Number(event.target.value))
-                    }
-                    className="accent-amber-500"
-                  />
-                </label>
-              </div>
+      <section className="reading-viewport">
+        <section className="reading-surface">
+          <div className="reading-surface-strip">
+            <ReaderToolbar
+              currentPage={snapshot.pagination.currentPage}
+              totalPages={snapshot.pagination.totalPages}
+              pageValue={pageValue}
+              hasSavedBookmark={hasSavedBookmark}
+              onPageValueChange={setPageValue}
+              onGoToPage={goToPage}
+              onPrevious={goToPreviousPage}
+              onNext={goToNextPage}
+              onSaveBookmark={saveBookmark}
+              onRestoreBookmark={restoreSavedBookmark}
+              onAddHighlight={addHighlight}
+              onClearHighlights={clearHighlights}
+            />
+            <div className="reading-surface-status">
+              <span>{bookmarkStatus}</span>
+              <span>{highlightStatus}</span>
             </div>
-        </div>
-      </section>
+          </div>
 
-      <section className={`workspace${sidebarCollapsed ? " workspace-collapsed" : ""}`}>
-        <ReaderSidebar
-          collapsed={sidebarCollapsed}
-          toc={snapshot.toc}
-          activeId={activeTocId}
-          expandedIds={expandedTocIds}
-          onCollapse={() => setSidebarCollapsed(true)}
-          onExpand={() => setSidebarCollapsed(false)}
-          onToggle={(id) => {
-            setExpandedTocIds((current) => toggleId(current, id))
-          }}
-          onSelect={async (id) => {
-            await goToTocItem(id)
-          }}
-        />
-
-          <section className="reader-panel">
-            <div className="reader-layout">
-              <div className="reader-main">
-                <ReaderToolbar
-                  currentPage={snapshot.pagination.currentPage}
-                  totalPages={snapshot.pagination.totalPages}
-                  pageValue={pageValue}
-                  hasSavedBookmark={hasSavedBookmark}
-                  onPageValueChange={setPageValue}
-                  onGoToPage={goToPage}
-                  onPrevious={goToPreviousPage}
-                  onNext={goToNextPage}
-                  onSaveBookmark={saveBookmark}
-                  onRestoreBookmark={restoreSavedBookmark}
-                  onAddHighlight={addHighlight}
-                  onClearHighlights={clearHighlights}
-                />
-
-                <p className="reader-meta">{snapshot.metaText}</p>
-                <p className="reader-bookmark-status">{bookmarkStatus}</p>
-                <p className="reader-highlight-status">{highlightStatus}</p>
-
-                <div className="reader-progress">
-                  <input
-                    type="range"
-                    min="1"
-                    max={snapshot.pagination.totalPages}
-                    value={snapshot.pagination.currentPage}
-                    onChange={async (event) => goToPage(Number(event.target.value))}
-                    className="page-range"
-                  />
-                  <div className="page-status">
-                    Page {snapshot.pagination.currentPage} / {snapshot.pagination.totalPages}
-                  </div>
-                </div>
-
-                <div className="reader-stage">
-                  <div
-                    ref={containerRef}
-                    data-mode={mode}
-                    className="reader-root"
-                  >
-                    <article className="placeholder-page">
-                      <h2>Waiting for an EPUB</h2>
-                      <p>Select a local EPUB file to parse and render it.</p>
-                    </article>
-                  </div>
-                  <ReaderViewportOverlay
-                    searchOverlays={snapshot.searchOverlays}
-                    annotationOverlays={snapshot.annotationOverlays}
-                    viewportOffset={snapshot.viewportOffset}
-                  />
-                </div>
-              </div>
-
-              <aside className="reader-side">
-                <ReaderDiagnosticsPanel
-                  renderBackend={snapshot.renderBackend}
-                  publisherStyles={publisherStyles}
-                  locator={snapshot.locator}
-                  restoreDiagnostics={snapshot.restoreDiagnostics}
-                  languageContext={snapshot.languageContext}
-                  navigationContext={snapshot.navigationContext}
-                  spreadContext={snapshot.spreadContext}
-                  diagnostics={snapshot.diagnostics}
-                  visibleSectionDiagnostics={snapshot.visibleSectionDiagnostics}
-                />
-              </aside>
+          <div className="reader-stage reader-stage-blueprint">
+            <div ref={containerRef} data-mode={mode} className="reader-root">
+              <article className="placeholder-page">
+                <h2>Waiting for an EPUB</h2>
+                <p>Select a local EPUB file to parse and render it.</p>
+              </article>
             </div>
-          </section>
+            <ReaderViewportOverlay
+              searchOverlays={snapshot.searchOverlays}
+              annotationOverlays={snapshot.annotationOverlays}
+              viewportOffset={snapshot.viewportOffset}
+            />
+            <ReaderSelectionToolbar
+              selection={snapshot.textSelection}
+              viewportOffset={snapshot.viewportOffset}
+              actions={selectionToolbarActions}
+            />
+          </div>
         </section>
+
+        <div className="reading-action-rail" aria-label="Reader utilities">
+          <button
+            type="button"
+            className="reading-action-button"
+            data-active={activeDrawer === "contents" ? "true" : "false"}
+            onClick={() => toggleDrawer("contents")}
+          >
+            TOC
+          </button>
+          <button
+            type="button"
+            className="reading-action-button"
+            data-active={activeDrawer === "search" ? "true" : "false"}
+            onClick={() => toggleDrawer("search")}
+          >
+            Find
+          </button>
+          <button
+            type="button"
+            className="reading-action-button"
+            data-active={activeDrawer === "settings" ? "true" : "false"}
+            onClick={() => toggleDrawer("settings")}
+          >
+            Tune
+          </button>
+          <button
+            type="button"
+            className="reading-action-button"
+            data-active={activeDrawer === "diagnostics" ? "true" : "false"}
+            onClick={() => toggleDrawer("diagnostics")}
+          >
+            Debug
+          </button>
+        </div>
+
+        {activeDrawer ? (
+          <>
+            <button
+              type="button"
+              aria-label="Close drawer"
+              className="reading-drawer-scrim"
+              onClick={() => setActiveDrawer(null)}
+            />
+            <aside className="reading-drawer" data-panel={activeDrawer}>
+              <div className="reading-drawer-header">
+                <div>
+                  <span className="drawer-kicker">{resolveDrawerKicker(activeDrawer)}</span>
+                  <strong>{resolveDrawerTitle(activeDrawer)}</strong>
+                </div>
+                <button
+                  type="button"
+                  className="drawer-close"
+                  onClick={() => setActiveDrawer(null)}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="reading-drawer-body">
+                {activeDrawer === "contents" ? (
+                  <ReaderSidebar
+                    collapsed={false}
+                    toc={snapshot.toc}
+                    activeId={activeTocId}
+                    expandedIds={expandedTocIds}
+                    onCollapse={() => setActiveDrawer(null)}
+                    onExpand={() => undefined}
+                    onToggle={(id) => {
+                      setExpandedTocIds((current) => toggleId(current, id))
+                    }}
+                    onSelect={async (id) => {
+                      await goToTocItem(id)
+                      setActiveDrawer(null)
+                    }}
+                  />
+                ) : null}
+
+                {activeDrawer === "search" ? (
+                  <div className="drawer-search-stack">
+                    <label className="field-shell">
+                      <span className="field-label">Search current book</span>
+                      <div className="search-bar">
+                        <input
+                          type="search"
+                          value={searchQuery}
+                          onChange={(event) => setSearchQuery(event.target.value)}
+                          onKeyDown={async (event) => {
+                            if (event.key === "Enter") {
+                              await performSearch(searchQuery)
+                            }
+                          }}
+                          placeholder="Search current book"
+                          className="field-input search-input"
+                        />
+                        <button
+                          type="button"
+                          className="search-submit"
+                          onClick={() => {
+                            void performSearch(searchQuery)
+                          }}
+                        >
+                          Search
+                        </button>
+                        <button
+                          type="button"
+                          className="search-clear"
+                          onClick={() => {
+                            setSearchQuery("")
+                            clearSearchResults()
+                          }}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </label>
+                    <SearchResultsPanel
+                      query={searchQuery}
+                      results={results}
+                      onSelect={async (index) => {
+                        await goToSearchResult(results[index]!)
+                        setActiveDrawer(null)
+                      }}
+                    />
+                  </div>
+                ) : null}
+
+                {activeDrawer === "settings" ? (
+                  <div className="drawer-settings-stack">
+                    <div className="controls-grid controls-settings-row">
+                      <label className="field-shell">
+                        <span className="field-label">Theme</span>
+                        <CustomSelect
+                          value={themeKey}
+                          options={[
+                            { value: "paper", label: "Paper" },
+                            { value: "night", label: "Night" },
+                            { value: "sage", label: "Sage" }
+                          ]}
+                          onChange={async (value) => {
+                            await handleThemeChange(value as keyof typeof THEMES)
+                          }}
+                        />
+                      </label>
+                      <label className="field-shell">
+                        <span className="field-label">Mode</span>
+                        <CustomSelect
+                          value={mode}
+                          options={[
+                            { value: "scroll", label: "Scroll" },
+                            { value: "paginated", label: "Paginated" }
+                          ]}
+                          onChange={async (value) => {
+                            await handleModeChange(value as "scroll" | "paginated")
+                          }}
+                        />
+                      </label>
+                      <label className="field-shell">
+                        <span className="field-label">Publisher Styles</span>
+                        <CustomSelect
+                          value={publisherStyles}
+                          options={[
+                            { value: "enabled", label: "Enabled" },
+                            { value: "disabled", label: "Disabled" }
+                          ]}
+                          onChange={async (value) => {
+                            await handlePublisherStylesChange(value as "enabled" | "disabled")
+                          }}
+                        />
+                      </label>
+                      <label className="field-shell">
+                        <span className="field-label">Experimental RTL</span>
+                        <CustomSelect
+                          value={experimentalRtl ? "enabled" : "disabled"}
+                          options={[
+                            { value: "disabled", label: "Disabled" },
+                            { value: "enabled", label: "Enabled" }
+                          ]}
+                          onChange={async (value) => {
+                            await handleExperimentalRtlChange(value === "enabled")
+                          }}
+                        />
+                      </label>
+                      <label className="field-shell">
+                        <span className="field-label">Font Family</span>
+                        <CustomSelect
+                          value={fontFamily}
+                          options={[
+                            {
+                              value: '"Iowan Old Style", "Palatino Linotype", serif',
+                              label: "Iowan"
+                            },
+                            {
+                              value: 'Georgia, "Times New Roman", serif',
+                              label: "Georgia"
+                            },
+                            {
+                              value: '"Source Han Serif SC", "Noto Serif SC", serif',
+                              label: "Source Han Serif"
+                            }
+                          ]}
+                          onChange={async (value) => {
+                            await handleFontFamilyChange(value)
+                          }}
+                        />
+                      </label>
+                      <label className="field-shell">
+                        <span className="field-label">Font Size</span>
+                        <input
+                          type="range"
+                          min="14"
+                          max="28"
+                          value={fontSize}
+                          onChange={async (event) =>
+                            handleFontSizeChange(Number(event.target.value))
+                          }
+                          className="accent-amber-500"
+                        />
+                      </label>
+                      <label className="field-shell">
+                        <span className="field-label">Letter Spacing</span>
+                        <input
+                          type="range"
+                          min="-1"
+                          max="4"
+                          step="0.5"
+                          value={letterSpacing}
+                          onChange={async (event) =>
+                            handleLetterSpacingChange(Number(event.target.value))
+                          }
+                          className="accent-amber-500"
+                        />
+                      </label>
+                      <label className="field-shell">
+                        <span className="field-label">Word Spacing</span>
+                        <input
+                          type="range"
+                          min="0"
+                          max="12"
+                          step="1"
+                          value={wordSpacing}
+                          onChange={async (event) =>
+                            handleWordSpacingChange(Number(event.target.value))
+                          }
+                          className="accent-amber-500"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+
+                {activeDrawer === "diagnostics" ? (
+                  <ReaderDiagnosticsPanel
+                    renderBackend={snapshot.renderBackend}
+                    publisherStyles={publisherStyles}
+                    locator={snapshot.locator}
+                    restoreDiagnostics={snapshot.restoreDiagnostics}
+                    languageContext={snapshot.languageContext}
+                    navigationContext={snapshot.navigationContext}
+                    spreadContext={snapshot.spreadContext}
+                    diagnostics={snapshot.diagnostics}
+                    visibleSectionDiagnostics={snapshot.visibleSectionDiagnostics}
+                  />
+                ) : null}
+              </div>
+            </aside>
+          </>
+        ) : null}
+      </section>
 
       {lightbox ? (
         <div
@@ -372,4 +476,44 @@ export function App(): JSX.Element {
       ) : null}
     </main>
   )
+}
+
+function resolveReadingTitle(selectedFileName: string, metaText: string): string {
+  const normalizedFileName =
+    selectedFileName !== "No file selected"
+      ? selectedFileName.replace(/\.epub$/i, "")
+      : ""
+  if (normalizedFileName) {
+    return normalizedFileName
+  }
+
+  return metaText !== "No book loaded"
+    ? metaText.split(" · ")[0] ?? DEFAULT_READING_TITLE
+    : DEFAULT_READING_TITLE
+}
+
+function resolveDrawerTitle(panel: DrawerPanel): string {
+  switch (panel) {
+    case "contents":
+      return "Table of Contents"
+    case "search":
+      return "Search"
+    case "settings":
+      return "Reader Settings"
+    case "diagnostics":
+      return "Debug"
+  }
+}
+
+function resolveDrawerKicker(panel: DrawerPanel): string {
+  switch (panel) {
+    case "contents":
+      return "Navigate"
+    case "search":
+      return "Find"
+    case "settings":
+      return "Tune"
+    case "diagnostics":
+      return "Debug"
+  }
 }

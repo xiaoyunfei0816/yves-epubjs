@@ -1,4 +1,4 @@
-import type { TocItem } from "../../core/src/index"
+import type { TocItem } from "@pretext-epub/core"
 
 export function findActiveTocId(
   items: TocItem[],

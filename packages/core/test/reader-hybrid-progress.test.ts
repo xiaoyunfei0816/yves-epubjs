@@ -117,7 +117,9 @@ describe("EpubReader hybrid progress", () => {
       progressInSection: 0.5
     });
 
-    const sectionTop = (reader as any).getSectionTop("section-2");
+    const sectionTop = (reader as unknown as { getSectionTop: (sectionId: string) => number }).getSectionTop(
+      "section-2"
+    );
     expect(reader.getRenderMetrics().backend).toBe("dom");
     expect(reader.getCurrentLocation()?.spineIndex).toBe(1);
     expect(reader.getCurrentLocation()?.progressInSection).toBe(0.5);

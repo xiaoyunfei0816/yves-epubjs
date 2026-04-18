@@ -100,9 +100,9 @@ describe("EpubReader compatibility behavior", () => {
 
     ;(reader as unknown as { book: Book }).book = book
 
-    expect((await reader.search("caption")).map((result) => result.locator.blockId)).toContain("figure-1")
-    expect((await reader.search("Alice")).map((result) => result.locator.blockId)).toContain("table-1")
-    expect((await reader.search("Definition body")).map((result) => result.locator.blockId)).toContain("dl-1")
+    expect((await reader.search("caption")).map((result) => result.locator.blockId)).toContain("caption-1")
+    expect((await reader.search("Alice")).map((result) => result.locator.blockId)).toContain("cell-text-1")
+    expect((await reader.search("Definition body")).map((result) => result.locator.blockId)).toContain("description-1")
     expect((await reader.search("searchable icon")).map((result) => result.locator.blockId)).toContain("text-1")
   })
 

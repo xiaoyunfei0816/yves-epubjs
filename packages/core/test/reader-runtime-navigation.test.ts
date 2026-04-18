@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { Book, SectionDocument } from "../src/model/types"
 import {
   EpubReader,
@@ -186,5 +186,98 @@ describe("EpubReader runtime navigation", () => {
     expect(reader.getRenderMetrics().backend).toBe("dom")
     expect(reader.getCurrentLocation()?.spineIndex).toBe(1)
     expect(reader.getPaginationInfo().currentPage).toBeGreaterThan(1)
+  })
+
+  it("does not treat canvas text selection as a relocation click", async () => {
+    const container = document.createElement("div")
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 320
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 220
+    })
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 0
+    })
+    document.body.appendChild(container)
+    Object.defineProperty(container, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        left: 0,
+        top: 0,
+        right: 320,
+        bottom: 220,
+        width: 320,
+        height: 220
+      })
+    })
+
+    const input = createSharedChapterRenderInput({
+      href: "OPS/chapter-1.xhtml",
+      content: createCanvasChapter("Selectable Chapter", 8)
+    })
+    const section: SectionDocument = {
+      ...toCanvasChapterRenderInput(input).section,
+      id: "section-1"
+    }
+    const book: Book = {
+      metadata: { title: "Canvas Selection" },
+      manifest: [],
+      spine: [{ idref: "item-1", href: section.href, linear: true }],
+      toc: [],
+      sections: [section]
+    }
+    const reader = new EpubReader({ container, mode: "scroll" })
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+      }
+    ).book = book
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+      }
+    ).chapterRenderInputs = [input]
+
+    const relocated = vi.fn()
+    reader.on("relocated", relocated)
+
+    await reader.render()
+
+    const textRun = container.querySelector(".epub-text-run")
+    expect(textRun).toBeTruthy()
+
+    const originalGetSelection = window.getSelection
+    const textNode = textRun?.firstChild ?? null
+    Object.defineProperty(window, "getSelection", {
+      configurable: true,
+      value: () => ({
+        toString: () => "Selectable",
+        anchorNode: textNode,
+        focusNode: textNode
+      })
+    })
+
+    textRun?.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 32,
+        clientY: 24
+      })
+    )
+
+    expect(relocated).not.toHaveBeenCalled()
+
+    Object.defineProperty(window, "getSelection", {
+      configurable: true,
+      value: originalGetSelection
+    })
   })
 })

@@ -6,6 +6,7 @@ import type {
 } from "../model/types";
 import type { PreprocessedChapterNode } from "../runtime/chapter-preprocess";
 import { buildDomChapterNormalizationCss } from "./dom-chapter-style";
+import { scopeDomStyleSheetCss } from "./dom-style-scope";
 
 export type DomChapterRenderInput = {
   sectionId: string;
@@ -146,6 +147,10 @@ function serializePreprocessedChapterNode(
     return `<${node.tagName}${attributes}>`;
   }
 
+  if (node.tagName === "style") {
+    return serializeInlineStyleNode(node, attributes)
+  }
+
   return `<${node.tagName}${attributes}>${serializePreprocessedChapterNodes(
     node.children,
     resolveAttributeValue
@@ -168,12 +173,23 @@ function serializeLinkedStyleSheets(
 ): string[] {
   return (stylesheets ?? []).map(
     (stylesheet) =>
-      `<style data-epub-dom-source="${escapeHtmlAttribute(stylesheet.href)}">${escapeStyleTagText(stylesheet.text)}</style>`
+      `<style data-epub-dom-source="${escapeHtmlAttribute(stylesheet.href)}">${escapeStyleTagText(scopeDomStyleSheetCss(stylesheet.text))}</style>`
   );
 }
 
 function escapeStyleTagText(value: string): string {
   return value.replaceAll("</style", "<\\/style");
+}
+
+function serializeInlineStyleNode(
+  node: Extract<PreprocessedChapterNode, { kind: "element" }>,
+  attributes: string
+): string {
+  const styleText = node.children
+    .map((child) => (child.kind === "text" ? child.text : ""))
+    .join("")
+
+  return `<style${attributes}>${escapeStyleTagText(scopeDomStyleSheetCss(styleText))}</style>`
 }
 
 function serializeSectionLanguageAttributes(input: DomChapterRenderInput): string {

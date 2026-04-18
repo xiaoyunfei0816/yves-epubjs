@@ -11,7 +11,7 @@ module.exports = {
   ignorePatterns: ["dist", "coverage"],
   overrides: [
     {
-      files: ["**/*.ts"],
+      files: ["**/*.{ts,tsx,js,mjs,cjs}"],
       parserOptions: {
         project: false
       }

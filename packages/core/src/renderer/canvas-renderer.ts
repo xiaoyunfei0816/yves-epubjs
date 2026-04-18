@@ -1,4 +1,5 @@
 import type { Point, Rect } from "../model/types";
+import { approximateTextWidth } from "../utils/text-wrap";
 import type {
   DrawOp,
   ImageDrawOp,
@@ -45,6 +46,11 @@ export class CanvasRenderer {
     externalCanvas?: HTMLCanvasElement
   ): CanvasRenderResult {
     container.innerHTML = "";
+    const wrapper = document.createElement("article");
+    wrapper.className = "epub-section epub-section-paginated-canvas";
+    wrapper.dataset.sectionId = displayList.sectionId;
+    wrapper.dataset.href = displayList.sectionHref;
+    wrapper.style.position = "relative";
     const canvas = externalCanvas ?? document.createElement("canvas");
     canvas.className = "epub-canvas epub-canvas-paginated";
     canvas.dataset.sectionId = displayList.sectionId;
@@ -52,9 +58,14 @@ export class CanvasRenderer {
     canvas.style.margin = "0 auto";
     this.prepareCanvas(canvas, displayList.width, Math.max(height, displayList.height));
     const renderToken = this.assignRenderToken(canvas);
-    if (!externalCanvas) {
-      container.appendChild(canvas);
+    wrapper.appendChild(canvas);
+    const textLayer = createCanvasTextLayer(displayList, {
+      className: "epub-text-layer epub-text-layer-paginated"
+    });
+    if (textLayer) {
+      wrapper.appendChild(textLayer);
     }
+    container.appendChild(wrapper);
     this.paint(canvas, displayList, renderToken);
 
     return {
@@ -153,12 +164,21 @@ export class CanvasRenderer {
       }
 
       const existingCanvases = new Map<string, HTMLCanvasElement>();
+      const existingTextLayers = new Map<string, HTMLDivElement>();
       wrapper
         .querySelectorAll<HTMLCanvasElement>("canvas.epub-canvas-section")
         .forEach((canvas) => {
           const sliceIndex = canvas.dataset.sliceIndex;
           if (sliceIndex) {
             existingCanvases.set(sliceIndex, canvas);
+          }
+        });
+      wrapper
+        .querySelectorAll<HTMLDivElement>(".epub-text-layer-section")
+        .forEach((layer) => {
+          const sliceIndex = layer.dataset.sliceIndex;
+          if (sliceIndex) {
+            existingTextLayers.set(sliceIndex, layer);
           }
         });
       const sectionInteractions: InteractionRegion[] = [];
@@ -188,6 +208,22 @@ export class CanvasRenderer {
         if (!externalCanvas || sectionsToRender.length > 1 || renderWindows.length > 1) {
           wrapper.appendChild(canvas);
         }
+        const textLayer = createCanvasTextLayer(slicedDisplayList, {
+          className: "epub-text-layer epub-text-layer-section",
+          sliceIndex,
+          top: renderWindow.top
+        });
+        const existingTextLayer = existingTextLayers.get(sliceIndex) ?? null;
+        existingTextLayers.delete(sliceIndex);
+        if (textLayer) {
+          if (existingTextLayer) {
+            existingTextLayer.replaceWith(textLayer);
+          } else {
+            wrapper.appendChild(textLayer);
+          }
+        } else if (existingTextLayer?.parentElement === wrapper) {
+          wrapper.removeChild(existingTextLayer);
+        }
         sectionInteractions.push(...sliced.sourceInteractions);
         totalCanvasHeight += slicedDisplayList.height;
         drawOpCount += slicedDisplayList.ops.length;
@@ -197,6 +233,11 @@ export class CanvasRenderer {
       for (const staleCanvas of existingCanvases.values()) {
         if (staleCanvas.parentElement === wrapper) {
           wrapper.removeChild(staleCanvas);
+        }
+      }
+      for (const staleTextLayer of existingTextLayers.values()) {
+        if (staleTextLayer.parentElement === wrapper) {
+          wrapper.removeChild(staleTextLayer);
         }
       }
       container.appendChild(wrapper);
@@ -334,6 +375,19 @@ export class CanvasRenderer {
     if (op.backgroundColor) {
       context.fillStyle = op.backgroundColor;
       context.fillRect(op.rect.x, op.rect.y, op.rect.width, op.rect.height);
+    }
+    if (op.highlightSegments?.length) {
+      for (const segment of op.highlightSegments) {
+        const segmentText = sliceByCharacterRange(op.text, segment.start, segment.end)
+        if (!segmentText) {
+          continue
+        }
+        const prefixText = sliceByCharacterRange(op.text, 0, segment.start)
+        const segmentX = op.rect.x + approximateTextWidth(prefixText, op.font)
+        const segmentWidth = approximateTextWidth(segmentText, op.font)
+        context.fillStyle = segment.color
+        context.fillRect(segmentX, op.rect.y, Math.max(1, segmentWidth), op.rect.height)
+      }
     }
     if (op.highlightColor) {
       context.fillStyle = op.highlightColor;
@@ -602,4 +656,76 @@ function resolveTextAscent(
   }
 
   return fontSize * 0.82;
+}
+
+function createCanvasTextLayer(
+  displayList: SectionDisplayList,
+  options: {
+    className: string;
+    sliceIndex?: string;
+    top?: number;
+  }
+): HTMLDivElement | null {
+  const textOps = displayList.ops.filter(
+    (op): op is TextRunDrawOp => op.kind === "text" && Boolean(op.text)
+  )
+  if (textOps.length === 0) {
+    return null
+  }
+
+  const layer = document.createElement("div")
+  layer.className = options.className
+  if (options.sliceIndex) {
+    layer.dataset.sliceIndex = options.sliceIndex
+  }
+  layer.style.position = "absolute"
+  layer.style.left = "50%"
+  layer.style.top = `${options.top ?? 0}px`
+  layer.style.transform = "translateX(-50%)"
+  layer.style.width = `${Math.max(1, displayList.width)}px`
+  layer.style.height = `${Math.max(1, displayList.height)}px`
+  layer.style.zIndex = "1"
+  layer.style.userSelect = "text"
+  layer.style.webkitUserSelect = "text"
+  layer.style.pointerEvents = "auto"
+  layer.style.overflow = "hidden"
+  layer.style.color = "transparent"
+  layer.style.webkitTextFillColor = "transparent"
+  layer.style.caretColor = "transparent"
+
+  const fragment = document.createDocumentFragment()
+  for (const op of textOps) {
+    const span = document.createElement("span")
+    span.className = "epub-text-run"
+    span.dataset.readerSectionId = op.sectionId
+    span.dataset.readerBlockId = op.blockId
+    span.dataset.readerInlineStart = `${op.textStart ?? 0}`
+    span.dataset.readerInlineEnd = `${op.textEnd ?? Array.from(op.text).length}`
+    span.textContent = op.text
+    span.style.position = "absolute"
+    span.style.left = `${op.x}px`
+    span.style.top = `${op.y}px`
+    span.style.width = `${Math.max(1, op.width)}px`
+    span.style.height = `${Math.max(1, op.rect.height)}px`
+    span.style.font = op.font
+    span.style.lineHeight = `${Math.max(1, op.rect.height)}px`
+    span.style.whiteSpace = "pre"
+    span.style.color = "transparent"
+    span.style.webkitTextFillColor = "transparent"
+    span.style.userSelect = "text"
+    span.style.webkitUserSelect = "text"
+    if (op.underline) {
+      span.style.textDecoration = "underline"
+      span.style.textDecorationColor = "transparent"
+    }
+    fragment.appendChild(span)
+  }
+  layer.appendChild(fragment)
+  return layer
+}
+
+function sliceByCharacterRange(text: string, start: number, end: number): string {
+  return Array.from(text)
+    .slice(Math.max(0, start), Math.max(0, end))
+    .join("")
 }

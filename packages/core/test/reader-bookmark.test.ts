@@ -214,4 +214,67 @@ describe("EpubReader bookmarks", () => {
       status: "restored"
     })
   })
+
+  it("restores paginated progress bookmarks without snapping back to the first block", async () => {
+    const container = createContainer()
+    const reader = new EpubReader({ container, mode: "paginated" })
+    const repeatedText = Array.from({ length: 140 }, () => ({
+      kind: "text" as const,
+      text: "Progress bookmark pagination target text. "
+    }))
+    const section: SectionDocument = {
+      id: "section-1",
+      href: "OPS/chapter-1.xhtml",
+      title: "Chapter 1",
+      anchors: {},
+      blocks: [
+        {
+          id: "text-1",
+          kind: "text",
+          inlines: repeatedText
+        },
+        {
+          id: "text-2",
+          kind: "text",
+          inlines: repeatedText
+        }
+      ]
+    }
+    const book: Book = {
+      metadata: {
+        title: "Bookmark Reader",
+        identifier: "urn:uuid:bookmark-reader"
+      },
+      manifest: [],
+      spine: [{ idref: "item-1", href: section.href, linear: true }],
+      toc: [],
+      sections: [section]
+    }
+
+    ;(reader as unknown as { book: Book; sourceName: string | null }).book = book
+
+    await reader.render()
+    await reader.goToPage(3)
+
+    const savedPage = reader.getPaginationInfo().currentPage
+    expect(savedPage).toBe(3)
+
+    const bookmark = reader.createBookmark({ label: "saved progress page" })
+    expect(bookmark?.locator.progressInSection).toBeGreaterThan(0)
+    expect(bookmark?.locator.cfi).toBeUndefined()
+
+    await reader.goToPage(1)
+    expect(reader.getPaginationInfo().currentPage).toBe(1)
+
+    const restored = await reader.restoreBookmark(bookmark!)
+    expect(restored).toBe(true)
+    expect(reader.getPaginationInfo().currentPage).toBe(savedPage)
+    expect(reader.getLastLocationRestoreDiagnostics()).toEqual({
+      requestedPrecision: "progress",
+      resolvedPrecision: "progress",
+      matchedBy: "href",
+      fallbackApplied: false,
+      status: "restored"
+    })
+  })
 })

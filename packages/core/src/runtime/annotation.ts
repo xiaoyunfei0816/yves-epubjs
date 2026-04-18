@@ -1,6 +1,14 @@
 import { nanoid } from "nanoid"
-import type { Annotation, Book, Decoration, Locator, SerializedLocator } from "../model/types"
+import type {
+  Annotation,
+  Book,
+  Decoration,
+  Locator,
+  SerializedLocator,
+  TextRangeSelector
+} from "../model/types"
 import { deserializeLocator, serializeLocator } from "./locator"
+import { normalizeTextRangeSelector } from "./reader-domain"
 
 export function createAnnotation(input: {
   publicationId: string
@@ -9,6 +17,7 @@ export function createAnnotation(input: {
   quote?: string
   note?: string
   color?: string
+  textRange?: TextRangeSelector
   createdAt?: string
   updatedAt?: string
 }): Annotation {
@@ -24,6 +33,7 @@ export function createAnnotation(input: {
     }),
     createdAt: timestamp,
     updatedAt: input.updatedAt ?? timestamp,
+    ...(input.textRange ? { textRange: normalizeTextRangeSelector(input.textRange) } : {}),
     ...(input.quote?.trim() ? { quote: input.quote.trim() } : {}),
     ...(input.note?.trim() ? { note: input.note.trim() } : {}),
     ...(input.color?.trim() ? { color: input.color.trim() } : {})
@@ -50,6 +60,7 @@ export function deserializeAnnotation(raw: unknown): Annotation | null {
   const updatedAt =
     typeof value.updatedAt === "string" && value.updatedAt.trim() ? value.updatedAt.trim() : null
   const locator = deserializeLocator(value.locator)
+  const textRange = parseTextRangeSelector(value.textRange)
 
   if (!id || !publicationId || !createdAt || !updatedAt || !locator) {
     return null
@@ -61,6 +72,7 @@ export function deserializeAnnotation(raw: unknown): Annotation | null {
     locator,
     createdAt,
     updatedAt,
+    ...(textRange ? { textRange } : {}),
     ...(typeof value.quote === "string" && value.quote.trim() ? { quote: value.quote.trim() } : {}),
     ...(typeof value.note === "string" && value.note.trim() ? { note: value.note.trim() } : {}),
     ...(typeof value.color === "string" && value.color.trim() ? { color: value.color.trim() } : {})
@@ -86,6 +98,7 @@ export function mapAnnotationToDecoration(annotation: Annotation): Decoration {
         : {})
     },
     style: "highlight",
+    ...(annotation.textRange ? { extras: { textRange: normalizeTextRangeSelector(annotation.textRange) } } : {}),
     ...(annotation.color ? { color: annotation.color } : {})
   }
 }
@@ -105,6 +118,54 @@ function parseAnnotationValue(raw: unknown): Record<string, unknown> | null {
   }
 
   return raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null
+}
+
+function parseTextRangeSelector(raw: unknown): TextRangeSelector | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined
+  }
+
+  const value = raw as {
+    start?: unknown
+    end?: unknown
+  }
+  const start = parseTextRangePoint(value.start)
+  const end = parseTextRangePoint(value.end)
+  if (!start || !end) {
+    return undefined
+  }
+
+  return normalizeTextRangeSelector({
+    start,
+    end
+  })
+}
+
+function parseTextRangePoint(raw: unknown): TextRangeSelector["start"] | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined
+  }
+
+  const value = raw as {
+    blockId?: unknown
+    inlineOffset?: unknown
+  }
+  if (typeof value.blockId !== "string" || !value.blockId.trim()) {
+    return undefined
+  }
+
+  const inlineOffset =
+    typeof value.inlineOffset === "number" && Number.isFinite(value.inlineOffset)
+      ? Math.max(0, Math.trunc(value.inlineOffset))
+      : undefined
+  if (inlineOffset === undefined) {
+    return undefined
+  }
+
+  return {
+    blockId: value.blockId.trim(),
+    inlineOffset
+  }
 }
 
 export type { SerializedLocator }
