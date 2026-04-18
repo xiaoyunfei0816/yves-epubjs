@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -264,6 +265,7 @@ export function useReaderController(
 
       const section = book.sections[locator.spineIndex]
       const pagination = reader.getPaginationInfo()
+      const positionLabel = reader.getSettings().mode === "scroll" ? "Section" : "Page"
       const nextActiveTocId = findActiveTocId(
         book.toc,
         section?.href ?? "",
@@ -273,7 +275,7 @@ export function useReaderController(
         ...baseSnapshot,
         metaText: `${book.metadata.title} · ${section?.title ?? section?.href ?? "Section"} · ${
           locator.spineIndex + 1
-        } / ${book.sections.length} · Page ${pagination.currentPage} / ${pagination.totalPages} · ${metrics.backend}`,
+        } / ${book.sections.length} · ${positionLabel} ${pagination.currentPage} / ${pagination.totalPages} · ${metrics.backend}`,
         pagination,
         toc: book.toc
       })
@@ -632,10 +634,10 @@ export function useReaderController(
     return true
   }
 
-  function setDebugMode(enabled: boolean): void {
+  const setDebugMode = useCallback((enabled: boolean): void => {
     readerRef.current?.setDebugMode(enabled)
     syncSnapshotRef.current?.()
-  }
+  }, [])
 
   function clearHighlights(): void {
     readerRef.current?.clearAnnotations()

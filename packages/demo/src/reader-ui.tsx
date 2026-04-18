@@ -113,6 +113,7 @@ export function ReaderSidebar(props: {
 }
 
 export function ReaderToolbar(props: {
+  mode: "scroll" | "paginated"
   currentPage: number
   totalPages: number
   pageValue: string
@@ -126,6 +127,8 @@ export function ReaderToolbar(props: {
   onAddHighlight: () => void | Promise<void>
   onClearHighlights: () => void
 }): JSX.Element {
+  const positionLabel = props.mode === "scroll" ? "Section" : "Page"
+
   return (
     <div className="reader-toolbar">
       <div className="reader-toolbar-group">
@@ -134,7 +137,7 @@ export function ReaderToolbar(props: {
       </div>
       <div className="reader-toolbar-group reader-toolbar-group-page">
         <label className="page-jump">
-          <span>Page</span>
+          <span>{positionLabel}</span>
           <input
             type="number"
             min="1"

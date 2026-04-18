@@ -1162,7 +1162,10 @@ describe("pretext layout integration", () => {
     await reader.goToTocItem("toc-later");
     expect(reader.getCurrentLocation()?.blockId).toBe("text-2");
     expect(reader.getCurrentLocation()?.progressInSection ?? 0).toBeGreaterThan(0);
-    expect(reader.getPaginationInfo().currentPage).toBeGreaterThan(1);
+    expect(reader.getPaginationInfo()).toEqual({
+      currentPage: 1,
+      totalPages: 1
+    });
   });
 
   it("resolves toc fragment anchors declared on structural containers", async () => {
@@ -1466,7 +1469,7 @@ describe("pretext layout integration", () => {
     }
   });
 
-  it("uses global page numbers for page jumps in scroll mode", async () => {
+  it("uses section numbers for jumps in scroll mode", async () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", {
       configurable: true,
@@ -1543,6 +1546,7 @@ describe("pretext layout integration", () => {
     await reader.render();
 
     const lastPage = reader.getPaginationInfo().totalPages;
+    expect(lastPage).toBe(2)
     await reader.goToPage(lastPage);
 
     expect(reader.getPaginationInfo().currentPage).toBe(lastPage);
@@ -2156,7 +2160,7 @@ describe("pretext layout integration", () => {
     }
   });
 
-  it("moves by global pages with next and prev in scroll mode", async () => {
+  it("moves by section with next and prev in scroll mode", async () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", {
       configurable: true,
@@ -2177,11 +2181,26 @@ describe("pretext layout integration", () => {
       kind: "text" as const,
       text: "This is a long paragraph designed to spill across multiple pages. "
     }));
-    const section: SectionDocument = {
+    const firstSection: SectionDocument = {
       ...createSection(),
+      id: "section-1",
+      href: "OPS/chapter-1.xhtml",
       blocks: [
         {
           id: "text-1",
+          kind: "text",
+          inlines: repeatedText
+        }
+      ]
+    };
+
+    const secondSection: SectionDocument = {
+      ...createSection(),
+      id: "section-2",
+      href: "OPS/chapter-2.xhtml",
+      blocks: [
+        {
+          id: "text-2",
           kind: "text",
           inlines: repeatedText
         }
@@ -2196,12 +2215,17 @@ describe("pretext layout integration", () => {
       spine: [
         {
           idref: "item-1",
-          href: section.href,
+          href: firstSection.href,
+          linear: true
+        },
+        {
+          idref: "item-2",
+          href: secondSection.href,
           linear: true
         }
       ],
       toc: [],
-      sections: [section]
+      sections: [firstSection, secondSection]
     };
 
     const state = reader as unknown as {
@@ -2218,7 +2242,7 @@ describe("pretext layout integration", () => {
     expect(reader.getPaginationInfo().currentPage).toBe(1);
   });
 
-  it("recomputes current global page correctly after typography changes in scroll mode", async () => {
+  it("keeps the current section stable after typography changes in scroll mode", async () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", {
       configurable: true,
@@ -2293,20 +2317,21 @@ describe("pretext layout integration", () => {
     state.book = book;
 
     await reader.render();
-    await reader.goToPage(6);
+    await reader.goToPage(2);
 
     const before = reader.getPaginationInfo();
-    expect(before.currentPage).toBe(6);
+    expect(before).toEqual({
+      currentPage: 2,
+      totalPages: 2
+    });
 
     await reader.setTypography({ fontSize: 24 });
 
     const after = reader.getPaginationInfo();
-    expect(after.totalPages).not.toBe(before.totalPages);
-    expect(after.currentPage).toBeGreaterThan(1);
-    expect(after.currentPage).toBeLessThanOrEqual(after.totalPages);
+    expect(after).toEqual(before);
   });
 
-  it("updates current page when scroll position changes in scroll mode", async () => {
+  it("updates current section when scroll position changes in scroll mode", async () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", {
       configurable: true,
@@ -2374,7 +2399,7 @@ describe("pretext layout integration", () => {
     ).syncPositionFromScroll(true);
 
     expect(reader.getCurrentLocation()?.spineIndex).toBe(1);
-    expect(reader.getPaginationInfo().currentPage).toBeGreaterThan(1);
+    expect(reader.getPaginationInfo().currentPage).toBe(2);
   });
 
   it("preserves the current scroll section during passive rerenders in scroll mode", async () => {

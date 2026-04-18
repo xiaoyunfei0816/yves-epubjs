@@ -82,7 +82,7 @@ export function buildPaginatedPages(options: {
         while (lineStart < layoutBlock.lines.length) {
           const remainingHeight = options.pageHeight - usedHeight
           let lineEnd = findPretextLineBreak(
-            layoutBlock.lines,
+            layoutBlock,
             lineStart,
             remainingHeight
           )
@@ -101,7 +101,7 @@ export function buildPaginatedPages(options: {
             }
             usedHeight = 0
             lineEnd = findPretextLineBreak(
-              layoutBlock.lines,
+              layoutBlock,
               lineStart,
               options.pageHeight
             )
@@ -117,7 +117,7 @@ export function buildPaginatedPages(options: {
             lineStart,
             lineEnd
           })
-          usedHeight += sumPretextLineHeights(layoutBlock.lines, lineStart, lineEnd)
+          usedHeight += estimatePretextSliceHeight(layoutBlock, lineStart, lineEnd)
           lineStart = lineEnd
 
           if (lineStart < layoutBlock.lines.length) {
@@ -135,8 +135,6 @@ export function buildPaginatedPages(options: {
             usedHeight = 0
           }
         }
-
-        usedHeight += getPretextBlockTrailingSpace(layoutBlock)
         continue
       }
 
@@ -224,15 +222,7 @@ export function buildPageDisplayList(options: {
 }): SectionDisplayList {
   const blocks = options.page.blocks.map((slice) =>
     slice.type === "pretext"
-      ? ({
-          ...slice.block,
-          lines: slice.block.lines.slice(slice.lineStart, slice.lineEnd),
-          estimatedHeight:
-            sumPretextLineHeights(slice.block.lines, slice.lineStart, slice.lineEnd) +
-            (slice.lineEnd === slice.block.lines.length
-              ? getPretextBlockTrailingSpace(slice.block)
-              : 0)
-        } satisfies LayoutPretextBlock)
+      ? createPretextSliceBlock(slice.block, slice.lineStart, slice.lineEnd)
       : ({
           type: "native",
           id: slice.block.id,
@@ -294,7 +284,7 @@ function getPretextBlockTrailingSpace(block: LayoutPretextBlock): number {
 }
 
 function findPretextLineBreak(
-  lines: Array<{ height: number }>,
+  block: LayoutPretextBlock,
   start: number,
   availableHeight: number
 ): number {
@@ -302,19 +292,60 @@ function findPretextLineBreak(
     return start
   }
 
-  let totalHeight = 0
+  const fixedTop = start === 0 ? block.paddingTop : 0
+  const fixedBottom = getPretextBlockTrailingAfterContent(block)
+  let totalHeight = fixedTop
   let index = start
-  while (index < lines.length) {
-    const lineHeight = lines[index]?.height ?? 0
-    if (totalHeight > 0 && totalHeight + lineHeight > availableHeight) {
+  while (index < block.lines.length) {
+    const lineHeight = block.lines[index]?.height ?? 0
+    const nextIndex = index + 1
+    const nextHeight =
+      totalHeight +
+      lineHeight +
+      (nextIndex === block.lines.length ? fixedBottom : 0)
+    if (totalHeight > fixedTop && nextHeight > availableHeight) {
       break
     }
-    totalHeight += lineHeight
-    index += 1
+    totalHeight = nextHeight
+    index = nextIndex
     if (totalHeight >= availableHeight) {
       break
     }
   }
 
   return index
+}
+
+function createPretextSliceBlock(
+  block: LayoutPretextBlock,
+  lineStart: number,
+  lineEnd: number
+): LayoutPretextBlock {
+  const isFirstSlice = lineStart === 0
+  const isLastSlice = lineEnd === block.lines.length
+  const paddingTop = isFirstSlice ? block.paddingTop : 0
+  const trailingAfterContent = isLastSlice ? getPretextBlockTrailingAfterContent(block) : 0
+
+  return {
+    ...block,
+    paddingTop,
+    paddingBottom: isLastSlice ? block.paddingBottom : 0,
+    lines: block.lines.slice(lineStart, lineEnd),
+    estimatedHeight:
+      sumPretextLineHeights(block.lines, lineStart, lineEnd) +
+      paddingTop +
+      trailingAfterContent
+  }
+}
+
+function estimatePretextSliceHeight(
+  block: LayoutPretextBlock,
+  lineStart: number,
+  lineEnd: number
+): number {
+  return createPretextSliceBlock(block, lineStart, lineEnd).estimatedHeight
+}
+
+function getPretextBlockTrailingAfterContent(block: LayoutPretextBlock): number {
+  return Math.max(0, getPretextBlockTrailingSpace(block) - block.paddingTop)
 }

@@ -122,6 +122,119 @@ describe("paginated render plan", () => {
       progressInSection: 0.5
     })
   })
+
+  it("removes repeated top padding from continuation pages of sliced pretext blocks", () => {
+    const section = createSection("section-1", "OPS/one.xhtml")
+    const block = {
+      type: "pretext",
+      id: "text-1",
+      kind: "text",
+      lineHeight: 20,
+      textAlign: "start",
+      paddingTop: 20,
+      paddingBottom: 10,
+      paddingLeft: 0,
+      paddingRight: 0,
+      lines: [
+        { width: 100, height: 40, fragments: [] },
+        { width: 100, height: 40, fragments: [] },
+        { width: 100, height: 40, fragments: [] }
+      ],
+      estimatedHeight: 150
+    } satisfies LayoutPretextBlock
+    const layout = createLayout(section, [block])
+
+    const plan = buildPaginatedPages({
+      sections: [section],
+      currentSectionIndex: 0,
+      sectionLayout: layout,
+      pageHeight: 100,
+      getSectionLayout: () => layout
+    })
+
+    expect(plan.pages).toHaveLength(2)
+
+    const firstPageCalls: Array<LayoutPretextBlock> = []
+    buildPageDisplayList({
+      page: plan.pages[0]!,
+      section,
+      width: 640,
+      viewportHeight: 720,
+      theme: {
+        background: "#fff",
+        color: "#111"
+      },
+      typography: {
+        fontSize: 18,
+        lineHeight: 1.6,
+        paragraphSpacing: 12
+      },
+      highlightedBlockIds: new Set<string>(),
+      underlinedBlockIds: new Set<string>(),
+      activeBlockId: undefined,
+      resolveImageLoaded: () => true,
+      resolveImageUrl: (src) => src,
+      estimateBlockHeight: () => 180,
+      buildSectionDisplayList: (input) => {
+        firstPageCalls.push(input.blocks[0] as LayoutPretextBlock)
+        return {
+          sectionId: input.section.id,
+          sectionHref: input.section.href,
+          width: input.width,
+          height: 180,
+          ops: [],
+          interactions: []
+        } satisfies SectionDisplayList
+      }
+    })
+
+    const secondPageCalls: Array<LayoutPretextBlock> = []
+    buildPageDisplayList({
+      page: plan.pages[1]!,
+      section,
+      width: 640,
+      viewportHeight: 720,
+      theme: {
+        background: "#fff",
+        color: "#111"
+      },
+      typography: {
+        fontSize: 18,
+        lineHeight: 1.6,
+        paragraphSpacing: 12
+      },
+      highlightedBlockIds: new Set<string>(),
+      underlinedBlockIds: new Set<string>(),
+      activeBlockId: undefined,
+      resolveImageLoaded: () => true,
+      resolveImageUrl: (src) => src,
+      estimateBlockHeight: () => 180,
+      buildSectionDisplayList: (input) => {
+        secondPageCalls.push(input.blocks[0] as LayoutPretextBlock)
+        return {
+          sectionId: input.section.id,
+          sectionHref: input.section.href,
+          width: input.width,
+          height: 180,
+          ops: [],
+          interactions: []
+        } satisfies SectionDisplayList
+      }
+    })
+
+    expect(firstPageCalls[0]).toMatchObject({
+      paddingTop: 20,
+      paddingBottom: 0,
+      estimatedHeight: 100
+    })
+    expect(firstPageCalls[0]?.lines).toHaveLength(2)
+    expect(secondPageCalls[0]).toMatchObject({
+      paddingTop: 0,
+      paddingBottom: 10,
+      estimatedHeight: 50
+    })
+    expect(secondPageCalls[0]?.lines).toHaveLength(1)
+  })
 })
 
 function createSection(id: string, href: string): SectionDocument {

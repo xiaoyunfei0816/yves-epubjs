@@ -118,7 +118,8 @@ export function App(): JSX.Element {
           <div className="reading-topbar-facts">
             <span className="reading-fact-chip">{mode}</span>
             <span className="reading-fact-chip">
-              {snapshot.renderBackend ?? "no-backend"} / page {snapshot.pagination.currentPage} of{" "}
+              {snapshot.renderBackend ?? "no-backend"} /{" "}
+              {mode === "scroll" ? "section" : "page"} {snapshot.pagination.currentPage} of{" "}
               {snapshot.pagination.totalPages}
             </span>
           </div>
@@ -147,6 +148,7 @@ export function App(): JSX.Element {
         <section className="reading-surface">
           <div className="reading-surface-strip">
             <ReaderToolbar
+              mode={mode}
               currentPage={snapshot.pagination.currentPage}
               totalPages={snapshot.pagination.totalPages}
               pageValue={pageValue}

@@ -32,6 +32,20 @@ const COMPLEX_CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
     </body>
   </html>`;
 
+const LONG_DOM_CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
+  <html xmlns="http://www.w3.org/1999/xhtml">
+    <head><title>Long DOM</title></head>
+    <body>
+      <section>
+        <h1>Long DOM</h1>
+        <table>
+          <tr><td>Force DOM backend</td></tr>
+        </table>
+        ${Array.from({ length: 18 }, (_, index) => `<p id="long-paragraph-${index + 1}">Paragraph ${index + 1} with enough text to keep the chapter flowing across multiple paginated viewport slices for regression coverage.</p>`).join("")}
+      </section>
+    </body>
+  </html>`;
+
 function createHybridReaderFixture(mode: "scroll" | "paginated" = "scroll"): {
   reader: EpubReader;
   container: HTMLDivElement;
@@ -104,6 +118,61 @@ function createHybridReaderFixture(mode: "scroll" | "paginated" = "scroll"): {
       chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[];
     }
   ).chapterRenderInputs = [simpleInput, complexInput];
+
+  return {
+    reader,
+    container,
+    book
+  };
+}
+
+function createLongDomReaderFixture(mode: "scroll" | "paginated" = "paginated"): {
+  reader: EpubReader;
+  container: HTMLDivElement;
+  book: Book;
+} {
+  const container = document.createElement("div");
+  container.style.padding = "20px 0 30px";
+  Object.defineProperty(container, "clientWidth", {
+    configurable: true,
+    value: 320
+  });
+  Object.defineProperty(container, "clientHeight", {
+    configurable: true,
+    value: 480
+  });
+  document.body.appendChild(container);
+
+  const longInput = createSharedChapterRenderInput({
+    href: "OPS/long-dom.xhtml",
+    content: LONG_DOM_CHAPTER
+  });
+  const longSection: SectionDocument = {
+    ...toCanvasChapterRenderInput(longInput).section,
+    id: "section-long-dom"
+  };
+
+  const book: Book = {
+    metadata: { title: "Long DOM Pagination" },
+    manifest: [],
+    spine: [{ idref: "item-long-dom", href: longSection.href, linear: true }],
+    toc: [],
+    sections: [longSection]
+  };
+
+  const reader = new EpubReader({ container, mode });
+  (
+    reader as unknown as {
+      book: Book;
+      chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[];
+    }
+  ).book = book;
+  (
+    reader as unknown as {
+      book: Book;
+      chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[];
+    }
+  ).chapterRenderInputs = [longInput];
 
   return {
     reader,
@@ -568,6 +637,75 @@ describe("EpubReader hybrid navigation", () => {
           originalGetBoundingClientRect
         );
       }
+      if (originalOffsetHeight) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
+      }
+      if (originalScrollHeight) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", originalScrollHeight);
+      }
+    }
+  });
+
+  it("uses the reader viewport height as the paginated DOM page step", async () => {
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight"
+    );
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight"
+    );
+
+    try {
+      let currentScrollTop = 0;
+
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+        configurable: true,
+        get() {
+          if (
+            this.classList?.contains("epub-dom-section") &&
+            this.dataset?.sectionId === "section-long-dom"
+          ) {
+            return 1720;
+          }
+          return originalOffsetHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+        configurable: true,
+        get() {
+          if (
+            this.classList?.contains("epub-dom-section") &&
+            this.dataset?.sectionId === "section-long-dom"
+          ) {
+            return 1720;
+          }
+          return originalScrollHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      const { reader, container } = createLongDomReaderFixture("paginated");
+      Object.defineProperty(container, "scrollTop", {
+        configurable: true,
+        get() {
+          return currentScrollTop;
+        },
+        set(value: number) {
+          currentScrollTop = value;
+        }
+      });
+
+      await reader.render();
+
+      expect(reader.getRenderMetrics().backend).toBe("dom");
+      expect(reader.getPaginationInfo().totalPages).toBe(4);
+
+      await reader.goToPage(2);
+
+      expect(reader.getPaginationInfo().currentPage).toBe(2);
+      expect(container.scrollTop).toBe(430);
+    } finally {
       if (originalOffsetHeight) {
         Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
       }

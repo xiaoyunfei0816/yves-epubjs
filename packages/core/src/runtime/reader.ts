@@ -133,6 +133,7 @@ import { buildSearchResultsForSection } from "./search-results";
 import {
   buildPageDisplayList,
   buildPaginatedPages,
+  type PageBlockSlice,
   type ReaderPage
 } from "./paginated-render-plan";
 import { buildScrollRenderPlan } from "./scroll-render-plan";
@@ -370,6 +371,11 @@ export class EpubReader {
       return;
     }
 
+    if (this.mode === "scroll") {
+      await this.goToScrollSection(this.currentSectionIndex + 2)
+      return
+    }
+
     this.ensurePages();
     const spreadTargetPage =
       this.mode === "paginated" ? this.resolveSpreadNavigationTarget("next") : null
@@ -387,6 +393,11 @@ export class EpubReader {
   async prev(): Promise<void> {
     if (!this.book) {
       return;
+    }
+
+    if (this.mode === "scroll") {
+      await this.goToScrollSection(this.currentSectionIndex)
+      return
     }
 
     this.ensurePages();
@@ -543,6 +554,11 @@ export class EpubReader {
       return;
     }
 
+    if (this.mode === "scroll") {
+      await this.goToScrollSection(pageNumber)
+      return
+    }
+
     this.ensurePages();
     if (this.pages.length === 0) {
       return;
@@ -557,6 +573,25 @@ export class EpubReader {
     }
 
     await this.goToLeafPage(pageNumber)
+  }
+
+  private async goToScrollSection(sectionNumber: number): Promise<void> {
+    if (!this.book) {
+      return
+    }
+
+    const nextSectionIndex = Math.max(
+      0,
+      Math.min(Math.trunc(sectionNumber) - 1, this.book.sections.length - 1)
+    )
+    this.currentSectionIndex = nextSectionIndex
+    this.currentPageNumber = nextSectionIndex + 1
+    this.updateLocator({
+      spineIndex: nextSectionIndex,
+      progressInSection: 0
+    })
+    this.renderCurrentSection()
+    this.events.emit("relocated", { locator: this.locator })
   }
 
   private async goToLeafPage(pageNumber: number): Promise<void> {
@@ -1386,10 +1421,13 @@ export class EpubReader {
   }
 
   getPaginationInfo(): PaginationInfo {
-    this.ensurePages();
     if (this.mode === "scroll") {
-      this.syncCurrentPageFromSection();
+      return {
+        currentPage: Math.max(1, Math.min(this.currentSectionIndex + 1, this.book?.sections.length ?? 1)),
+        totalPages: Math.max(1, this.book?.sections.length ?? 1)
+      }
     }
+    this.ensurePages();
     if (this.mode === "paginated") {
       const visibleSpreads = this.getVisiblePaginatedSpreads()
       if (visibleSpreads.length > 0) {
@@ -1615,19 +1653,25 @@ export class EpubReader {
         } else {
           this.renderDomSection(section, renderVersion);
         }
-        if (currentPage) {
-          this.currentPageNumber = currentPage.pageNumber;
+        const measuredPage = this.syncMeasuredPaginatedDomPages(section)
+        const resolvedPage = measuredPage ?? currentPage
+        if (resolvedPage) {
+          this.currentPageNumber = resolvedPage.pageNumber;
           this.updateLocator({
             ...this.locator,
-            spineIndex: currentPage.spineIndex,
+            spineIndex: resolvedPage.spineIndex,
             progressInSection:
-              currentPage.totalPagesInSection > 1
-                ? (currentPage.pageNumberInSection - 1) /
-                  (currentPage.totalPagesInSection - 1)
+              resolvedPage.totalPagesInSection > 1
+                ? (resolvedPage.pageNumberInSection - 1) /
+                  (resolvedPage.totalPagesInSection - 1)
                 : 0
           });
         }
-        this.syncDomSectionStateAfterRender(renderBehavior, preservedScrollAnchor);
+        this.syncDomSectionStateAfterRender(
+          renderBehavior,
+          preservedScrollAnchor,
+          resolvedPage
+        );
         return;
       }
       this.renderPaginatedCanvas(section, currentPage, renderVersion);
@@ -1870,7 +1914,8 @@ export class EpubReader {
 
   private syncDomSectionStateAfterRender(
     renderBehavior: RenderBehavior,
-    preservedScrollAnchor: ScrollAnchor | null
+    preservedScrollAnchor: ScrollAnchor | null,
+    paginatedPage: ReaderPage | null = null
   ): void {
     if (!this.options.container) {
       return;
@@ -1878,6 +1923,30 @@ export class EpubReader {
 
     if (renderBehavior === "preserve" && preservedScrollAnchor && this.mode === "scroll") {
       this.setProgrammaticScrollTop(preservedScrollAnchor.fallbackScrollTop);
+    } else if (this.mode === "paginated") {
+      const targetPage =
+        paginatedPage ??
+        (this.locator
+          ? this.findPageForLocator({
+              ...this.locator,
+              spineIndex: this.currentSectionIndex
+            })
+          : null) ??
+        this.findCurrentPageForSection(
+          this.book?.sections[this.currentSectionIndex]?.id ?? ""
+        )
+      const progressInSection =
+        targetPage && targetPage.totalPagesInSection > 1
+          ? (targetPage.pageNumberInSection - 1) / (targetPage.totalPagesInSection - 1)
+          : 0
+
+      this.scrollDomSectionToPaginatedPage(targetPage?.pageNumberInSection ?? 1);
+      this.updateLocator({
+        ...this.locator,
+        spineIndex: this.currentSectionIndex,
+        progressInSection
+      });
+      return;
     } else if (this.scrollToLocatorAnchor()) {
       this.syncCurrentPageFromSection();
       this.updateLocator({
@@ -1915,6 +1984,114 @@ export class EpubReader {
       sectionHeight - this.options.container.clientHeight
     );
     this.setProgrammaticScrollTop(availableScroll * clamped);
+  }
+
+  private scrollDomSectionToPaginatedPage(pageNumberInSection: number): void {
+    if (!this.options.container) {
+      return
+    }
+
+    const section = this.options.container.querySelector(".epub-dom-section")
+    const sectionHeight =
+      (section instanceof HTMLElement
+        ? section.scrollHeight || section.offsetHeight
+        : 0) || this.options.container.scrollHeight
+    const maxScroll = Math.max(0, sectionHeight - this.getPageHeight())
+    const targetOffset = Math.max(0, pageNumberInSection - 1) * this.getPageHeight()
+    this.setProgrammaticScrollTop(Math.min(targetOffset, maxScroll))
+  }
+
+  private syncMeasuredPaginatedDomPages(section: SectionDocument): ReaderPage | null {
+    if (!this.options.container) {
+      return null
+    }
+
+    if (
+      section.renditionLayout === "pre-paginated" ||
+      section.presentationRole === "cover" ||
+      section.presentationRole === "image-page"
+    ) {
+      return null
+    }
+
+    const selectorValue = escapeAttributeSelectorValue(section.id)
+    const sectionElement = this.options.container.querySelector<HTMLElement>(
+      `.epub-dom-section[data-section-id="${selectorValue}"]`
+    )
+    if (!sectionElement) {
+      return null
+    }
+
+    const pageHeight = this.getPageHeight()
+    const sectionHeight = Math.max(
+      pageHeight,
+      sectionElement.scrollHeight || sectionElement.offsetHeight || pageHeight
+    )
+    const pageCount = Math.max(1, Math.ceil(sectionHeight / pageHeight))
+    const seenBlockIdsByPage = Array.from({ length: pageCount }, () => new Set<string>())
+    const pageBlocks = Array.from({ length: pageCount }, () => [] as PageBlockSlice[])
+    const sectionRect = sectionElement.getBoundingClientRect()
+
+    const measuredElements = Array.from(
+      sectionElement.querySelectorAll<HTMLElement>("[data-reader-block-id]")
+    )
+    if (measuredElements.length === 0) {
+      return null
+    }
+
+    for (const element of measuredElements) {
+      const blockId = element.dataset.readerBlockId?.trim()
+      if (!blockId) {
+        continue
+      }
+
+      const block = findBlockById(section.blocks, blockId)
+      if (!block) {
+        continue
+      }
+
+      const relativeTop = Math.max(0, element.getBoundingClientRect().top - sectionRect.top)
+      const pageIndex = Math.min(pageCount - 1, Math.floor(relativeTop / pageHeight))
+      const seenBlockIds = seenBlockIdsByPage[pageIndex]
+      const blocks = pageBlocks[pageIndex]
+      if (!seenBlockIds || !blocks || seenBlockIds.has(block.id)) {
+        continue
+      }
+
+      seenBlockIds.add(block.id)
+      blocks.push({
+        type: "native",
+        block
+      })
+    }
+
+    const nextPages: ReaderPage[] = []
+    const pagesBeforeSection = this.pages.filter((page) => page.spineIndex < this.currentSectionIndex)
+    const pagesAfterSection = this.pages.filter((page) => page.spineIndex > this.currentSectionIndex)
+    for (let index = 0; index < pageCount; index += 1) {
+      nextPages.push({
+        pageNumber: 0,
+        pageNumberInSection: index + 1,
+        totalPagesInSection: pageCount,
+        spineIndex: this.currentSectionIndex,
+        sectionId: section.id,
+        sectionHref: section.href,
+        blocks: pageBlocks[index] ?? []
+      })
+    }
+
+    this.pages = [...pagesBeforeSection, ...nextPages, ...pagesAfterSection].map((page, index) => ({
+      ...page,
+      pageNumber: index + 1
+    }))
+    this.sectionEstimatedHeights[this.currentSectionIndex] = pageCount * pageHeight
+
+    return this.locator
+      ? this.findPageForLocator({
+          ...this.locator,
+          spineIndex: this.currentSectionIndex
+        })
+      : this.findCurrentPageForSection(section.id)
   }
 
   private resolveChapterRenderDecision(sectionIndex: number): ChapterRenderDecision {
@@ -2400,9 +2577,10 @@ export class EpubReader {
   }
 
   private getPaginationMeasurement(): { width: number; height: number } {
+    const { height } = this.getContainerInnerDimensions()
     return {
       width: this.getContentWidth(),
-      height: this.options.container?.clientHeight ?? 720
+      height
     }
   }
 
@@ -2997,11 +3175,7 @@ export class EpubReader {
   }
 
   private getPageHeight(): number {
-    if (!this.options.container) {
-      return 720;
-    }
-
-    return Math.max(220, this.options.container.clientHeight - 24);
+    return this.getContainerInnerDimensions().height
   }
 
   private findCurrentPageForSection(sectionId: string): ReaderPage | null {
@@ -3253,6 +3427,11 @@ export class EpubReader {
   }
 
   private syncCurrentPageFromSection(): void {
+    if (this.mode === "scroll") {
+      this.currentPageNumber = this.currentSectionIndex + 1
+      return
+    }
+
     const matchingPage = this.locator
       ? this.findPageForLocator({
           ...this.locator,
@@ -3284,6 +3463,10 @@ export class EpubReader {
   private getProgressForCurrentLocator(): number {
     if (!this.locator) {
       return 0;
+    }
+
+    if (this.mode === "scroll") {
+      return clampProgress(this.locator.progressInSection ?? 0)
     }
 
     const page = this.findPageForLocator({
