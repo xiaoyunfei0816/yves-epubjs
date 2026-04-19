@@ -32,6 +32,7 @@ export type ReaderPage = {
   spineIndex: number
   sectionId: string
   sectionHref: string
+  offsetInSection?: number
   blocks: PageBlockSlice[]
 }
 
@@ -181,7 +182,8 @@ export function buildPaginatedPages(options: {
     pages: pages.map((page, index) => ({
       ...page,
       pageNumber: index + 1,
-      totalPagesInSection: totalPagesBySection.get(page.sectionId) ?? 1
+      totalPagesInSection: totalPagesBySection.get(page.sectionId) ?? 1,
+      offsetInSection: (page.pageNumberInSection - 1) * options.pageHeight
     })),
     sectionEstimatedHeights: options.sections.map((section) => {
       const sectionPageCount = totalPagesBySection.get(section.id) ?? 1

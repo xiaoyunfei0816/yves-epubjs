@@ -1829,7 +1829,7 @@ export class EpubReader {
     const renderedSections: Array<{
       sectionId: string
       input: DomChapterRenderInput
-      pageNumberInSection: number
+      page: ReaderPage
       usesViewportSlice: boolean
     }> = []
     const pageHeight = this.getPageHeight()
@@ -1849,7 +1849,7 @@ export class EpubReader {
         renderedSections.push({
           sectionId: slot.section.id,
           input: domRenderInput,
-          pageNumberInSection: slot.page.pageNumberInSection,
+          page: slot.page,
           usesViewportSlice
         })
         const sectionMarkup = this.domChapterRenderer.createMarkup(domRenderInput)
@@ -1875,7 +1875,7 @@ export class EpubReader {
           (entry) => entry.sectionId === renderedSection.sectionId
         )
         if (renderedPage?.usesViewportSlice) {
-          this.positionPaginatedDomSection(domSection, renderedPage.pageNumberInSection)
+          this.positionPaginatedDomSection(domSection, renderedPage.page)
         }
         annotateDomSectionWithBlockIds(this.book.sections[sectionIndex]!, domSection)
         applyDomDecorations({
@@ -1967,7 +1967,7 @@ export class EpubReader {
           ? (targetPage.pageNumberInSection - 1) / (targetPage.totalPagesInSection - 1)
           : 0
 
-      this.scrollDomSectionToPaginatedPage(targetPage?.pageNumberInSection ?? 1);
+      this.scrollDomSectionToPaginatedPage(targetPage);
       this.updateLocator({
         ...this.locator,
         spineIndex: this.currentSectionIndex,
@@ -2013,21 +2013,21 @@ export class EpubReader {
     this.setProgrammaticScrollTop(availableScroll * clamped);
   }
 
-  private scrollDomSectionToPaginatedPage(pageNumberInSection: number): void {
+  private scrollDomSectionToPaginatedPage(page: ReaderPage | null): void {
     if (!this.options.container) {
       return
     }
 
     const section = this.options.container.querySelector<HTMLElement>(".epub-dom-section")
-    if (section) {
-      this.positionPaginatedDomSection(section, pageNumberInSection)
+    if (section && page) {
+      this.positionPaginatedDomSection(section, page)
     }
     this.setProgrammaticScrollTop(0)
   }
 
   private positionPaginatedDomSection(
     section: HTMLElement,
-    pageNumberInSection: number
+    page: ReaderPage
   ): void {
     const viewport = section.closest<HTMLElement>("[data-page-viewport='true']")
     if (!viewport) {
@@ -2035,8 +2035,17 @@ export class EpubReader {
     }
 
     const pageHeight = this.getPageHeight()
-    viewport.style.height = `${pageHeight}px`
-    const targetOffset = Math.max(0, pageNumberInSection - 1) * pageHeight
+    const targetOffset =
+      typeof page.offsetInSection === "number"
+        ? Math.max(0, page.offsetInSection)
+        : Math.max(0, page.pageNumberInSection - 1) * pageHeight
+    const nextPage = this.findPageByNumber(page.pageNumber + 1)
+    const sectionHeight = Math.max(pageHeight, section.scrollHeight || section.offsetHeight || pageHeight)
+    const visibleHeight =
+      nextPage?.sectionId === page.sectionId && typeof nextPage.offsetInSection === "number"
+        ? Math.max(1, Math.min(pageHeight, nextPage.offsetInSection - targetOffset))
+        : Math.max(1, Math.min(pageHeight, sectionHeight - targetOffset))
+    viewport.style.height = `${visibleHeight}px`
     section.style.position = "relative"
     section.style.transform = `translateY(-${targetOffset}px)`
     section.style.transformOrigin = "top left"
@@ -2064,76 +2073,92 @@ export class EpubReader {
       return null
     }
 
-    const pageHeight = this.getPageHeight()
-    const sectionHeight = Math.max(
-      pageHeight,
-      sectionElement.scrollHeight || sectionElement.offsetHeight || pageHeight
-    )
-    const pageCount = Math.max(1, Math.ceil(sectionHeight / pageHeight))
-    const seenBlockIdsByPage = Array.from({ length: pageCount }, () => new Set<string>())
-    const pageBlocks = Array.from({ length: pageCount }, () => [] as PageBlockSlice[])
-    const sectionRect = sectionElement.getBoundingClientRect()
+    const previousTransform = sectionElement.style.transform
+    const previousTransformOrigin = sectionElement.style.transformOrigin
+    const previousWillChange = sectionElement.style.willChange
 
-    const measuredElements = Array.from(
-      sectionElement.querySelectorAll<HTMLElement>("[data-reader-block-id]")
-    )
-    if (measuredElements.length === 0) {
-      return null
-    }
+    try {
+      sectionElement.style.transform = "translateY(0px)"
+      sectionElement.style.transformOrigin = "top left"
+      sectionElement.style.willChange = "auto"
 
-    for (const element of measuredElements) {
-      const blockId = element.dataset.readerBlockId?.trim()
-      if (!blockId) {
-        continue
+      const pageHeight = this.getPageHeight()
+      const sectionHeight = Math.max(
+        pageHeight,
+        sectionElement.scrollHeight || sectionElement.offsetHeight || pageHeight
+      )
+      const pageOffsets = measurePaginatedDomPageOffsets(sectionElement, pageHeight)
+      const pageCount = Math.max(1, pageOffsets.length)
+      const seenBlockIdsByPage = Array.from({ length: pageCount }, () => new Set<string>())
+      const pageBlocks = Array.from({ length: pageCount }, () => [] as PageBlockSlice[])
+      const sectionRect = sectionElement.getBoundingClientRect()
+
+      const measuredElements = Array.from(
+        sectionElement.querySelectorAll<HTMLElement>("[data-reader-block-id]")
+      )
+      if (measuredElements.length === 0) {
+        return null
       }
 
-      const block = findBlockById(section.blocks, blockId)
-      if (!block) {
-        continue
-      }
+      for (const element of measuredElements) {
+        const blockId = element.dataset.readerBlockId?.trim()
+        if (!blockId) {
+          continue
+        }
 
-      const relativeTop = Math.max(0, element.getBoundingClientRect().top - sectionRect.top)
-      const pageIndex = Math.min(pageCount - 1, Math.floor(relativeTop / pageHeight))
-      const seenBlockIds = seenBlockIdsByPage[pageIndex]
-      const blocks = pageBlocks[pageIndex]
-      if (!seenBlockIds || !blocks || seenBlockIds.has(block.id)) {
-        continue
-      }
+        const block = findBlockById(section.blocks, blockId)
+        if (!block) {
+          continue
+        }
 
-      seenBlockIds.add(block.id)
-      blocks.push({
-        type: "native",
-        block
-      })
-    }
+        const relativeTop = Math.max(0, element.getBoundingClientRect().top - sectionRect.top)
+        const pageIndex = resolvePaginatedDomPageIndex(relativeTop, pageOffsets)
+        const seenBlockIds = seenBlockIdsByPage[pageIndex]
+        const blocks = pageBlocks[pageIndex]
+        if (!seenBlockIds || !blocks || seenBlockIds.has(block.id)) {
+          continue
+        }
 
-    const nextPages: ReaderPage[] = []
-    const pagesBeforeSection = this.pages.filter((page) => page.spineIndex < this.currentSectionIndex)
-    const pagesAfterSection = this.pages.filter((page) => page.spineIndex > this.currentSectionIndex)
-    for (let index = 0; index < pageCount; index += 1) {
-      nextPages.push({
-        pageNumber: 0,
-        pageNumberInSection: index + 1,
-        totalPagesInSection: pageCount,
-        spineIndex: this.currentSectionIndex,
-        sectionId: section.id,
-        sectionHref: section.href,
-        blocks: pageBlocks[index] ?? []
-      })
-    }
-
-    this.pages = [...pagesBeforeSection, ...nextPages, ...pagesAfterSection].map((page, index) => ({
-      ...page,
-      pageNumber: index + 1
-    }))
-    this.sectionEstimatedHeights[this.currentSectionIndex] = pageCount * pageHeight
-
-    return this.locator
-      ? this.findPageForLocator({
-          ...this.locator,
-          spineIndex: this.currentSectionIndex
+        seenBlockIds.add(block.id)
+        blocks.push({
+          type: "native",
+          block
         })
-      : this.findCurrentPageForSection(section.id)
+      }
+
+      const nextPages: ReaderPage[] = []
+      const pagesBeforeSection = this.pages.filter((page) => page.spineIndex < this.currentSectionIndex)
+      const pagesAfterSection = this.pages.filter((page) => page.spineIndex > this.currentSectionIndex)
+      for (let index = 0; index < pageCount; index += 1) {
+        nextPages.push({
+          pageNumber: 0,
+          pageNumberInSection: index + 1,
+          totalPagesInSection: pageCount,
+          spineIndex: this.currentSectionIndex,
+          sectionId: section.id,
+          sectionHref: section.href,
+          offsetInSection: pageOffsets[index] ?? index * pageHeight,
+          blocks: pageBlocks[index] ?? []
+        })
+      }
+
+      this.pages = [...pagesBeforeSection, ...nextPages, ...pagesAfterSection].map((page, index) => ({
+        ...page,
+        pageNumber: index + 1
+      }))
+      this.sectionEstimatedHeights[this.currentSectionIndex] = Math.max(sectionHeight, pageCount * pageHeight)
+
+      return this.locator
+        ? this.findPageForLocator({
+            ...this.locator,
+            spineIndex: this.currentSectionIndex
+          })
+        : this.findCurrentPageForSection(section.id)
+    } finally {
+      sectionElement.style.transform = previousTransform
+      sectionElement.style.transformOrigin = previousTransformOrigin
+      sectionElement.style.willChange = previousWillChange
+    }
   }
 
   private resolveChapterRenderDecision(sectionIndex: number): ChapterRenderDecision {
@@ -5169,6 +5194,103 @@ function collectTextNodes(root: Node): Text[] {
     current = walker.nextNode()
   }
   return textNodes
+}
+
+function measurePaginatedDomPageOffsets(
+  sectionElement: HTMLElement,
+  pageHeight: number
+): number[] {
+  const sectionHeight = Math.max(
+    pageHeight,
+    sectionElement.scrollHeight || sectionElement.offsetHeight || pageHeight
+  )
+  const maxOffset = Math.max(0, sectionHeight - pageHeight)
+  const lineBands = collectPaginatedDomReadableLineBands(sectionElement)
+  if (lineBands.length === 0) {
+    const offsets = [0]
+    for (let offset = pageHeight; offset < sectionHeight; offset += pageHeight) {
+      offsets.push(offset)
+    }
+    return offsets
+  }
+
+  const offsets = [0]
+  let currentOffset = 0
+  while (currentOffset < maxOffset - 0.5) {
+    const pageBottom = currentOffset + pageHeight
+    const lastFullyVisibleLine = [...lineBands]
+      .reverse()
+      .find((band) => band.top >= currentOffset - 0.5 && band.bottom <= pageBottom + 0.5)
+    const nextLine = lastFullyVisibleLine
+      ? lineBands.find((band) => band.top >= lastFullyVisibleLine.bottom - 0.5)
+      : lineBands.find((band) => band.top > currentOffset + 0.5)
+    const fallbackOffset = Math.min(sectionHeight, currentOffset + pageHeight)
+    const nextOffset = Math.min(
+      sectionHeight,
+      Math.max(currentOffset + 1, nextLine?.top ?? fallbackOffset)
+    )
+    if (nextOffset <= currentOffset + 0.5) {
+      break
+    }
+    offsets.push(nextOffset)
+    currentOffset = nextOffset
+  }
+
+  return offsets
+}
+
+function collectPaginatedDomReadableLineBands(
+  sectionElement: HTMLElement
+): Array<{ top: number; bottom: number }> {
+  if (typeof document === "undefined") {
+    return []
+  }
+
+  const sectionRect = sectionElement.getBoundingClientRect()
+  const bands = new Map<string, { top: number; bottom: number }>()
+  for (const element of collectDomReadableBlockElements(sectionElement)) {
+    const hasText = collectTextNodes(element).some((textNode) => (textNode.textContent ?? "").trim())
+    const rects = hasText
+      ? measureDomRangeLineBands(element)
+      : [element.getBoundingClientRect()]
+
+    for (const rect of rects) {
+      if (rect.height <= 0 || rect.width <= 0) {
+        continue
+      }
+      const top = Math.max(0, rect.top - sectionRect.top)
+      const bottom = Math.max(top, rect.bottom - sectionRect.top)
+      const key = `${top.toFixed(2)}:${bottom.toFixed(2)}`
+      if (!bands.has(key)) {
+        bands.set(key, { top, bottom })
+      }
+    }
+  }
+
+  return [...bands.values()].sort((left, right) =>
+    left.top === right.top ? left.bottom - right.bottom : left.top - right.top
+  )
+}
+
+function measureDomRangeLineBands(root: HTMLElement): DOMRect[] {
+  if (typeof document === "undefined") {
+    return []
+  }
+
+  const range = document.createRange()
+  range.selectNodeContents(root)
+  return typeof range.getClientRects === "function" ? Array.from(range.getClientRects()) : []
+}
+
+function resolvePaginatedDomPageIndex(offsetTop: number, pageOffsets: number[]): number {
+  for (let index = pageOffsets.length - 1; index >= 0; index -= 1) {
+    const candidate = pageOffsets[index]
+    if (typeof candidate === "number" && offsetTop >= candidate - 0.5) {
+      return index
+    }
+  }
+
+  return 0
 }
 
 function getScopedTextSelectionRecord(scope: Node): {
