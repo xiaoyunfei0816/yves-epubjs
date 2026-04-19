@@ -36,6 +36,8 @@ export function createSharedChapterRenderInput(input: {
   return {
     href: input.href,
     content: input.content,
+    // Preprocess once so render analysis, DOM routing, and later render passes
+    // all reason about the same normalized chapter structure.
     preprocessed: preprocessChapterDocument(input),
     linkedStyleSheets: [...(input.linkedStyleSheets ?? [])]
   };

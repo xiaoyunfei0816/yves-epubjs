@@ -448,6 +448,8 @@ export class EpubReader {
       return false;
     }
 
+    // Resolve the best restorable locator first so callers can inspect why a
+    // restore succeeded, downgraded precision, or failed before navigation runs.
     const restored = restoreLocatorWithDiagnostics({
       book: this.book,
       locator
@@ -1595,6 +1597,8 @@ export class EpubReader {
       return;
     }
 
+    // In scroll mode, preserve renders should keep the same visual anchor in view
+    // after relayout, theme changes, or annotation updates.
     const preservedScrollAnchor =
       this.mode === "scroll" && renderBehavior === "preserve"
         ? this.captureScrollAnchor()
@@ -2124,6 +2128,8 @@ export class EpubReader {
       };
     }
 
+    // Cache by chapter source so repeated renders, searches, and mode switches do
+    // not keep re-running the analyzer for the same section content.
     return this.chapterRenderDecisionCache.resolve(
       {
         href: input.href,
@@ -3413,6 +3419,8 @@ export class EpubReader {
       return null
     }
 
+    // Navigation advances by visible spread, not raw leaf page, so a synthetic
+    // spread turns with one action instead of stepping into its paired page.
     const boundaryPageNumber =
       action === "next"
         ? (spread.pageNumbers[spread.pageNumbers.length - 1] ?? spread.currentPageNumber) + 1

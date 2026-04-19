@@ -105,6 +105,8 @@ export class BookParser {
       };
     });
 
+    // Prefer the declared cover image when available. If metadata is incomplete,
+    // fall back to the first section that is effectively a single image page.
     const coverSectionIndex = resolveCoverSectionIndex(sections, opf.metadata.coverImageHref)
     if (typeof coverSectionIndex === "number") {
       const section = sections[coverSectionIndex]
@@ -116,6 +118,8 @@ export class BookParser {
       }
     }
 
+    // Mark remaining standalone image sections explicitly so downstream render
+    // decisions can preserve their page-like presentation.
     sections.forEach((section, index) => {
       if (section.presentationRole || !isSingleImageSection(section.blocks)) {
         return

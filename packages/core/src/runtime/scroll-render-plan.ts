@@ -57,6 +57,8 @@ export function buildScrollRenderPlan(options: {
     }
 
     if (index < options.scrollWindowStart || index > options.scrollWindowEnd) {
+      // Keep off-window sections as height placeholders so scroll geometry stays
+      // stable even when we skip expensive layout/render work for them.
       const height = options.getSectionHeight(section.id)
       measuredSectionHeights[index] = height
       sectionsToRender.push({
@@ -69,6 +71,8 @@ export function buildScrollRenderPlan(options: {
 
     const chapterRenderDecision = options.resolveChapterRenderDecision(index)
     if (chapterRenderDecision.mode === "dom") {
+      // DOM sections keep an estimated height until the browser measures them,
+      // which lets mixed canvas/DOM scroll mode share one placement model.
       const height =
         options.sectionEstimatedHeights[index] ??
         Math.max(options.pageHeight, options.viewportHeight)
@@ -137,6 +141,8 @@ function assignScrollRenderWindows(input: {
     entry.height = height
 
     if (entry.displayList) {
+      // Render the visible slice plus adjacent slices. This reduces blank flashes
+      // during fast scroll without forcing a full-section canvas redraw.
       const currentRenderTop = Math.max(0, input.viewportTop - overscan - runningTop)
       const currentRenderBottom = Math.min(
         height,
