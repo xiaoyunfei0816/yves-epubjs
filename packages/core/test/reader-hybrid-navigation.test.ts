@@ -646,7 +646,7 @@ describe("EpubReader hybrid navigation", () => {
     }
   });
 
-  it("uses the reader viewport height as the paginated DOM page step", async () => {
+  it("positions paginated DOM pages with a translated viewport slice", async () => {
     const originalOffsetHeight = Object.getOwnPropertyDescriptor(
       HTMLElement.prototype,
       "offsetHeight"
@@ -704,7 +704,85 @@ describe("EpubReader hybrid navigation", () => {
       await reader.goToPage(2);
 
       expect(reader.getPaginationInfo().currentPage).toBe(2);
-      expect(container.scrollTop).toBe(430);
+      expect(container.scrollTop).toBe(0);
+      expect(
+        container.querySelector<HTMLElement>(".epub-dom-page-viewport")?.style.height
+      ).toBe("430px");
+      expect(
+        container.querySelector<HTMLElement>(".epub-dom-section")?.style.transform
+      ).toBe("translateY(-430px)");
+    } finally {
+      if (originalOffsetHeight) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
+      }
+      if (originalScrollHeight) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", originalScrollHeight);
+      }
+    }
+  });
+
+  it("does not clamp the last paginated DOM slice back into repeated content", async () => {
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight"
+    );
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight"
+    );
+
+    try {
+      let currentScrollTop = 0;
+
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+        configurable: true,
+        get() {
+          if (
+            this.classList?.contains("epub-dom-section") &&
+            this.dataset?.sectionId === "section-long-dom"
+          ) {
+            return 603;
+          }
+          return originalOffsetHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+        configurable: true,
+        get() {
+          if (
+            this.classList?.contains("epub-dom-section") &&
+            this.dataset?.sectionId === "section-long-dom"
+          ) {
+            return 603;
+          }
+          return originalScrollHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      const { reader, container } = createLongDomReaderFixture("paginated");
+      Object.defineProperty(container, "scrollTop", {
+        configurable: true,
+        get() {
+          return currentScrollTop;
+        },
+        set(value: number) {
+          currentScrollTop = value;
+        }
+      });
+
+      await reader.render();
+
+      expect(reader.getRenderMetrics().backend).toBe("dom");
+      expect(reader.getPaginationInfo().totalPages).toBe(2);
+
+      await reader.goToPage(2);
+
+      expect(reader.getPaginationInfo().currentPage).toBe(2);
+      expect(container.scrollTop).toBe(0);
+      expect(
+        container.querySelector<HTMLElement>(".epub-dom-section")?.style.transform
+      ).toBe("translateY(-430px)");
     } finally {
       if (originalOffsetHeight) {
         Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);

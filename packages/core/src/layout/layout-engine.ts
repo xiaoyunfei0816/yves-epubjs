@@ -190,11 +190,21 @@ export class LayoutEngine {
       typography: input.typography
     });
 
+    // Pretext lines must wrap against the same content box that the canvas
+    // renderer uses later; otherwise the last glyph can land inside the
+    // section side padding and get clipped at paint time.
+    const sectionContentWidth = Math.max(
+      40,
+      width - styleProfile.section.sidePadding * 2
+    );
     const paddingTop = block.style?.paddingTop ?? 0;
     const paddingBottom = block.style?.paddingBottom ?? 0;
     const paddingLeft = block.style?.paddingLeft ?? 0;
     const paddingRight = block.style?.paddingRight ?? 0;
-    const contentWidth = Math.max(40, width - paddingLeft - paddingRight);
+    const contentWidth = Math.max(
+      40,
+      sectionContentWidth - paddingLeft - paddingRight
+    );
 
     if (block.kind === "text") {
       const coverImage = this.getCoverImageInline(block, input.section);

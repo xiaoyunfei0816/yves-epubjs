@@ -390,10 +390,6 @@ export function useReaderController(
     }))
     await reader.open(file)
     await reader.render()
-    await reader.goToLocation({
-      spineIndex: 0,
-      progressInSection: 0
-    })
     const publicationId = reader.getPublicationId()
     const mergedPreferences = loadStoredReaderPreferences(publicationId ?? undefined)
     if (mergedPreferences) {

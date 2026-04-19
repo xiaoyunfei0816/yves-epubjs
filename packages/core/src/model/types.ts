@@ -23,6 +23,7 @@ export type BookMetadata = {
   creator?: string;
   publisher?: string;
   coverImageHref?: string;
+  startHref?: string;
   renditionLayout?: RenditionLayout;
   renditionViewport?: FixedLayoutViewport;
   renditionSpread?: RenditionSpread;

@@ -21,6 +21,9 @@ type OpfDocument = {
     spine?: {
       itemref?: XmlNode | XmlNode[];
     };
+    guide?: {
+      reference?: XmlNode | XmlNode[];
+    };
   };
 };
 
@@ -96,6 +99,7 @@ export function parseOpfDocument(
   const metadataNode = packageNode?.metadata;
   const manifestNodes = asArray(packageNode?.manifest?.item);
   const spineNodes = asArray(packageNode?.spine?.itemref);
+  const guideNodes = asArray(packageNode?.guide?.reference)
 
   const title = readFirstText(metadataNode, ["dc:title", "title"]) ?? "Untitled EPUB";
   const metadata: BookMetadata = { title };
@@ -161,6 +165,10 @@ export function parseOpfDocument(
   if (coverImageHref) {
     metadata.coverImageHref = coverImageHref
   }
+  const startHref = resolveGuideStartHref(guideNodes, packageDocumentPath)
+  if (startHref) {
+    metadata.startHref = startHref
+  }
 
   const spine = spineNodes.flatMap((item) => {
     const idref = typeof item["@_idref"] === "string" ? item["@_idref"] : undefined;
@@ -201,6 +209,27 @@ export function parseOpfDocument(
     manifest,
     spine
   };
+}
+
+function resolveGuideStartHref(
+  guideNodes: XmlNode[],
+  packageDocumentPath: string
+): string | undefined {
+  for (const reference of guideNodes) {
+    const type = typeof reference["@_type"] === "string" ? reference["@_type"].trim().toLowerCase() : ""
+    if (type !== "text") {
+      continue
+    }
+
+    const href = typeof reference["@_href"] === "string" ? reference["@_href"].trim() : ""
+    if (!href) {
+      continue
+    }
+
+    return resolveResourcePath(packageDocumentPath, href)
+  }
+
+  return undefined
 }
 
 function resolveMetadataRenditionLayout(

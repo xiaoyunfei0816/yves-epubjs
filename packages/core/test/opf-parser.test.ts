@@ -134,6 +134,32 @@ describe("parseOpfDocument", () => {
     expect(epub2.metadata.coverImageHref).toBe("OPS/images/legacy-cover.png")
   })
 
+  it("extracts the epub2 guide text reference as the default reading start href", () => {
+    const result = parseOpfDocument(
+      `<?xml version="1.0"?>
+      <package>
+        <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+          <dc:title>Guide Start Book</dc:title>
+        </metadata>
+        <manifest>
+          <item id="chapter-1" href="chapter-1.xhtml" media-type="application/xhtml+xml" />
+          <item id="chapter-2" href="chapter-2.xhtml" media-type="application/xhtml+xml" />
+        </manifest>
+        <spine>
+          <itemref idref="chapter-1" />
+          <itemref idref="chapter-2" />
+        </spine>
+        <guide>
+          <reference type="cover" title="Cover" href="chapter-1.xhtml" />
+          <reference type="text" title="Start" href="chapter-2.xhtml#intro" />
+        </guide>
+      </package>`,
+      "OPS/content.opf"
+    )
+
+    expect(result.metadata.startHref).toBe("OPS/chapter-2.xhtml#intro")
+  })
+
   it("parses rendition layout, spread metadata, viewport metadata, and spine-level overrides", () => {
     const result = parseOpfDocument(
       `<?xml version="1.0"?>

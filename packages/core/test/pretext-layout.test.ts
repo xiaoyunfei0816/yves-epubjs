@@ -116,6 +116,62 @@ describe("pretext layout integration", () => {
     expect(layout.blocks[0]?.type === "pretext" && layout.blocks[0].lines.length).toBeGreaterThanOrEqual(2)
   })
 
+  it("keeps pretext text runs inside the section content box", () => {
+    const engine = new LayoutEngine()
+    const section: SectionDocument = {
+      id: "section-pretext-width-boundary",
+      href: "OPS/pretext-width-boundary.xhtml",
+      title: "Width Boundary",
+      anchors: {},
+      blocks: [
+        {
+          id: "text-pretext-width-boundary",
+          kind: "text",
+          inlines: [
+            {
+              kind: "text",
+              text:
+                "每逢世界无烟日，医学界的专家总会说：“今天所有吸烟者都应该尝试戒烟！”大部分吸烟的人都清楚，这一天他们抽的烟比平时还多。吸烟者们并不喜欢被当成白痴对待，尤其讨厌无法理解他们为什么吸烟的人。"
+            }
+          ]
+        }
+      ]
+    }
+
+    const layout = engine.layout(
+      {
+        section,
+        spineIndex: 0,
+        viewportWidth: 672,
+        viewportHeight: 600,
+        typography,
+        fontFamily: "serif"
+      },
+      "scroll"
+    )
+
+    const displayList = new DisplayListBuilder().buildSection({
+      section,
+      width: layout.width,
+      viewportHeight: 600,
+      blocks: layout.blocks,
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography,
+      activeBlockId: undefined
+    })
+
+    const textOps = displayList.ops.filter(
+      (op): op is TextRunDrawOp =>
+        op.kind === "text" && op.blockId === "text-pretext-width-boundary"
+    )
+
+    expect(textOps.length).toBeGreaterThan(1)
+    expect(textOps.every((op) => op.x + op.width <= displayList.width + 0.5)).toBe(true)
+  })
+
   it("carries measured fragment widths through pretext layout output", () => {
     const engine = new LayoutEngine()
     const section = createSection()

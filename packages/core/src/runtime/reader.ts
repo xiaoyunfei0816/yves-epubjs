@@ -324,8 +324,15 @@ export class EpubReader {
     this.chapterRenderInputs = parsed.sectionContents.map((entry) =>
       createSharedChapterRenderInput(entry)
     );
-    this.locator = null;
-    this.currentSectionIndex = 0;
+    const startLocator = parsed.book.metadata.startHref
+      ? resolveBookHrefLocator({
+          book: parsed.book,
+          currentSectionIndex: 0,
+          href: parsed.book.metadata.startHref
+        })
+      : null
+    this.locator = startLocator;
+    this.currentSectionIndex = startLocator?.spineIndex ?? 0;
     this.pages = [];
     this.sectionEstimatedHeights = [];
     this.currentPageNumber = 1;
@@ -1822,7 +1829,10 @@ export class EpubReader {
     const renderedSections: Array<{
       sectionId: string
       input: DomChapterRenderInput
+      pageNumberInSection: number
+      usesViewportSlice: boolean
     }> = []
+    const pageHeight = this.getPageHeight()
     const markup = spread.slots
       .map((slot) => {
         if (!slot.section || !slot.page) {
@@ -1835,11 +1845,18 @@ export class EpubReader {
         }
 
         const domRenderInput = this.createDomRenderInput(slot.section, input)
+        const usesViewportSlice = domRenderInput.renditionLayout !== "pre-paginated"
         renderedSections.push({
           sectionId: slot.section.id,
-          input: domRenderInput
+          input: domRenderInput,
+          pageNumberInSection: slot.page.pageNumberInSection,
+          usesViewportSlice
         })
-        return `<div class="epub-dom-spread-slot epub-dom-spread-slot-${slot.position}" data-spread-slot="${slot.position}" data-page-number="${slot.page.pageNumber}">${this.domChapterRenderer.createMarkup(domRenderInput)}</div>`
+        const sectionMarkup = this.domChapterRenderer.createMarkup(domRenderInput)
+        const slotMarkup = usesViewportSlice
+          ? `<div class="epub-dom-page-viewport" data-page-viewport="true" data-page-number-in-section="${slot.page.pageNumberInSection}" style="position: relative; overflow: hidden; height: ${pageHeight}px;">${sectionMarkup}</div>`
+          : sectionMarkup
+        return `<div class="epub-dom-spread-slot epub-dom-spread-slot-${slot.position}" data-spread-slot="${slot.position}" data-page-number="${slot.page.pageNumber}">${slotMarkup}</div>`
       })
       .join("")
 
@@ -1854,6 +1871,12 @@ export class EpubReader {
         (section) => section.id === renderedSection.sectionId
       )
       if (domSection && sectionIndex >= 0) {
+        const renderedPage = renderedSections.find(
+          (entry) => entry.sectionId === renderedSection.sectionId
+        )
+        if (renderedPage?.usesViewportSlice) {
+          this.positionPaginatedDomSection(domSection, renderedPage.pageNumberInSection)
+        }
         annotateDomSectionWithBlockIds(this.book.sections[sectionIndex]!, domSection)
         applyDomDecorations({
           container: this.options.container,
@@ -1995,14 +2018,29 @@ export class EpubReader {
       return
     }
 
-    const section = this.options.container.querySelector(".epub-dom-section")
-    const sectionHeight =
-      (section instanceof HTMLElement
-        ? section.scrollHeight || section.offsetHeight
-        : 0) || this.options.container.scrollHeight
-    const maxScroll = Math.max(0, sectionHeight - this.getPageHeight())
-    const targetOffset = Math.max(0, pageNumberInSection - 1) * this.getPageHeight()
-    this.setProgrammaticScrollTop(Math.min(targetOffset, maxScroll))
+    const section = this.options.container.querySelector<HTMLElement>(".epub-dom-section")
+    if (section) {
+      this.positionPaginatedDomSection(section, pageNumberInSection)
+    }
+    this.setProgrammaticScrollTop(0)
+  }
+
+  private positionPaginatedDomSection(
+    section: HTMLElement,
+    pageNumberInSection: number
+  ): void {
+    const viewport = section.closest<HTMLElement>("[data-page-viewport='true']")
+    if (!viewport) {
+      return
+    }
+
+    const pageHeight = this.getPageHeight()
+    viewport.style.height = `${pageHeight}px`
+    const targetOffset = Math.max(0, pageNumberInSection - 1) * pageHeight
+    section.style.position = "relative"
+    section.style.transform = `translateY(-${targetOffset}px)`
+    section.style.transformOrigin = "top left"
+    section.style.willChange = "transform"
   }
 
   private syncMeasuredPaginatedDomPages(section: SectionDocument): ReaderPage | null {
