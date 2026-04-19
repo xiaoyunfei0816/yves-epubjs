@@ -3,42 +3,44 @@ import type {
   RenditionLayout,
   Theme,
   TypographyOptions
-} from "../model/types";
-import type { PreprocessedChapterNode } from "../runtime/chapter-preprocess";
-import { buildDomChapterNormalizationCss } from "./dom-chapter-style";
-import { scopeDomStyleSheetCss } from "./dom-style-scope";
+} from "../model/types"
+import type { PreprocessedChapterNode } from "../runtime/chapter-preprocess"
+import { buildDomChapterNormalizationCss } from "./dom-chapter-style"
+import { scopeDomStyleSheetCss } from "./dom-style-scope"
 
 export type DomChapterRenderInput = {
-  sectionId: string;
-  sectionHref: string;
-  sectionLanguage?: string;
-  sectionDirection?: "ltr" | "rtl";
-  renditionLayout?: RenditionLayout;
-  fixedLayoutViewport?: FixedLayoutViewport;
-  fixedLayoutScale?: number;
-  fixedLayoutRenderWidth?: number;
-  fixedLayoutRenderHeight?: number;
-  presentationRole?: "cover" | "image-page";
-  presentationImageSrc?: string;
-  presentationImageAlt?: string;
+  sectionId: string
+  sectionHref: string
+  sectionLanguage?: string
+  sectionDirection?: "ltr" | "rtl"
+  renditionLayout?: RenditionLayout
+  fixedLayoutViewport?: FixedLayoutViewport
+  fixedLayoutScale?: number
+  fixedLayoutRenderWidth?: number
+  fixedLayoutRenderHeight?: number
+  presentationRole?: "cover" | "image-page"
+  presentationImageSrc?: string
+  presentationImageAlt?: string
+  presentationViewportWidth?: number
+  presentationViewportHeight?: number
   linkedStyleSheets?: Array<{
-    href: string;
-    text: string;
-  }>;
-  nodes: PreprocessedChapterNode[];
-  theme: Theme;
-  typography: TypographyOptions;
-  fontFamily: string;
+    href: string
+    text: string
+  }>
+  nodes: PreprocessedChapterNode[]
+  theme: Theme
+  typography: TypographyOptions
+  fontFamily: string
   resolveAttributeValue?: (input: {
-    tagName: string;
-    attributeName: string;
-    value: string;
-  }) => string;
-};
+    tagName: string
+    attributeName: string
+    value: string
+  }) => string
+}
 
 export class DomChapterRenderer {
   render(container: HTMLElement, input: DomChapterRenderInput): void {
-    container.innerHTML = this.createMarkup(input);
+    container.innerHTML = this.createMarkup(input)
   }
 
   clear(container: HTMLElement): void {
@@ -46,12 +48,13 @@ export class DomChapterRenderer {
       .querySelectorAll(
         ".epub-dom-section, style[data-epub-dom-normalization], style[data-epub-dom-source]"
       )
-      .forEach((element) => element.remove());
+      .forEach((element) => element.remove())
   }
 
   createMarkup(input: DomChapterRenderInput): string {
     if (
-      (input.presentationRole === "cover" || input.presentationRole === "image-page") &&
+      (input.presentationRole === "cover" ||
+        input.presentationRole === "image-page") &&
       input.presentationImageSrc
     ) {
       return this.createPresentationImageMarkup(input)
@@ -59,35 +62,53 @@ export class DomChapterRenderer {
 
     return [
       ...serializeLinkedStyleSheets(input.linkedStyleSheets),
-      `<style data-epub-dom-normalization="true">${buildDomChapterNormalizationCss({
-        theme: input.theme,
-        typography: input.typography,
-        fontFamily: input.fontFamily,
-        ...(input.renditionLayout ? { renditionLayout: input.renditionLayout } : {}),
-        ...(input.presentationRole ? { presentationRole: input.presentationRole } : {})
-      })}</style>`,
-      `<div class="epub-dom-section${input.presentationRole === "cover" ? " epub-dom-section-cover" : ""}${input.renditionLayout === "pre-paginated" ? " epub-dom-section-fxl" : ""}" data-section-id="${escapeHtmlAttribute(input.sectionId)}" data-section-href="${escapeHtmlAttribute(input.sectionHref)}"${serializeSectionLanguageAttributes(input)}${serializeFixedLayoutAttributes(input)}>`,
-      serializePreprocessedChapterNodes(input.nodes, input.resolveAttributeValue),
+      `<style data-epub-dom-normalization="true">${buildDomChapterNormalizationCss(
+        {
+          theme: input.theme,
+          typography: input.typography,
+          fontFamily: input.fontFamily,
+          ...(input.renditionLayout
+            ? { renditionLayout: input.renditionLayout }
+            : {}),
+          ...(input.presentationRole
+            ? { presentationRole: input.presentationRole }
+            : {})
+        }
+      )}</style>`,
+      `<div class="epub-dom-section${input.presentationRole === "cover" ? " epub-dom-section-cover" : ""}${input.renditionLayout === "pre-paginated" ? " epub-dom-section-fxl" : ""}" data-section-id="${escapeHtmlAttribute(input.sectionId)}" data-section-href="${escapeHtmlAttribute(input.sectionHref)}"${serializeSectionLanguageAttributes(input)}${serializeSectionLayoutAttributes(input)}>`,
+      serializePreprocessedChapterNodes(
+        input.nodes,
+        input.resolveAttributeValue
+      ),
       "</div>"
-    ].join("");
+    ].join("")
   }
 
   createPresentationImageMarkup(input: DomChapterRenderInput): string {
     const imageAlt =
-      input.presentationImageAlt ?? (input.presentationRole === "cover" ? "Cover" : "")
+      input.presentationImageAlt ??
+      (input.presentationRole === "cover" ? "Cover" : "")
     const presentationClass =
-      input.presentationRole === "cover" ? "epub-dom-cover" : "epub-dom-image-page"
+      input.presentationRole === "cover"
+        ? "epub-dom-cover"
+        : "epub-dom-image-page"
 
     return [
       ...serializeLinkedStyleSheets(input.linkedStyleSheets),
-      `<style data-epub-dom-normalization="true">${buildDomChapterNormalizationCss({
-        theme: input.theme,
-        typography: input.typography,
-        fontFamily: input.fontFamily,
-        ...(input.renditionLayout ? { renditionLayout: input.renditionLayout } : {}),
-        ...(input.presentationRole ? { presentationRole: input.presentationRole } : {})
-      })}</style>`,
-      `<div class="epub-dom-section epub-dom-section-${input.presentationRole} ${presentationClass}${input.renditionLayout === "pre-paginated" ? " epub-dom-section-fxl" : ""}" data-section-id="${escapeHtmlAttribute(input.sectionId)}" data-section-href="${escapeHtmlAttribute(input.sectionHref)}"${serializeSectionLanguageAttributes(input)}${serializeFixedLayoutAttributes(input)}>`,
+      `<style data-epub-dom-normalization="true">${buildDomChapterNormalizationCss(
+        {
+          theme: input.theme,
+          typography: input.typography,
+          fontFamily: input.fontFamily,
+          ...(input.renditionLayout
+            ? { renditionLayout: input.renditionLayout }
+            : {}),
+          ...(input.presentationRole
+            ? { presentationRole: input.presentationRole }
+            : {})
+        }
+      )}</style>`,
+      `<div class="epub-dom-section epub-dom-section-${input.presentationRole} ${presentationClass}${input.renditionLayout === "pre-paginated" ? " epub-dom-section-fxl" : ""}" data-section-id="${escapeHtmlAttribute(input.sectionId)}" data-section-href="${escapeHtmlAttribute(input.sectionHref)}"${serializeSectionLanguageAttributes(input)}${serializeSectionLayoutAttributes(input)}>`,
       `<img class="epub-dom-presentation-image" src="${escapeHtmlAttribute(input.presentationImageSrc ?? "")}" alt="${escapeHtmlAttribute(imageAlt)}">`,
       "</div>"
     ].join("")
@@ -108,15 +129,17 @@ const VOID_HTML_TAGS = new Set([
   "source",
   "track",
   "wbr"
-]);
+])
 
 function serializePreprocessedChapterNodes(
   nodes: PreprocessedChapterNode[],
   resolveAttributeValue?: DomChapterRenderInput["resolveAttributeValue"]
 ): string {
   return nodes
-    .map((node) => serializePreprocessedChapterNode(node, resolveAttributeValue))
-    .join("");
+    .map((node) =>
+      serializePreprocessedChapterNode(node, resolveAttributeValue)
+    )
+    .join("")
 }
 
 function serializePreprocessedChapterNode(
@@ -124,7 +147,7 @@ function serializePreprocessedChapterNode(
   resolveAttributeValue?: DomChapterRenderInput["resolveAttributeValue"]
 ): string {
   if (node.kind === "text") {
-    return escapeHtmlText(node.text);
+    return escapeHtmlText(node.text)
   }
 
   const attributes = Object.entries(node.attributes)
@@ -135,16 +158,16 @@ function serializePreprocessedChapterNode(
             attributeName: name,
             value
           })
-        : value;
+        : value
       if (!resolvedValue.trim()) {
         return []
       }
       return [` ${name}="${escapeHtmlAttribute(resolvedValue)}"`]
     })
-    .join("");
+    .join("")
 
   if (VOID_HTML_TAGS.has(node.tagName)) {
-    return `<${node.tagName}${attributes}>`;
+    return `<${node.tagName}${attributes}>`
   }
 
   if (node.tagName === "style") {
@@ -154,18 +177,18 @@ function serializePreprocessedChapterNode(
   return `<${node.tagName}${attributes}>${serializePreprocessedChapterNodes(
     node.children,
     resolveAttributeValue
-  )}</${node.tagName}>`;
+  )}</${node.tagName}>`
 }
 
 function escapeHtmlText(value: string): string {
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+    .replaceAll(">", "&gt;")
 }
 
 function escapeHtmlAttribute(value: string): string {
-  return escapeHtmlText(value).replaceAll('"', "&quot;");
+  return escapeHtmlText(value).replaceAll('"', "&quot;")
 }
 
 function serializeLinkedStyleSheets(
@@ -174,11 +197,11 @@ function serializeLinkedStyleSheets(
   return (stylesheets ?? []).map(
     (stylesheet) =>
       `<style data-epub-dom-source="${escapeHtmlAttribute(stylesheet.href)}">${escapeStyleTagText(scopeDomStyleSheetCss(stylesheet.text))}</style>`
-  );
+  )
 }
 
 function escapeStyleTagText(value: string): string {
-  return value.replaceAll("</style", "<\\/style");
+  return value.replaceAll("</style", "<\\/style")
 }
 
 function serializeInlineStyleNode(
@@ -192,39 +215,79 @@ function serializeInlineStyleNode(
   return `<style${attributes}>${escapeStyleTagText(scopeDomStyleSheetCss(styleText))}</style>`
 }
 
-function serializeSectionLanguageAttributes(input: DomChapterRenderInput): string {
+function serializeSectionLanguageAttributes(
+  input: DomChapterRenderInput
+): string {
   return [
-    input.sectionLanguage ? ` lang="${escapeHtmlAttribute(input.sectionLanguage)}"` : "",
-    input.sectionDirection ? ` dir="${escapeHtmlAttribute(input.sectionDirection)}"` : ""
+    input.sectionLanguage
+      ? ` lang="${escapeHtmlAttribute(input.sectionLanguage)}"`
+      : "",
+    input.sectionDirection
+      ? ` dir="${escapeHtmlAttribute(input.sectionDirection)}"`
+      : ""
   ].join("")
 }
 
-function serializeFixedLayoutAttributes(input: DomChapterRenderInput): string {
-  if (input.renditionLayout !== "pre-paginated" || !input.fixedLayoutViewport) {
-    return ""
+function serializeSectionLayoutAttributes(
+  input: DomChapterRenderInput
+): string {
+  const styleAttributes: string[] = []
+  const dataAttributes: string[] = []
+
+  if (input.renditionLayout === "pre-paginated" && input.fixedLayoutViewport) {
+    dataAttributes.push(` data-rendition-layout="pre-paginated"`)
+    dataAttributes.push(
+      ` data-fxl-viewport-width="${escapeHtmlAttribute(String(input.fixedLayoutViewport.width))}"`
+    )
+    dataAttributes.push(
+      ` data-fxl-viewport-height="${escapeHtmlAttribute(String(input.fixedLayoutViewport.height))}"`
+    )
+    styleAttributes.push(
+      `--fxl-viewport-width: ${input.fixedLayoutViewport.width}px`
+    )
+    styleAttributes.push(
+      `--fxl-viewport-height: ${input.fixedLayoutViewport.height}px`
+    )
+
+    if (typeof input.fixedLayoutRenderWidth === "number") {
+      styleAttributes.push(
+        `--fxl-render-width: ${input.fixedLayoutRenderWidth}px`
+      )
+    }
+    if (typeof input.fixedLayoutRenderHeight === "number") {
+      styleAttributes.push(
+        `--fxl-render-height: ${input.fixedLayoutRenderHeight}px`
+      )
+    }
+    if (typeof input.fixedLayoutScale === "number") {
+      dataAttributes.push(
+        ` data-fxl-scale="${escapeHtmlAttribute(input.fixedLayoutScale.toFixed(4))}"`
+      )
+      styleAttributes.push(`--fxl-scale: ${input.fixedLayoutScale}`)
+    }
   }
 
-  const styleAttributes = [
-    `--fxl-viewport-width: ${input.fixedLayoutViewport.width}px`,
-    `--fxl-viewport-height: ${input.fixedLayoutViewport.height}px`,
-    ...(typeof input.fixedLayoutRenderWidth === "number"
-      ? [`--fxl-render-width: ${input.fixedLayoutRenderWidth}px`]
-      : []),
-    ...(typeof input.fixedLayoutRenderHeight === "number"
-      ? [`--fxl-render-height: ${input.fixedLayoutRenderHeight}px`]
-      : []),
-    ...(typeof input.fixedLayoutScale === "number"
-      ? [`--fxl-scale: ${input.fixedLayoutScale}`]
-      : [])
-  ].join("; ")
+  if (typeof input.presentationViewportWidth === "number") {
+    dataAttributes.push(
+      ` data-presentation-width="${escapeHtmlAttribute(String(input.presentationViewportWidth))}"`
+    )
+    styleAttributes.push(
+      `--reader-presentation-width: ${input.presentationViewportWidth}px`
+    )
+  }
+  if (typeof input.presentationViewportHeight === "number") {
+    dataAttributes.push(
+      ` data-presentation-height="${escapeHtmlAttribute(String(input.presentationViewportHeight))}"`
+    )
+    styleAttributes.push(
+      `--reader-presentation-height: ${input.presentationViewportHeight}px`
+    )
+  }
 
   return [
-    ` data-rendition-layout="pre-paginated"`,
-    ` data-fxl-viewport-width="${escapeHtmlAttribute(String(input.fixedLayoutViewport.width))}"`,
-    ` data-fxl-viewport-height="${escapeHtmlAttribute(String(input.fixedLayoutViewport.height))}"`,
-    typeof input.fixedLayoutScale === "number"
-      ? ` data-fxl-scale="${escapeHtmlAttribute(input.fixedLayoutScale.toFixed(4))}"`
-      : "",
-    styleAttributes ? ` style="${escapeHtmlAttribute(styleAttributes)}"` : ""
+    ...dataAttributes,
+    styleAttributes.length > 0
+      ? ` style="${escapeHtmlAttribute(styleAttributes.join("; "))}"`
+      : ""
   ].join("")
 }

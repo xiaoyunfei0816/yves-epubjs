@@ -1,21 +1,21 @@
-import type { Theme, TypographyOptions } from "../model/types";
+import type { Theme, TypographyOptions } from "../model/types"
 import {
   buildReadingStyleCssVariables,
   buildReadingStyleProfile
-} from "./reading-style-profile";
+} from "./reading-style-profile"
 
 export function buildDomChapterNormalizationCss(input: {
-  theme: Theme;
-  typography: TypographyOptions;
-  fontFamily: string;
-  renditionLayout?: "reflowable" | "pre-paginated";
-  presentationRole?: "cover" | "image-page";
+  theme: Theme
+  typography: TypographyOptions
+  fontFamily: string
+  renditionLayout?: "reflowable" | "pre-paginated"
+  presentationRole?: "cover" | "image-page"
 }): string {
   const profile = buildReadingStyleProfile({
     theme: input.theme,
     typography: input.typography
-  });
-  const variables = buildReadingStyleCssVariables(profile);
+  })
+  const variables = buildReadingStyleCssVariables(profile)
 
   return [
     `.epub-dom-section {`,
@@ -44,6 +44,14 @@ export function buildDomChapterNormalizationCss(input: {
     `}`,
     `.epub-dom-cover, .epub-dom-image-page {`,
     `  padding: 0;`,
+    `  width: 100%;`,
+    `  max-width: var(--reader-presentation-width, 100%);`,
+    `  height: var(--reader-presentation-height, auto);`,
+    `  min-height: var(--reader-presentation-height, auto);`,
+    `  display: flex;`,
+    `  align-items: center;`,
+    `  justify-content: center;`,
+    `  overflow: hidden;`,
     `}`,
     `.epub-dom-section :where(p, blockquote, pre, ul, ol, dl, table, figure, aside, nav) {`,
     `  margin-top: 0;`,
@@ -112,15 +120,13 @@ export function buildDomChapterNormalizationCss(input: {
     `  display: block;`,
     `  margin: 0 auto;`,
     `}`,
-    `.epub-dom-section-cover img {`,
-      `  display: block;`,
-      `  width: 100%;`,
-      `  max-width: none;`,
-    `}`,
-    `.epub-dom-section-image-page img {`,
+    `.epub-dom-cover .epub-dom-presentation-image, .epub-dom-image-page .epub-dom-presentation-image {`,
     `  display: block;`,
-    `  max-width: 100%;`,
     `  width: auto;`,
+    `  height: auto;`,
+    `  max-width: 100%;`,
+    `  max-height: 100%;`,
+    `  object-fit: contain;`,
     `  margin: 0 auto;`,
     `}`,
     `.epub-dom-section table {`,
@@ -167,5 +173,5 @@ export function buildDomChapterNormalizationCss(input: {
     `  background: transparent;`,
     `  padding: 0;`,
     `}`
-  ].join("\n");
+  ].join("\n")
 }

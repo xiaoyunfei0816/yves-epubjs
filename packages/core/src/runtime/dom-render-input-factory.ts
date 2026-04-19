@@ -31,9 +31,23 @@ export type FixedLayoutFrame = {
   scale: number
 }
 
+type PresentationViewport = {
+  width: number
+  height: number
+}
+
 export function createDomChapterRenderInput(
   options: DomRenderInputFactoryOptions
 ): DomChapterRenderInput {
+  const fixedLayoutFrame = resolveFixedLayoutFrame({
+    section: options.section,
+    ...(typeof options.availableWidth === "number"
+      ? { availableWidth: options.availableWidth }
+      : {}),
+    ...(typeof options.availableHeight === "number"
+      ? { availableHeight: options.availableHeight }
+      : {})
+  })
   const renderInput: DomChapterRenderInput = {
     sectionId: options.section.id,
     sectionHref: options.section.href,
@@ -46,20 +60,24 @@ export function createDomChapterRenderInput(
       : {}),
     ...(options.publisherStyles === "enabled"
       ? {
-          linkedStyleSheets: (options.input.linkedStyleSheets ?? []).map((stylesheet) => ({
-            href: stylesheet.href,
-            text: resolveDomStyleSheetText(
-              stylesheet.href,
-              stylesheet.text,
-              options.resolveDomResourceUrl
-            )
-          }))
+          linkedStyleSheets: (options.input.linkedStyleSheets ?? []).map(
+            (stylesheet) => ({
+              href: stylesheet.href,
+              text: resolveDomStyleSheetText(
+                stylesheet.href,
+                stylesheet.text,
+                options.resolveDomResourceUrl
+              )
+            })
+          )
         }
       : {}),
     nodes:
       options.publisherStyles === "enabled"
         ? options.input.preprocessed.nodes
-        : stripPublisherStylesFromPreprocessedNodes(options.input.preprocessed.nodes),
+        : stripPublisherStylesFromPreprocessedNodes(
+            options.input.preprocessed.nodes
+          ),
     theme: options.theme,
     typography: options.typography,
     fontFamily: options.fontFamily,
@@ -73,15 +91,6 @@ export function createDomChapterRenderInput(
         resolveDomResourceUrl: options.resolveDomResourceUrl
       })
   }
-  const fixedLayoutFrame = resolveFixedLayoutFrame({
-    section: options.section,
-    ...(typeof options.availableWidth === "number"
-      ? { availableWidth: options.availableWidth }
-      : {}),
-    ...(typeof options.availableHeight === "number"
-      ? { availableHeight: options.availableHeight }
-      : {})
-  })
   if (fixedLayoutFrame) {
     renderInput.fixedLayoutViewport = fixedLayoutFrame.viewport
     renderInput.fixedLayoutScale = fixedLayoutFrame.scale
@@ -89,7 +98,25 @@ export function createDomChapterRenderInput(
     renderInput.fixedLayoutRenderHeight = fixedLayoutFrame.height
   }
 
-  const presentationImage = resolvePresentationSectionImage(options.book, options.section)
+  const presentationViewport = resolvePresentationViewport({
+    section: options.section,
+    fixedLayoutFrame,
+    ...(typeof options.availableWidth === "number"
+      ? { availableWidth: options.availableWidth }
+      : {}),
+    ...(typeof options.availableHeight === "number"
+      ? { availableHeight: options.availableHeight }
+      : {})
+  })
+  if (presentationViewport) {
+    renderInput.presentationViewportWidth = presentationViewport.width
+    renderInput.presentationViewportHeight = presentationViewport.height
+  }
+
+  const presentationImage = resolvePresentationSectionImage(
+    options.book,
+    options.section
+  )
   if (!presentationImage) {
     return renderInput
   }
@@ -97,7 +124,9 @@ export function createDomChapterRenderInput(
   return {
     ...renderInput,
     presentationImageSrc: options.resolveDomResourceUrl(presentationImage.src),
-    ...(presentationImage.alt ? { presentationImageAlt: presentationImage.alt } : {})
+    ...(presentationImage.alt
+      ? { presentationImageAlt: presentationImage.alt }
+      : {})
   }
 }
 
@@ -122,7 +151,10 @@ export function resolveFixedLayoutFrame(input: {
     typeof input.availableHeight === "number" && input.availableHeight > 0
       ? input.availableHeight
       : viewport.height
-  const scale = Math.min(availableWidth / viewport.width, availableHeight / viewport.height)
+  const scale = Math.min(
+    availableWidth / viewport.width,
+    availableHeight / viewport.height
+  )
   const normalizedScale = Number.isFinite(scale) && scale > 0 ? scale : 1
 
   return {
@@ -131,6 +163,37 @@ export function resolveFixedLayoutFrame(input: {
     height: Math.round(viewport.height * normalizedScale),
     scale: Number(normalizedScale.toFixed(4))
   }
+}
+
+function resolvePresentationViewport(input: {
+  section: SectionDocument
+  fixedLayoutFrame: FixedLayoutFrame | null
+  availableWidth?: number
+  availableHeight?: number
+}): PresentationViewport | null {
+  if (
+    input.section.presentationRole !== "cover" &&
+    input.section.presentationRole !== "image-page"
+  ) {
+    return null
+  }
+
+  const width =
+    input.fixedLayoutFrame?.width ??
+    (typeof input.availableWidth === "number" && input.availableWidth > 0
+      ? Math.round(input.availableWidth)
+      : null)
+  const height =
+    input.fixedLayoutFrame?.height ??
+    (typeof input.availableHeight === "number" && input.availableHeight > 0
+      ? Math.round(input.availableHeight)
+      : null)
+
+  if (typeof width !== "number" || typeof height !== "number") {
+    return null
+  }
+
+  return { width, height }
 }
 
 function resolveDomAttributeValue(input: {
@@ -144,7 +207,10 @@ function resolveDomAttributeValue(input: {
   const normalizedTagName = input.tagName.toLowerCase()
   const normalizedAttributeName = input.attributeName.toLowerCase()
 
-  if (input.publisherStyles === "disabled" && normalizedAttributeName === "style") {
+  if (
+    input.publisherStyles === "disabled" &&
+    normalizedAttributeName === "style"
+  ) {
     return ""
   }
 
@@ -174,17 +240,16 @@ function resolveDomAttributeValue(input: {
     return sanitizedResourceValue
   }
 
-  return input.resolveDomResourceUrl(resolveResourcePath(input.sectionHref, input.value))
+  return input.resolveDomResourceUrl(
+    resolveResourcePath(input.sectionHref, input.value)
+  )
 }
 
 function shouldResolveDomResourceAttribute(
   tagName: string,
   attributeName: string
 ): boolean {
-  if (
-    attributeName === "src" &&
-    (tagName === "img" || tagName === "source")
-  ) {
+  if (attributeName === "src" && (tagName === "img" || tagName === "source")) {
     return true
   }
 
@@ -220,7 +285,9 @@ function resolveDomCssUrlValues(
         return `url(${wrappedQuote}${sanitized}${wrappedQuote})`
       }
 
-      const resolved = resolveDomResourceUrl(resolveResourcePath(sectionHref, path))
+      const resolved = resolveDomResourceUrl(
+        resolveResourcePath(sectionHref, path)
+      )
       const wrappedQuote = quote || '"'
       return `url(${wrappedQuote}${resolved}${wrappedQuote})`
     }
@@ -250,7 +317,10 @@ function resolvePresentationSectionImage(
     }
   }
 
-  if (section.presentationRole === "cover" || section.presentationRole === "image-page") {
+  if (
+    section.presentationRole === "cover" ||
+    section.presentationRole === "image-page"
+  ) {
     return extractSingleSectionImage(section)
   }
 

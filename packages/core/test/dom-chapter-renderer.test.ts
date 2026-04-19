@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { DomChapterRenderer, buildDomChapterNormalizationCss } from "../src";
+import { describe, expect, it } from "vitest"
+import { DomChapterRenderer, buildDomChapterNormalizationCss } from "../src"
 
 describe("DomChapterRenderer", () => {
   it("mounts and clears a dom chapter section", () => {
-    const container = document.createElement("div");
-    const renderer = new DomChapterRenderer();
+    const container = document.createElement("div")
+    const renderer = new DomChapterRenderer()
 
     renderer.render(container, {
       sectionId: "section-1",
@@ -34,21 +34,25 @@ describe("DomChapterRenderer", () => {
           ]
         }
       ]
-    });
+    })
 
-    expect(container.querySelector(".epub-dom-section")).toBeTruthy();
-    expect(container.querySelector("style[data-epub-dom-normalization='true']")).toBeTruthy();
-    expect(container.textContent).toContain("Hello");
+    expect(container.querySelector(".epub-dom-section")).toBeTruthy()
+    expect(
+      container.querySelector("style[data-epub-dom-normalization='true']")
+    ).toBeTruthy()
+    expect(container.textContent).toContain("Hello")
 
-    renderer.clear(container);
+    renderer.clear(container)
 
-    expect(container.querySelector(".epub-dom-section")).toBeFalsy();
-    expect(container.querySelector("style[data-epub-dom-normalization='true']")).toBeFalsy();
-  });
+    expect(container.querySelector(".epub-dom-section")).toBeFalsy()
+    expect(
+      container.querySelector("style[data-epub-dom-normalization='true']")
+    ).toBeFalsy()
+  })
 
   it("injects linked stylesheet text before normalization css and clears it", () => {
-    const container = document.createElement("div");
-    const renderer = new DomChapterRenderer();
+    const container = document.createElement("div")
+    const renderer = new DomChapterRenderer()
 
     renderer.render(container, {
       sectionId: "section-1",
@@ -77,22 +81,26 @@ describe("DomChapterRenderer", () => {
           children: [{ kind: "text", text: "Hello" }]
         }
       ]
-    });
+    })
 
-    const sourceStyle = container.querySelector("style[data-epub-dom-source='OPS/styles/chapter.css']");
-    const normalizationStyle = container.querySelector("style[data-epub-dom-normalization='true']");
+    const sourceStyle = container.querySelector(
+      "style[data-epub-dom-source='OPS/styles/chapter.css']"
+    )
+    const normalizationStyle = container.querySelector(
+      "style[data-epub-dom-normalization='true']"
+    )
 
-    expect(sourceStyle?.textContent).toContain(".epub-dom-section .badge");
-    expect(sourceStyle?.textContent).toContain("height:1.1em");
-    expect(sourceStyle?.textContent).not.toContain("@font-face");
+    expect(sourceStyle?.textContent).toContain(".epub-dom-section .badge")
+    expect(sourceStyle?.textContent).toContain("height:1.1em")
+    expect(sourceStyle?.textContent).not.toContain("@font-face")
     expect(sourceStyle?.compareDocumentPosition(normalizationStyle!)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
-    );
+    )
 
-    renderer.clear(container);
+    renderer.clear(container)
 
-    expect(container.querySelector("style[data-epub-dom-source]")).toBeFalsy();
-  });
+    expect(container.querySelector("style[data-epub-dom-source]")).toBeFalsy()
+  })
 
   it("scopes inline style tags to the rendered chapter root", () => {
     const renderer = new DomChapterRenderer()
@@ -133,7 +141,9 @@ describe("DomChapterRenderer", () => {
 
     expect(markup).not.toContain("@import")
     expect(markup).toContain(".epub-dom-section>main{margin:0}")
-    expect(markup).toContain("@media (min-width:600px){.epub-dom-section h2{color:red}}")
+    expect(markup).toContain(
+      "@media (min-width:600px){.epub-dom-section h2{color:red}}"
+    )
   })
 
   it("builds normalized css for theme and typography constraints", () => {
@@ -148,24 +158,26 @@ describe("DomChapterRenderer", () => {
         paragraphSpacing: 12
       },
       fontFamily: '"Iowan Old Style", serif'
-    });
+    })
 
-    expect(css).toContain("font-size: 18px;");
-    expect(css).toContain("line-height: 1.6;");
-    expect(css).toContain("font-family: \"Iowan Old Style\", serif;");
-    expect(css).toContain("--reader-side-padding: 8px;");
-    expect(css).toContain("--reader-link-color: #1b4b72;");
-    expect(css).toContain("--reader-caption-color: #475569;");
-    expect(css).toContain(".epub-dom-section table {");
-    expect(css).toContain(".epub-dom-section a {");
-    expect(css).toContain(".epub-dom-section figcaption, .epub-dom-section caption {");
-    expect(css).toContain(".epub-dom-section mark {");
-    expect(css).toContain(".epub-dom-section hr {");
-    expect(css).toContain("padding-left: var(--reader-quote-accent-gap);");
-  });
+    expect(css).toContain("font-size: 18px;")
+    expect(css).toContain("line-height: 1.6;")
+    expect(css).toContain('font-family: "Iowan Old Style", serif;')
+    expect(css).toContain("--reader-side-padding: 8px;")
+    expect(css).toContain("--reader-link-color: #1b4b72;")
+    expect(css).toContain("--reader-caption-color: #475569;")
+    expect(css).toContain(".epub-dom-section table {")
+    expect(css).toContain(".epub-dom-section a {")
+    expect(css).toContain(
+      ".epub-dom-section figcaption, .epub-dom-section caption {"
+    )
+    expect(css).toContain(".epub-dom-section mark {")
+    expect(css).toContain(".epub-dom-section hr {")
+    expect(css).toContain("padding-left: var(--reader-quote-accent-gap);")
+  })
 
   it("rewrites resolved attribute values while serializing dom chapters", () => {
-    const renderer = new DomChapterRenderer();
+    const renderer = new DomChapterRenderer()
 
     const markup = renderer.createMarkup({
       sectionId: "section-1",
@@ -181,9 +193,7 @@ describe("DomChapterRenderer", () => {
       },
       fontFamily: '"Iowan Old Style", serif',
       resolveAttributeValue: ({ tagName, attributeName, value }) =>
-        tagName === "img" && attributeName === "src"
-          ? `blob:${value}`
-          : value,
+        tagName === "img" && attributeName === "src" ? `blob:${value}` : value,
       nodes: [
         {
           kind: "element",
@@ -195,11 +205,11 @@ describe("DomChapterRenderer", () => {
           children: []
         }
       ]
-    });
+    })
 
-    expect(markup).toContain('src="blob:OPS/images/cover.jpg"');
-    expect(markup).toContain('alt="Cover"');
-  });
+    expect(markup).toContain('src="blob:OPS/images/cover.jpg"')
+    expect(markup).toContain('alt="Cover"')
+  })
 
   it("adds cover styling hooks for cover sections", () => {
     const renderer = new DomChapterRenderer()
@@ -209,6 +219,8 @@ describe("DomChapterRenderer", () => {
       sectionHref: "OPS/cover.xhtml",
       presentationRole: "cover",
       presentationImageSrc: "blob:cover-image",
+      presentationViewportWidth: 480,
+      presentationViewportHeight: 720,
       theme: {
         color: "#1f2328",
         background: "#fffdf7"
@@ -232,11 +244,16 @@ describe("DomChapterRenderer", () => {
       ]
     })
 
-    expect(markup).toContain("epub-dom-section epub-dom-section-cover epub-dom-cover")
+    expect(markup).toContain(
+      "epub-dom-section epub-dom-section-cover epub-dom-cover"
+    )
     expect(markup).toContain('class="epub-dom-presentation-image"')
     expect(markup).toContain('src="blob:cover-image"')
-    expect(markup).toContain(".epub-dom-section-cover img {")
-    expect(markup).toContain("width: 100%;")
+    expect(markup).toContain('data-presentation-width="480"')
+    expect(markup).toContain('data-presentation-height="720"')
+    expect(markup).toContain("--reader-presentation-height: 720px")
+    expect(markup).toContain(".epub-dom-cover .epub-dom-presentation-image")
+    expect(markup).toContain("max-height: 100%;")
   })
 
   it("renders standalone image pages as centered presentation images", () => {
@@ -247,6 +264,8 @@ describe("DomChapterRenderer", () => {
       sectionHref: "OPS/title.xhtml",
       presentationRole: "image-page",
       presentationImageSrc: "blob:title-image",
+      presentationViewportWidth: 420,
+      presentationViewportHeight: 560,
       theme: {
         color: "#1f2328",
         background: "#fffdf7"
@@ -262,7 +281,9 @@ describe("DomChapterRenderer", () => {
 
     expect(markup).toContain("epub-dom-section-image-page epub-dom-image-page")
     expect(markup).toContain('src="blob:title-image"')
-    expect(markup).toContain(".epub-dom-section-image-page img {")
+    expect(markup).toContain('data-presentation-width="420"')
+    expect(markup).toContain('data-presentation-height="560"')
+    expect(markup).toContain("object-fit: contain;")
   })
 
   it("adds fixed-layout sizing hooks for pre-paginated sections", () => {
@@ -302,8 +323,8 @@ describe("DomChapterRenderer", () => {
     expect(markup).toContain("epub-dom-section-fxl")
     expect(markup).toContain('data-rendition-layout="pre-paginated"')
     expect(markup).toContain('data-fxl-viewport-width="1200"')
-    expect(markup).toContain('--fxl-render-width: 405px')
-    expect(markup).toContain('--fxl-render-height: 540px')
+    expect(markup).toContain("--fxl-render-width: 405px")
+    expect(markup).toContain("--fxl-render-height: 540px")
     expect(markup).toContain(".epub-dom-section-fxl {")
   })
-});
+})

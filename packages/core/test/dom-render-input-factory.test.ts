@@ -45,7 +45,9 @@ describe("dom render input factory", () => {
           href: "OPS/styles/book.css",
           mediaType: "text/css",
           text: "body { background-image: url('../images/paper.png'); }",
-          ast: parseCssStyleSheet("body { background-image: url('../images/paper.png'); }")
+          ast: parseCssStyleSheet(
+            "body { background-image: url('../images/paper.png'); }"
+          )
         }
       ]
     })
@@ -149,6 +151,39 @@ describe("dom render input factory", () => {
 
     expect(renderInput.presentationImageSrc).toBe("asset:OPS/images/plate.png")
     expect(renderInput.presentationImageAlt).toBe("Plate")
+  })
+
+  it("records the available presentation viewport for cover and single-image pages", () => {
+    const content = `<?xml version="1.0"?>
+      <html>
+        <body>
+          <p><img src="images/plate.png" alt="Plate"></p>
+        </body>
+      </html>`
+    const section: SectionDocument = {
+      ...createSection(content, "image-page", "OPS/plate.xhtml"),
+      presentationRole: "image-page"
+    }
+    const input = createSharedChapterRenderInput({
+      href: section.href,
+      content
+    })
+
+    const renderInput = createDomChapterRenderInput({
+      book: null,
+      section,
+      input,
+      theme: THEME,
+      typography: TYPOGRAPHY,
+      fontFamily: "serif",
+      publisherStyles: "enabled",
+      availableWidth: 640,
+      availableHeight: 480,
+      resolveDomResourceUrl: (path) => `asset:${path}`
+    })
+
+    expect(renderInput.presentationViewportWidth).toBe(640)
+    expect(renderInput.presentationViewportHeight).toBe(480)
   })
 
   it("derives fixed-layout viewport sizing for pre-paginated sections", () => {
@@ -266,7 +301,9 @@ describe("dom render input factory", () => {
           href: "OPS/styles/book.css",
           mediaType: "text/css",
           text: "body { background-image: url('https://cdn.example.com/paper.png'); }",
-          ast: parseCssStyleSheet("body { background-image: url('https://cdn.example.com/paper.png'); }")
+          ast: parseCssStyleSheet(
+            "body { background-image: url('https://cdn.example.com/paper.png'); }"
+          )
         }
       ]
     })
@@ -300,7 +337,11 @@ describe("dom render input factory", () => {
   })
 })
 
-function createSection(content: string, id: string, href: string): SectionDocument {
+function createSection(
+  content: string,
+  id: string,
+  href: string
+): SectionDocument {
   return {
     ...parseXhtmlDocument(content, href),
     id

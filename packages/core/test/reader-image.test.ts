@@ -1,73 +1,73 @@
-import { describe, expect, it, vi } from "vitest";
-import { InMemoryResourceContainer } from "../src/container/resource-container";
-import type { Book, SectionDocument } from "../src/model/types";
-import { EpubReader } from "../src/runtime/reader";
+import { describe, expect, it, vi } from "vitest"
+import { InMemoryResourceContainer } from "../src/container/resource-container"
+import type { Book, SectionDocument } from "../src/model/types"
+import { EpubReader } from "../src/runtime/reader"
 
 describe("EpubReader image resources", () => {
   it("converts EPUB image resources into object URLs for rendering", async () => {
-    const createObjectURL = vi.fn(() => "blob:cover-image");
-    const revokeObjectURL = vi.fn();
-    const originalCreateObjectURL = URL.createObjectURL;
-    const originalRevokeObjectURL = URL.revokeObjectURL;
+    const createObjectURL = vi.fn(() => "blob:cover-image")
+    const revokeObjectURL = vi.fn()
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
 
-    URL.createObjectURL = createObjectURL;
-    URL.revokeObjectURL = revokeObjectURL;
+    URL.createObjectURL = createObjectURL
+    URL.revokeObjectURL = revokeObjectURL
 
-    const container = document.createElement("div");
-    const reader = new EpubReader({ container });
+    const container = document.createElement("div")
+    const reader = new EpubReader({ container })
 
     const resources = new InMemoryResourceContainer({
       "OPS/images/cover.png": new Uint8Array([137, 80, 78, 71])
-    });
+    })
 
-    const imageUrl = (reader as unknown as {
-      resources: typeof resources;
-      resolveRenderableResourceUrl(path: string): string;
-    });
+    const imageUrl = reader as unknown as {
+      resources: typeof resources
+      resolveRenderableResourceUrl(path: string): string
+    }
 
-    imageUrl.resources = resources;
+    imageUrl.resources = resources
     expect(imageUrl.resolveRenderableResourceUrl("OPS/images/cover.png")).toBe(
       "OPS/images/cover.png"
-    );
+    )
 
-    await Promise.resolve();
-    await Promise.resolve();
+    await Promise.resolve()
+    await Promise.resolve()
 
-    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
     expect(imageUrl.resolveRenderableResourceUrl("OPS/images/cover.png")).toBe(
       "blob:cover-image"
-    );
+    )
 
-    reader.destroy();
-    expect(revokeObjectURL).toHaveBeenCalledWith("blob:cover-image");
+    reader.destroy()
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:cover-image")
 
-    URL.createObjectURL = originalCreateObjectURL;
-    URL.revokeObjectURL = originalRevokeObjectURL;
-  });
+    URL.createObjectURL = originalCreateObjectURL
+    URL.revokeObjectURL = originalRevokeObjectURL
+  })
 
   it("uses resolved blob URLs for canvas image rendering and hit testing", async () => {
-    const createObjectURL = vi.fn(() => "blob:cover-image");
-    const revokeObjectURL = vi.fn();
-    const originalCreateObjectURL = URL.createObjectURL;
-    const originalRevokeObjectURL = URL.revokeObjectURL;
+    const createObjectURL = vi.fn(() => "blob:cover-image")
+    const revokeObjectURL = vi.fn()
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
 
-    URL.createObjectURL = createObjectURL;
-    URL.revokeObjectURL = revokeObjectURL;
+    URL.createObjectURL = createObjectURL
+    URL.revokeObjectURL = revokeObjectURL
 
-    const container = document.createElement("div");
+    const container = document.createElement("div")
     Object.defineProperty(container, "clientWidth", {
       configurable: true,
       value: 320
-    });
+    })
     Object.defineProperty(container, "clientHeight", {
       configurable: true,
       value: 320
-    });
+    })
 
     const reader = new EpubReader({
       container,
       mode: "paginated"
-    });
+    })
 
     const section: SectionDocument = {
       id: "section-image",
@@ -84,7 +84,7 @@ describe("EpubReader image resources", () => {
           height: 240
         }
       ]
-    };
+    }
 
     const book: Book = {
       metadata: { title: "Images" },
@@ -98,132 +98,147 @@ describe("EpubReader image resources", () => {
       ],
       toc: [],
       sections: [section]
-    };
+    }
 
     const resources = new InMemoryResourceContainer({
       "OPS/images/cover.png": new Uint8Array([137, 80, 78, 71])
-    });
+    })
 
-    (reader as unknown as { book: Book; resources: typeof resources }).book = book;
-    (reader as unknown as { book: Book; resources: typeof resources }).resources = resources;
-    await reader.render();
-    await Promise.resolve();
-    await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    await Promise.resolve();
+    ;(reader as unknown as { book: Book; resources: typeof resources }).book =
+      book
+    ;(
+      reader as unknown as { book: Book; resources: typeof resources }
+    ).resources = resources
+    await reader.render()
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    await Promise.resolve()
 
     const hit = reader.hitTest({
       x: 160,
       y: 120
-    });
+    })
 
-    expect(hit?.kind).toBe("image");
-    expect(hit && hit.kind === "image" ? hit.src : null).toBe("blob:cover-image");
+    expect(hit?.kind).toBe("image")
+    expect(hit && hit.kind === "image" ? hit.src : null).toBe(
+      "blob:cover-image"
+    )
 
-    reader.destroy();
-    URL.createObjectURL = originalCreateObjectURL;
-    URL.revokeObjectURL = originalRevokeObjectURL;
-  });
+    reader.destroy()
+    URL.createObjectURL = originalCreateObjectURL
+    URL.revokeObjectURL = originalRevokeObjectURL
+  })
 
   it("patches rendered DOM image resources in place without forcing a scroll rerender", async () => {
-    const createObjectURL = vi.fn(() => "blob:dom-cover-image");
-    const revokeObjectURL = vi.fn();
-    const originalCreateObjectURL = URL.createObjectURL;
-    const originalRevokeObjectURL = URL.revokeObjectURL;
+    const createObjectURL = vi.fn(() => "blob:dom-cover-image")
+    const revokeObjectURL = vi.fn()
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
 
-    URL.createObjectURL = createObjectURL;
-    URL.revokeObjectURL = revokeObjectURL;
+    URL.createObjectURL = createObjectURL
+    URL.revokeObjectURL = revokeObjectURL
 
-    const container = document.createElement("div");
+    const container = document.createElement("div")
     container.innerHTML =
-      '<div class="epub-dom-section"><img src="OPS/images/dom-cover.png" alt="Cover"></div>';
-    const reader = new EpubReader({ container });
+      '<div class="epub-dom-section"><img src="OPS/images/dom-cover.png" alt="Cover"></div>'
+    const reader = new EpubReader({ container })
     const renderSpy = vi.spyOn(
-      reader as unknown as { renderCurrentSection(renderBehavior?: "relocate" | "preserve"): void },
-      "renderCurrentSection"
-    );
-
-    const resources = new InMemoryResourceContainer({
-      "OPS/images/dom-cover.png": new Uint8Array([137, 80, 78, 71])
-    });
-
-    (
       reader as unknown as {
-        resources: typeof resources;
-        resolveDomResourceUrl(path: string): string;
-      }
-    ).resources = resources;
-
-    expect(
-      (
-        reader as unknown as {
-          resolveDomResourceUrl(path: string): string;
-        }
-      ).resolveDomResourceUrl("OPS/images/dom-cover.png")
-    ).toBe("OPS/images/dom-cover.png");
-
-    await Promise.resolve();
-    await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    const image = container.querySelector("img");
-    expect(createObjectURL).toHaveBeenCalledTimes(1);
-    expect(image?.getAttribute("src")).toBe("blob:dom-cover-image");
-    expect(renderSpy).not.toHaveBeenCalled();
-
-    reader.destroy();
-    URL.createObjectURL = originalCreateObjectURL;
-    URL.revokeObjectURL = originalRevokeObjectURL;
-  });
-
-  it("rewrites svg image xlink:href resources for dom rendering", async () => {
-    const createObjectURL = vi.fn(() => "blob:dom-svg-cover");
-    const revokeObjectURL = vi.fn();
-    const originalCreateObjectURL = URL.createObjectURL;
-    const originalRevokeObjectURL = URL.revokeObjectURL;
-
-    URL.createObjectURL = createObjectURL;
-    URL.revokeObjectURL = revokeObjectURL;
-
-    const container = document.createElement("div");
-    container.innerHTML =
-      '<div class="epub-dom-section"><svg><image xlink:href="OPS/images/dom-cover.png"></image></svg></div>';
-    const reader = new EpubReader({ container });
+        renderCurrentSection(renderBehavior?: "relocate" | "preserve"): void
+      },
+      "renderCurrentSection"
+    )
 
     const resources = new InMemoryResourceContainer({
       "OPS/images/dom-cover.png": new Uint8Array([137, 80, 78, 71])
-    });
+    })
 
     ;(
       reader as unknown as {
-        resources: typeof resources;
-        resolveDomResourceUrl(path: string): string;
+        resources: typeof resources
+        resolveDomResourceUrl(path: string): string
       }
-    ).resources = resources;
+    ).resources = resources
 
     expect(
       (
         reader as unknown as {
-          resolveDomResourceUrl(path: string): string;
+          resolveDomResourceUrl(path: string): string
         }
       ).resolveDomResourceUrl("OPS/images/dom-cover.png")
-    ).toBe("OPS/images/dom-cover.png");
+    ).toBe("OPS/images/dom-cover.png")
 
-    await Promise.resolve();
-    await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
-    const image = container.querySelector("image");
-    expect(createObjectURL).toHaveBeenCalledTimes(1);
-    expect(image?.getAttribute("xlink:href")).toBe("blob:dom-svg-cover");
+    const image = container.querySelector("img")
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+    expect(image?.getAttribute("src")).toBe("blob:dom-cover-image")
+    expect(renderSpy).not.toHaveBeenCalled()
 
-    reader.destroy();
-    URL.createObjectURL = originalCreateObjectURL;
-    URL.revokeObjectURL = originalRevokeObjectURL;
-  });
+    reader.destroy()
+    URL.createObjectURL = originalCreateObjectURL
+    URL.revokeObjectURL = originalRevokeObjectURL
+  })
+
+  it("rewrites svg image xlink:href resources for dom rendering", async () => {
+    const createObjectURL = vi.fn(() => "blob:dom-svg-cover")
+    const revokeObjectURL = vi.fn()
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+
+    URL.createObjectURL = createObjectURL
+    URL.revokeObjectURL = revokeObjectURL
+
+    const container = document.createElement("div")
+    container.innerHTML =
+      '<div class="epub-dom-section"><svg><image xlink:href="OPS/images/dom-cover.png"></image></svg></div>'
+    const reader = new EpubReader({ container })
+
+    const resources = new InMemoryResourceContainer({
+      "OPS/images/dom-cover.png": new Uint8Array([137, 80, 78, 71])
+    })
+
+    ;(
+      reader as unknown as {
+        resources: typeof resources
+        resolveDomResourceUrl(path: string): string
+      }
+    ).resources = resources
+
+    expect(
+      (
+        reader as unknown as {
+          resolveDomResourceUrl(path: string): string
+        }
+      ).resolveDomResourceUrl("OPS/images/dom-cover.png")
+    ).toBe("OPS/images/dom-cover.png")
+
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const image = container.querySelector("image")
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+    expect(image?.getAttribute("xlink:href")).toBe("blob:dom-svg-cover")
+
+    reader.destroy()
+    URL.createObjectURL = originalCreateObjectURL
+    URL.revokeObjectURL = originalRevokeObjectURL
+  })
 
   it("forces cover sections onto the dom backend and uses the direct cover image", () => {
     const container = document.createElement("div")
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 980
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 720
+    })
     const reader = new EpubReader({
       container,
       mode: "paginated",
@@ -251,7 +266,10 @@ describe("EpubReader image resources", () => {
             nodes: []
           }
         }>
-        resolveChapterRenderDecision(sectionIndex: number): { mode: string; reasons: string[] }
+        resolveChapterRenderDecision(sectionIndex: number): {
+          mode: string
+          reasons: string[]
+        }
         createDomRenderInput(
           section: SectionDocument,
           input: {
@@ -262,7 +280,12 @@ describe("EpubReader image resources", () => {
               nodes: []
             }
           }
-        ): { presentationImageSrc?: string; presentationRole?: "cover" | "image-page" }
+        ): {
+          presentationImageSrc?: string
+          presentationRole?: "cover" | "image-page"
+          presentationViewportWidth?: number
+          presentationViewportHeight?: number
+        }
       }
     ).book = {
       metadata: {
@@ -284,7 +307,10 @@ describe("EpubReader image resources", () => {
           nodes: []
         }
       }>
-      resolveChapterRenderDecision(sectionIndex: number): { mode: string; reasons: string[] }
+      resolveChapterRenderDecision(sectionIndex: number): {
+        mode: string
+        reasons: string[]
+      }
       createDomRenderInput(
         section: SectionDocument,
         input: {
@@ -295,7 +321,12 @@ describe("EpubReader image resources", () => {
             nodes: []
           }
         }
-      ): { presentationImageSrc?: string; presentationRole?: "cover" | "image-page" }
+      ): {
+        presentationImageSrc?: string
+        presentationRole?: "cover" | "image-page"
+        presentationViewportWidth?: number
+        presentationViewportHeight?: number
+      }
     }
     state.chapterRenderInputs = [
       {
@@ -313,16 +344,29 @@ describe("EpubReader image resources", () => {
       score: 0,
       reasons: ["cover-section"]
     })
-    expect(state.createDomRenderInput(section, state.chapterRenderInputs[0]!).presentationRole).toBe(
-      "cover"
-    )
     expect(
-      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).presentationImageSrc
-    ).toBe("OPS/Images/cover.jpg")
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!)
+        .presentationRole
+    ).toBe("cover")
+    const domRenderInput = state.createDomRenderInput(
+      section,
+      state.chapterRenderInputs[0]!
+    )
+    expect(domRenderInput.presentationImageSrc).toBe("OPS/Images/cover.jpg")
+    expect(domRenderInput.presentationViewportWidth).toBe(980)
+    expect(domRenderInput.presentationViewportHeight).toBe(720)
   })
 
   it("forces image-only sections onto the dom backend and uses the standalone image", () => {
     const container = document.createElement("div")
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 960
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 700
+    })
     const reader = new EpubReader({
       container,
       mode: "paginated",
@@ -340,7 +384,9 @@ describe("EpubReader image resources", () => {
         {
           id: "title-image-block",
           kind: "text",
-          inlines: [{ kind: "image", src: "OPS/Image00000.jpg", alt: "Title image" }]
+          inlines: [
+            { kind: "image", src: "OPS/Image00000.jpg", alt: "Title image" }
+          ]
         }
       ]
     }
@@ -356,7 +402,10 @@ describe("EpubReader image resources", () => {
             nodes: []
           }
         }>
-        resolveChapterRenderDecision(sectionIndex: number): { mode: string; reasons: string[] }
+        resolveChapterRenderDecision(sectionIndex: number): {
+          mode: string
+          reasons: string[]
+        }
         createDomRenderInput(
           section: SectionDocument,
           input: {
@@ -367,7 +416,12 @@ describe("EpubReader image resources", () => {
               nodes: []
             }
           }
-        ): { presentationImageSrc?: string; presentationRole?: "cover" | "image-page" }
+        ): {
+          presentationImageSrc?: string
+          presentationRole?: "cover" | "image-page"
+          presentationViewportWidth?: number
+          presentationViewportHeight?: number
+        }
       }
     ).book = {
       metadata: {
@@ -388,7 +442,10 @@ describe("EpubReader image resources", () => {
           nodes: []
         }
       }>
-      resolveChapterRenderDecision(sectionIndex: number): { mode: string; reasons: string[] }
+      resolveChapterRenderDecision(sectionIndex: number): {
+        mode: string
+        reasons: string[]
+      }
       createDomRenderInput(
         section: SectionDocument,
         input: {
@@ -399,7 +456,12 @@ describe("EpubReader image resources", () => {
             nodes: []
           }
         }
-      ): { presentationImageSrc?: string; presentationRole?: "cover" | "image-page" }
+      ): {
+        presentationImageSrc?: string
+        presentationRole?: "cover" | "image-page"
+        presentationViewportWidth?: number
+        presentationViewportHeight?: number
+      }
     }
     state.chapterRenderInputs = [
       {
@@ -417,12 +479,17 @@ describe("EpubReader image resources", () => {
       score: 0,
       reasons: ["image-page-section"]
     })
-    expect(state.createDomRenderInput(section, state.chapterRenderInputs[0]!).presentationRole).toBe(
-      "image-page"
-    )
     expect(
-      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).presentationImageSrc
-    ).toBe("OPS/Image00000.jpg")
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!)
+        .presentationRole
+    ).toBe("image-page")
+    const domRenderInput = state.createDomRenderInput(
+      section,
+      state.chapterRenderInputs[0]!
+    )
+    expect(domRenderInput.presentationImageSrc).toBe("OPS/Image00000.jpg")
+    expect(domRenderInput.presentationViewportWidth).toBe(960)
+    expect(domRenderInput.presentationViewportHeight).toBe(700)
   })
 
   it("forces fixed-layout sections onto the dom backend and computes a fitted viewport box", () => {
@@ -466,7 +533,11 @@ describe("EpubReader image resources", () => {
             nodes: []
           }
         }>
-        resolveChapterRenderDecision(sectionIndex: number): { mode: string; score: number; reasons: string[] }
+        resolveChapterRenderDecision(sectionIndex: number): {
+          mode: string
+          score: number
+          reasons: string[]
+        }
         createDomRenderInput(
           section: SectionDocument,
           input: {
@@ -495,7 +566,14 @@ describe("EpubReader image resources", () => {
         }
       },
       manifest: [],
-      spine: [{ idref: "fxl", href: section.href, linear: true, renditionLayout: "pre-paginated" }],
+      spine: [
+        {
+          idref: "fxl",
+          href: section.href,
+          linear: true,
+          renditionLayout: "pre-paginated"
+        }
+      ],
       toc: [],
       sections: [section]
     }
@@ -509,7 +587,11 @@ describe("EpubReader image resources", () => {
           nodes: []
         }
       }>
-      resolveChapterRenderDecision(sectionIndex: number): { mode: string; score: number; reasons: string[] }
+      resolveChapterRenderDecision(sectionIndex: number): {
+        mode: string
+        score: number
+        reasons: string[]
+      }
       createDomRenderInput(
         section: SectionDocument,
         input: {
@@ -544,23 +626,28 @@ describe("EpubReader image resources", () => {
       score: 0,
       reasons: ["fixed-layout-section"]
     })
-    expect(state.createDomRenderInput(section, state.chapterRenderInputs[0]!).renditionLayout).toBe(
-      "pre-paginated"
-    )
     expect(
-      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutViewport
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!)
+        .renditionLayout
+    ).toBe("pre-paginated")
+    expect(
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!)
+        .fixedLayoutViewport
     ).toEqual({
       width: 1200,
       height: 1600
     })
     expect(
-      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutRenderWidth
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!)
+        .fixedLayoutRenderWidth
     ).toBe(540)
     expect(
-      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutRenderHeight
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!)
+        .fixedLayoutRenderHeight
     ).toBe(720)
     expect(
-      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutScale
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!)
+        .fixedLayoutScale
     ).toBe(0.45)
   })
 
@@ -633,7 +720,14 @@ describe("EpubReader image resources", () => {
         }
       },
       manifest: [],
-      spine: [{ idref: "fxl-padded", href: section.href, linear: true, renditionLayout: "pre-paginated" }],
+      spine: [
+        {
+          idref: "fxl-padded",
+          href: section.href,
+          linear: true,
+          renditionLayout: "pre-paginated"
+        }
+      ],
       toc: [],
       sections: [section]
     }
@@ -675,13 +769,16 @@ describe("EpubReader image resources", () => {
     ]
 
     expect(
-      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutRenderWidth
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!)
+        .fixedLayoutRenderWidth
     ).toBe(504)
     expect(
-      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutRenderHeight
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!)
+        .fixedLayoutRenderHeight
     ).toBe(672)
     expect(
-      state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutScale
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!)
+        .fixedLayoutScale
     ).toBe(0.42)
   })
 
@@ -707,7 +804,10 @@ describe("EpubReader image resources", () => {
       }
     }
 
-    vi.stubGlobal("ResizeObserver", MockResizeObserver as unknown as typeof ResizeObserver)
+    vi.stubGlobal(
+      "ResizeObserver",
+      MockResizeObserver as unknown as typeof ResizeObserver
+    )
 
     try {
       const container = document.createElement("div")
@@ -759,11 +859,130 @@ describe("EpubReader image resources", () => {
           }
         },
         manifest: [],
-        spine: [{ idref: "fxl-resize", href: section.href, linear: true, renditionLayout: "pre-paginated" }],
+        spine: [
+          {
+            idref: "fxl-resize",
+            href: section.href,
+            linear: true,
+            renditionLayout: "pre-paginated"
+          }
+        ],
         toc: [],
         sections: [section]
       }
+      ;(
+        reader as unknown as {
+          chapterRenderInputs: Array<{
+            href: string
+            content: string
+            preprocessed: {
+              href: string
+              nodes: []
+            }
+          }>
+        }
+      ).chapterRenderInputs = [
+        {
+          href: section.href,
+          content: "<html><body></body></html>",
+          preprocessed: {
+            href: section.href,
+            nodes: []
+          }
+        }
+      ]
 
+      const renderSpy = vi.spyOn(
+        reader as unknown as {
+          renderCurrentSection(renderBehavior?: "relocate" | "preserve"): void
+        },
+        "renderCurrentSection"
+      )
+
+      await reader.render()
+      renderSpy.mockClear()
+      clientWidth = 980
+      resizeCallbacks[0]?.()
+
+      expect(renderSpy).toHaveBeenCalledWith("preserve")
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("rerenders presentation image sections when the reader viewport width changes", async () => {
+    const resizeCallbacks: Array<() => void> = []
+    class MockResizeObserver {
+      constructor(private readonly callback: ResizeObserverCallback) {
+        resizeCallbacks.push(() => {
+          this.callback([], this as unknown as ResizeObserver)
+        })
+      }
+
+      observe(): void {
+        return undefined
+      }
+
+      disconnect(): void {
+        return undefined
+      }
+
+      unobserve(): void {
+        return undefined
+      }
+    }
+
+    vi.stubGlobal(
+      "ResizeObserver",
+      MockResizeObserver as unknown as typeof ResizeObserver
+    )
+
+    try {
+      const container = document.createElement("div")
+      container.style.padding = "24px 30px"
+      document.body.appendChild(container)
+      let clientWidth = 920
+      Object.defineProperty(container, "clientWidth", {
+        configurable: true,
+        get: () => clientWidth
+      })
+      Object.defineProperty(container, "clientHeight", {
+        configurable: true,
+        value: 900
+      })
+
+      const reader = new EpubReader({ container, mode: "paginated" })
+      const section: SectionDocument = {
+        id: "section-cover-resize",
+        href: "OPS/cover.xhtml",
+        title: "Cover Resize",
+        presentationRole: "cover",
+        anchors: {},
+        blocks: []
+      }
+
+      ;(
+        reader as unknown as {
+          book: Book
+          chapterRenderInputs: Array<{
+            href: string
+            content: string
+            preprocessed: {
+              href: string
+              nodes: []
+            }
+          }>
+        }
+      ).book = {
+        metadata: {
+          title: "Cover Resize Book",
+          coverImageHref: "OPS/images/cover.jpg"
+        },
+        manifest: [],
+        spine: [{ idref: "cover", href: section.href, linear: true }],
+        toc: [],
+        sections: [section]
+      }
       ;(
         reader as unknown as {
           chapterRenderInputs: Array<{
@@ -890,7 +1109,6 @@ describe("EpubReader image resources", () => {
       toc: [],
       sections: [coverSection, titleSection, chapterSection]
     }
-
     ;(
       reader as unknown as {
         chapterRenderInputs: Array<{
@@ -937,4 +1155,4 @@ describe("EpubReader image resources", () => {
     expect(container.querySelector(".placeholder-page")).toBeNull()
     expect(reader.getRenderMetrics().backend).toBe("dom")
   })
-});
+})
