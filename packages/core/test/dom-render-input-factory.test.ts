@@ -186,6 +186,34 @@ describe("dom render input factory", () => {
     expect(renderInput.presentationViewportHeight).toBe(480)
   })
 
+  it("records the available content viewport height for regular sections", () => {
+    const content = `<?xml version="1.0"?>
+      <html>
+        <body>
+          <p><img src="images/chart.png" alt="Chart"></p>
+        </body>
+      </html>`
+    const section = createSection(content, "section-regular", "OPS/chapter.xhtml")
+    const input = createSharedChapterRenderInput({
+      href: section.href,
+      content
+    })
+
+    const renderInput = createDomChapterRenderInput({
+      book: null,
+      section,
+      input,
+      theme: THEME,
+      typography: TYPOGRAPHY,
+      fontFamily: "serif",
+      publisherStyles: "enabled",
+      availableHeight: 512,
+      resolveDomResourceUrl: (path) => `asset:${path}`
+    })
+
+    expect(renderInput.contentViewportHeight).toBe(512)
+  })
+
   it("derives fixed-layout viewport sizing for pre-paginated sections", () => {
     const content = `<?xml version="1.0"?>
       <html>

@@ -21,6 +21,7 @@ export type DomChapterRenderInput = {
   presentationRole?: "cover" | "image-page"
   presentationImageSrc?: string
   presentationImageAlt?: string
+  contentViewportHeight?: number
   presentationViewportWidth?: number
   presentationViewportHeight?: number
   linkedStyleSheets?: Array<{
@@ -281,6 +282,14 @@ function serializeSectionLayoutAttributes(
     )
     styleAttributes.push(
       `--reader-presentation-height: ${input.presentationViewportHeight}px`
+    )
+  }
+  if (typeof input.contentViewportHeight === "number") {
+    dataAttributes.push(
+      ` data-content-height="${escapeHtmlAttribute(String(input.contentViewportHeight))}"`
+    )
+    styleAttributes.push(
+      `--reader-content-viewport-height: ${input.contentViewportHeight}px`
     )
   }
 

@@ -46,6 +46,23 @@ const LONG_DOM_CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
     </body>
   </html>`;
 
+const DOM_MEDIA_CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
+  <html xmlns="http://www.w3.org/1999/xhtml">
+    <head><title>DOM Media</title></head>
+    <body>
+      <section>
+        <table>
+          <tr><td>Force DOM backend</td></tr>
+        </table>
+        <p id="intro">Intro paragraph before a large chart image.</p>
+        <div id="chart-wrap">
+          <img id="chart-image" src="OPS/images/chart.png" alt="Chart" />
+        </div>
+        <p id="after">Paragraph after the chart.</p>
+      </section>
+    </body>
+  </html>`;
+
 function createHybridReaderFixture(mode: "scroll" | "paginated" = "scroll"): {
   reader: EpubReader;
   container: HTMLDivElement;
@@ -173,6 +190,60 @@ function createLongDomReaderFixture(mode: "scroll" | "paginated" = "paginated"):
       chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[];
     }
   ).chapterRenderInputs = [longInput];
+
+  return {
+    reader,
+    container,
+    book
+  };
+}
+
+function createDomMediaReaderFixture(mode: "scroll" | "paginated" = "paginated"): {
+  reader: EpubReader;
+  container: HTMLDivElement;
+  book: Book;
+} {
+  const container = document.createElement("div");
+  Object.defineProperty(container, "clientWidth", {
+    configurable: true,
+    value: 320
+  });
+  Object.defineProperty(container, "clientHeight", {
+    configurable: true,
+    value: 240
+  });
+  document.body.appendChild(container);
+
+  const mediaInput = createSharedChapterRenderInput({
+    href: "OPS/dom-media.xhtml",
+    content: DOM_MEDIA_CHAPTER
+  });
+  const mediaSection: SectionDocument = {
+    ...toCanvasChapterRenderInput(mediaInput).section,
+    id: "section-dom-media"
+  };
+
+  const book: Book = {
+    metadata: { title: "DOM Media Navigation" },
+    manifest: [],
+    spine: [{ idref: "item-1", href: mediaSection.href, linear: true }],
+    toc: [],
+    sections: [mediaSection]
+  };
+
+  const reader = new EpubReader({ container, mode });
+  (
+    reader as unknown as {
+      book: Book;
+      chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[];
+    }
+  ).book = book;
+  (
+    reader as unknown as {
+      book: Book;
+      chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[];
+    }
+  ).chapterRenderInputs = [mediaInput];
 
   return {
     reader,
@@ -784,6 +855,126 @@ describe("EpubReader hybrid navigation", () => {
         container.querySelector<HTMLElement>(".epub-dom-section")?.style.transform
       ).toBe("translateY(-430px)");
     } finally {
+      if (originalOffsetHeight) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
+      }
+      if (originalScrollHeight) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", originalScrollHeight);
+      }
+    }
+  });
+
+  it("starts the next DOM page at the top of overflowing media blocks", async () => {
+    const originalGetBoundingClientRect = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "getBoundingClientRect"
+    );
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight"
+    );
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight"
+    );
+
+    try {
+      let currentScrollTop = 0;
+
+      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+        configurable: true,
+        value: function (): DOMRect {
+          if (
+            this.classList?.contains("epub-dom-section") &&
+            this.dataset?.sectionId === "section-dom-media"
+          ) {
+            return new DOMRect(0, 0, 280, 340);
+          }
+          if (this.tagName.toLowerCase() === "td") {
+            return new DOMRect(0, 0, 180, 20);
+          }
+          if (this.id === "intro") {
+            return new DOMRect(0, 30, 220, 30);
+          }
+          if (this.id === "chart-image") {
+            return new DOMRect(0, 120, 200, 140);
+          }
+          if (this.id === "after") {
+            return new DOMRect(0, 280, 220, 40);
+          }
+          return originalGetBoundingClientRect?.value?.call(this) ?? {
+            x: 0,
+            y: 0,
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: 0,
+            height: 0,
+            toJSON() {
+              return {};
+            }
+          };
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+        configurable: true,
+        get() {
+          if (
+            this.classList?.contains("epub-dom-section") &&
+            this.dataset?.sectionId === "section-dom-media"
+          ) {
+            return 340;
+          }
+          return originalOffsetHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+        configurable: true,
+        get() {
+          if (
+            this.classList?.contains("epub-dom-section") &&
+            this.dataset?.sectionId === "section-dom-media"
+          ) {
+            return 340;
+          }
+          return originalScrollHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      const { reader, container } = createDomMediaReaderFixture("paginated");
+      Object.defineProperty(container, "scrollTop", {
+        configurable: true,
+        get() {
+          return currentScrollTop;
+        },
+        set(value: number) {
+          currentScrollTop = value;
+        }
+      });
+
+      await reader.render();
+
+      expect(reader.getRenderMetrics().backend).toBe("dom");
+      expect(reader.getPaginationInfo().totalPages).toBe(2);
+
+      await reader.goToPage(2);
+
+      expect(reader.getPaginationInfo().currentPage).toBe(2);
+      expect(container.scrollTop).toBe(0);
+      expect(
+        container.querySelector<HTMLElement>(".epub-dom-section")?.style.transform
+      ).toBe("translateY(-120px)");
+    } finally {
+      if (originalGetBoundingClientRect) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "getBoundingClientRect",
+          originalGetBoundingClientRect
+        );
+      }
       if (originalOffsetHeight) {
         Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
       }

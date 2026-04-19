@@ -183,6 +183,98 @@ describe("EpubReader image resources", () => {
     URL.revokeObjectURL = originalRevokeObjectURL
   })
 
+  it("rerenders paginated DOM sections when an image load changes layout", async () => {
+    const createObjectURL = vi.fn(() => "blob:dom-cover-image")
+    const revokeObjectURL = vi.fn()
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+
+    URL.createObjectURL = createObjectURL
+    URL.revokeObjectURL = revokeObjectURL
+
+    const container = document.createElement("div")
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 320
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 320
+    })
+    container.innerHTML =
+      '<div class="epub-dom-section"><img src="OPS/images/dom-cover.png" alt="Cover"></div>'
+    const reader = new EpubReader({ container, mode: "paginated" })
+    ;(
+      reader as unknown as {
+        book: Book
+        lastChapterRenderDecision: { mode: "dom"; score: number; reasons: string[] }
+      }
+    ).book = {
+      metadata: { title: "DOM Layout Change" },
+      manifest: [],
+      spine: [{ idref: "item-1", href: "OPS/chapter.xhtml", linear: true }],
+      toc: [],
+      sections: [
+        {
+          id: "section-1",
+          href: "OPS/chapter.xhtml",
+          anchors: {},
+          blocks: []
+        }
+      ]
+    }
+    ;(
+      reader as unknown as {
+        lastChapterRenderDecision: { mode: "dom"; score: number; reasons: string[] }
+      }
+    ).lastChapterRenderDecision = {
+      mode: "dom",
+      score: 0,
+      reasons: ["test-dom-layout-change"]
+    }
+    const renderSpy = vi.spyOn(
+      reader as unknown as {
+        renderCurrentSection(renderBehavior?: "relocate" | "preserve"): void
+      },
+      "renderCurrentSection"
+    )
+
+    const resources = new InMemoryResourceContainer({
+      "OPS/images/dom-cover.png": new Uint8Array([137, 80, 78, 71])
+    })
+
+    ;(
+      reader as unknown as {
+        resources: typeof resources
+        resolveDomResourceUrl(path: string): string
+      }
+    ).resources = resources
+
+    expect(
+      (
+        reader as unknown as {
+          resolveDomResourceUrl(path: string): string
+        }
+      ).resolveDomResourceUrl("OPS/images/dom-cover.png")
+    ).toBe("OPS/images/dom-cover.png")
+
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const image = container.querySelector("img")
+    expect(createObjectURL).toHaveBeenCalledTimes(1)
+    expect(image?.getAttribute("src")).toBe("blob:dom-cover-image")
+    image?.dispatchEvent(new Event("load"))
+    await new Promise((resolve) => setTimeout(resolve, 60))
+
+    expect(renderSpy).toHaveBeenCalledWith("preserve")
+
+    reader.destroy()
+    URL.createObjectURL = originalCreateObjectURL
+    URL.revokeObjectURL = originalRevokeObjectURL
+  })
+
   it("rewrites svg image xlink:href resources for dom rendering", async () => {
     const createObjectURL = vi.fn(() => "blob:dom-svg-cover")
     const revokeObjectURL = vi.fn()

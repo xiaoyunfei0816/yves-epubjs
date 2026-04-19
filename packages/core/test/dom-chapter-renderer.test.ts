@@ -174,6 +174,7 @@ describe("DomChapterRenderer", () => {
     expect(css).toContain(".epub-dom-section mark {")
     expect(css).toContain(".epub-dom-section hr {")
     expect(css).toContain("padding-left: var(--reader-quote-accent-gap);")
+    expect(css).toContain("max-height: min(900px, calc(var(--reader-content-viewport-height, 100vh) * 0.78));")
   })
 
   it("rewrites resolved attribute values while serializing dom chapters", () => {
@@ -326,5 +327,36 @@ describe("DomChapterRenderer", () => {
     expect(markup).toContain("--fxl-render-width: 405px")
     expect(markup).toContain("--fxl-render-height: 540px")
     expect(markup).toContain(".epub-dom-section-fxl {")
+  })
+
+  it("serializes the content viewport height hook for regular sections", () => {
+    const renderer = new DomChapterRenderer()
+
+    const markup = renderer.createMarkup({
+      sectionId: "section-1",
+      sectionHref: "OPS/chapter.xhtml",
+      contentViewportHeight: 640,
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography: {
+        fontSize: 18,
+        lineHeight: 1.6,
+        paragraphSpacing: 12
+      },
+      fontFamily: '"Iowan Old Style", serif',
+      nodes: [
+        {
+          kind: "element",
+          tagName: "p",
+          attributes: {},
+          children: [{ kind: "text", text: "Hello" }]
+        }
+      ]
+    })
+
+    expect(markup).toContain('data-content-height="640"')
+    expect(markup).toContain("--reader-content-viewport-height: 640px")
   })
 })

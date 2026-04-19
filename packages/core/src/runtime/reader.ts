@@ -65,6 +65,10 @@ import {
   extractBlockText as collectBlockText,
   extractInlineText as collectInlineText
 } from "../utils/block-text"
+import {
+  extractIntrinsicImageSize,
+  type IntrinsicImageSize
+} from "../utils/image-intrinsic-size"
 import { buildChapterAnalysisInput } from "./chapter-analysis-input"
 import { analyzeChapterRenderMode } from "./chapter-render-analyzer"
 import { ChapterRenderDecisionCache } from "./chapter-render-decision-cache"
@@ -228,6 +232,11 @@ export class EpubReader {
   }
   private renderVersion = 0
   private lastChapterRenderDecision: ChapterRenderDecision | null = null
+  private readonly imageIntrinsicSizeCache = new Map<
+    string,
+    IntrinsicImageSize | null
+  >()
+  private readonly pendingImageIntrinsicSizePaths = new Set<string>()
   private lastLocatorRestoreDiagnostics: LocatorRestoreDiagnostics | null = null
   private lastFixedLayoutRenderSignature: string | null = null
   private lastPresentationRenderSignature: string | null = null
@@ -292,11 +301,20 @@ export class EpubReader {
     this.renderableResourceManager = new RenderableResourceManager({
       getContainer: () => this.options.container,
       readBinary: (path) => this.resources?.readBinary(path) ?? null,
-      shouldTrackDomLayoutChanges: () => Boolean(this.locator?.anchorId),
+      shouldTrackDomLayoutChanges: () =>
+        this.lastChapterRenderDecision?.mode === "dom" &&
+        (this.mode === "paginated" || Boolean(this.locator?.anchorId)),
       onCanvasResourceResolved: () => {
         this.scheduleDeferredResourceRenderRefresh()
       },
       onDomLayoutChange: () => {
+        if (
+          this.mode === "paginated" &&
+          this.lastChapterRenderDecision?.mode === "dom"
+        ) {
+          this.scheduleDeferredResourceRenderRefresh()
+          return
+        }
         this.scheduleDeferredAnchorRealignment()
       }
     })
@@ -325,6 +343,8 @@ export class EpubReader {
     this.rebuildSectionIndex()
     this.sourceName = normalized.sourceName ?? null
     this.resources = parsed.resources
+    this.imageIntrinsicSizeCache.clear()
+    this.pendingImageIntrinsicSizePaths.clear()
     this.annotations = []
     this.revokeObjectUrls()
     this.chapterRenderInputs = parsed.sectionContents.map((entry) =>
@@ -1342,6 +1362,8 @@ export class EpubReader {
     }
     this.book = null
     this.resources = null
+    this.imageIntrinsicSizeCache.clear()
+    this.pendingImageIntrinsicSizePaths.clear()
     this.chapterRenderInputs = []
     this.locator = null
     this.pages = []
@@ -1741,7 +1763,9 @@ export class EpubReader {
                 viewportWidth: paginationMeasurement.width,
                 viewportHeight: paginationMeasurement.height,
                 typography: this.typography,
-                fontFamily: this.getFontFamily()
+                fontFamily: this.getFontFamily(),
+                resolveImageIntrinsicSize: (src) =>
+                  this.resolveImageIntrinsicSizeForLayout(src)
               },
               this.mode
             )
@@ -2518,7 +2542,9 @@ export class EpubReader {
             viewportWidth: this.getContentWidth(),
             viewportHeight: this.options.container!.clientHeight,
             typography: this.typography,
-            fontFamily: this.getFontFamily()
+            fontFamily: this.getFontFamily(),
+            resolveImageIntrinsicSize: (src) =>
+              this.resolveImageIntrinsicSizeForLayout(src)
           },
           "scroll"
         )
@@ -2532,6 +2558,8 @@ export class EpubReader {
           locatorMap: layout.locatorMap,
           resolveImageLoaded: (src) => this.isImageResourceReady(src),
           resolveImageUrl: (src) => this.resolveCanvasResourceUrl(src),
+          resolveImageIntrinsicSize: (src) =>
+            this.resolveImageIntrinsicSizeForLayout(src),
           highlightedBlockIds:
             this.getHighlightedCanvasBlockIdsForSection(index),
           highlightRangesByBlock:
@@ -2644,6 +2672,8 @@ export class EpubReader {
       activeBlockId: this.getActiveCanvasBlockIdForSection(page.spineIndex),
       resolveImageLoaded: (src) => this.isImageResourceReady(src),
       resolveImageUrl: (src) => this.resolveCanvasResourceUrl(src),
+      resolveImageIntrinsicSize: (src) =>
+        this.resolveImageIntrinsicSizeForLayout(src),
       estimateBlockHeight: (block) => this.estimateBlockHeightForPage(block),
       buildSectionDisplayList: (input) =>
         this.displayListBuilder.buildSection(input)
@@ -2664,7 +2694,9 @@ export class EpubReader {
           viewportWidth: this.getContentWidth(),
           viewportHeight: this.options.container?.clientHeight ?? 720,
           typography: this.typography,
-          fontFamily: this.getFontFamily()
+          fontFamily: this.getFontFamily(),
+          resolveImageIntrinsicSize: (src) =>
+            this.resolveImageIntrinsicSizeForLayout(src)
         },
         "paginated"
       ).blocks[0]?.estimatedHeight ??
@@ -2674,6 +2706,41 @@ export class EpubReader {
 
   private isImageResourceReady(src: string): boolean {
     return this.renderableResourceManager.isReady(src)
+  }
+
+  private resolveImageIntrinsicSizeForLayout(
+    src: string
+  ): IntrinsicImageSize | null | undefined {
+    const cached = this.imageIntrinsicSizeCache.get(src)
+    if (cached) {
+      return cached
+    }
+    if (this.imageIntrinsicSizeCache.has(src)) {
+      return null
+    }
+
+    if (!this.resources || this.pendingImageIntrinsicSizePaths.has(src)) {
+      return undefined
+    }
+
+    this.pendingImageIntrinsicSizePaths.add(src)
+    this.resources
+      .readBinary(src)
+      .then((binary) => {
+        const resolved = extractIntrinsicImageSize(binary, src)
+        this.imageIntrinsicSizeCache.set(src, resolved)
+        if (resolved) {
+          this.scheduleDeferredResourceRenderRefresh()
+        }
+      })
+      .catch(() => {
+        this.imageIntrinsicSizeCache.set(src, null)
+      })
+      .finally(() => {
+        this.pendingImageIntrinsicSizePaths.delete(src)
+      })
+
+    return undefined
   }
 
   private extractBlockText(block: BlockNode): string {
@@ -3511,7 +3578,9 @@ export class EpubReader {
             viewportWidth: targetWidth,
             viewportHeight: targetHeight,
             typography: this.typography,
-            fontFamily: this.getFontFamily()
+            fontFamily: this.getFontFamily(),
+            resolveImageIntrinsicSize: (src) =>
+              this.resolveImageIntrinsicSizeForLayout(src)
           },
           "paginated"
         )
@@ -5730,6 +5799,19 @@ function collectPaginatedDomReadableLineBands(
     }
   }
 
+  for (const element of collectDomMediaElements(sectionElement)) {
+    const rect = element.getBoundingClientRect()
+    if (rect.height <= 0 || rect.width <= 0) {
+      continue
+    }
+    const top = Math.max(0, rect.top - sectionRect.top)
+    const bottom = Math.max(top, rect.bottom - sectionRect.top)
+    const key = `${top.toFixed(2)}:${bottom.toFixed(2)}`
+    if (!bands.has(key)) {
+      bands.set(key, { top, bottom })
+    }
+  }
+
   return [...bands.values()].sort((left, right) =>
     left.top === right.top ? left.bottom - right.bottom : left.top - right.top
   )
@@ -6320,6 +6402,14 @@ function collectDomReadableBlockElements(
   return Array.from(
     sectionElement.querySelectorAll<HTMLElement>(
       "p, li, pre, h1, h2, h3, h4, h5, h6, td, th, dt, dd, figcaption"
+    )
+  )
+}
+
+function collectDomMediaElements(sectionElement: HTMLElement): HTMLElement[] {
+  return Array.from(
+    sectionElement.querySelectorAll<HTMLElement>(
+      "img, svg, image, object, video, canvas, figure"
     )
   )
 }

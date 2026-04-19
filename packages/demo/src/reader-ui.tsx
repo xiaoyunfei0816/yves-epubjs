@@ -58,56 +58,34 @@ export function SearchResultsPanel(props: {
 }
 
 export function ReaderSidebar(props: {
-  collapsed: boolean
   toc: TocItem[]
   activeId: string | null
   expandedIds: Set<string>
-  onCollapse: () => void
-  onExpand: () => void
   onToggle: (id: string) => void
   onSelect: (id: string) => void | Promise<void>
 }): JSX.Element {
   return (
-    <aside className={`sidebar${props.collapsed ? " is-collapsed" : ""}`}>
-      {props.collapsed ? (
-        <button
-          type="button"
-          className="sidebar-toggle sidebar-toggle-floating"
-          onClick={props.onExpand}
-          aria-label="Expand sidebar"
-        >
-          ›
-        </button>
-      ) : (
-        <div className="sidebar-panel">
-          <div className="sidebar-panel-header">
-            <h2>Contents</h2>
-            <button
-              type="button"
-              className="sidebar-toggle"
-              onClick={props.onCollapse}
-              aria-label="Collapse sidebar"
-            >
-              ‹
-            </button>
-          </div>
-          <div className="sidebar-panel-body">
-            <div className="space-y-2">
-              {props.toc.length === 0 ? (
-                <p className="empty-state">No table of contents available.</p>
-              ) : (
-                <TocTree
-                  items={props.toc}
-                  activeId={props.activeId}
-                  expandedIds={props.expandedIds}
-                  onToggle={props.onToggle}
-                  onSelect={props.onSelect}
-                />
-              )}
-            </div>
+    <aside className="sidebar">
+      <div className="sidebar-panel">
+        <div className="sidebar-panel-header">
+          <h2>Contents</h2>
+        </div>
+        <div className="sidebar-panel-body">
+          <div className="space-y-2">
+            {props.toc.length === 0 ? (
+              <p className="empty-state">No table of contents available.</p>
+            ) : (
+              <TocTree
+                items={props.toc}
+                activeId={props.activeId}
+                expandedIds={props.expandedIds}
+                onToggle={props.onToggle}
+                onSelect={props.onSelect}
+              />
+            )}
           </div>
         </div>
-      )}
+      </div>
     </aside>
   )
 }
@@ -151,6 +129,12 @@ export function ReaderToolbar(props: {
             }}
             className="field-input page-input"
           />
+          <span
+            className="page-total"
+            aria-label={`${positionLabel} ${props.currentPage} of ${props.totalPages}`}
+          >
+            / {props.totalPages}
+          </span>
         </label>
         <ToolbarButton onClick={() => props.onGoToPage(Number(props.pageValue))}>Go</ToolbarButton>
       </div>

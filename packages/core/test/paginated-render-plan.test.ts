@@ -235,6 +235,93 @@ describe("paginated render plan", () => {
     })
     expect(secondPageCalls[0]?.lines).toHaveLength(1)
   })
+
+  it("moves image-bearing pretext lines to the next page when the remaining space is too small", () => {
+    const section = createSection("section-1", "OPS/one.xhtml")
+    const introBlock = {
+      type: "pretext",
+      id: "text-1",
+      kind: "text",
+      lineHeight: 20,
+      textAlign: "start",
+      paddingTop: 0,
+      paddingBottom: 0,
+      paddingLeft: 0,
+      paddingRight: 0,
+      lines: [{ width: 100, height: 60, fragments: [] }],
+      estimatedHeight: 60
+    } satisfies LayoutPretextBlock
+    const imageBlock = {
+      type: "pretext",
+      id: "text-2",
+      kind: "text",
+      lineHeight: 20,
+      textAlign: "center",
+      paddingTop: 0,
+      paddingBottom: 0,
+      paddingLeft: 0,
+      paddingRight: 0,
+      lines: [
+        {
+          width: 80,
+          height: 70,
+          fragments: [
+            {
+              text: "",
+              font: '400 18px "Iowan Old Style", serif',
+              gapBefore: 0,
+              image: {
+                src: "OPS/image.png",
+                width: 80,
+                height: 70,
+                marginLeft: 0,
+                marginRight: 0
+              }
+            }
+          ]
+        },
+        {
+          width: 100,
+          height: 20,
+          fragments: [
+            {
+              text: "Caption",
+              font: '400 18px "Iowan Old Style", serif',
+              gapBefore: 0
+            }
+          ]
+        }
+      ],
+      estimatedHeight: 90
+    } satisfies LayoutPretextBlock
+    const layout = createLayout(section, [introBlock, imageBlock])
+
+    const plan = buildPaginatedPages({
+      sections: [section],
+      currentSectionIndex: 0,
+      sectionLayout: layout,
+      pageHeight: 100,
+      getSectionLayout: () => layout
+    })
+
+    expect(plan.pages).toHaveLength(2)
+    expect(plan.pages[0]?.blocks).toHaveLength(1)
+    expect(plan.pages[0]?.blocks[0]).toMatchObject({
+      type: "pretext",
+      block: {
+        id: "text-1"
+      }
+    })
+    expect(plan.pages[1]?.blocks).toHaveLength(1)
+    expect(plan.pages[1]?.blocks[0]).toMatchObject({
+      type: "pretext",
+      block: {
+        id: "text-2"
+      },
+      lineStart: 0,
+      lineEnd: 2
+    })
+  })
 })
 
 function createSection(id: string, href: string): SectionDocument {

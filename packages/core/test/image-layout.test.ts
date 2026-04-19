@@ -29,7 +29,7 @@ describe("image layout strategy", () => {
     expect(layout.height).toBe(90);
   });
 
-  it("allows wide images to use a larger width budget than regular illustrations", () => {
+  it("caps oversized content images to the content width instead of using heuristic width buckets", () => {
     const wide = resolveImageLayout({
       availableWidth: 480,
       viewportHeight: 720,
@@ -43,7 +43,8 @@ describe("image layout strategy", () => {
       intrinsicHeight: 1000
     });
 
-    expect(wide.width).toBeGreaterThan(regular.width);
+    expect(wide.width).toBe(480);
+    expect(regular.width).toBe(480);
   });
 
   it("caps tall portrait images against the viewport height", () => {
@@ -122,6 +123,63 @@ describe("image layout strategy", () => {
       height: 90
     });
     expect(displayList.height).toBe(130);
+  });
+
+  it("uses resolved resource intrinsic sizes when block metadata is missing", () => {
+    const section: SectionDocument = {
+      id: "section-image-metadata",
+      href: "OPS/image.xhtml",
+      anchors: {},
+      blocks: [
+        {
+          id: "image-1",
+          kind: "image",
+          src: "OPS/image.jpg",
+          alt: "Inline image"
+        }
+      ]
+    };
+
+    const engine = new LayoutEngine();
+    const layout = engine.layout(
+      {
+        section,
+        spineIndex: 0,
+        viewportWidth: 400,
+        viewportHeight: 600,
+        typography,
+        fontFamily: "serif",
+        resolveImageIntrinsicSize: () => ({
+          width: 120,
+          height: 90
+        })
+      },
+      "scroll"
+    );
+    const builder = new DisplayListBuilder();
+    const displayList = builder.buildSection({
+      section,
+      width: layout.width,
+      viewportHeight: 600,
+      blocks: layout.blocks,
+      theme,
+      typography,
+      locatorMap: layout.locatorMap,
+      resolveImageIntrinsicSize: () => ({
+        width: 120,
+        height: 90
+      }),
+      activeBlockId: undefined
+    });
+    const imageOp = displayList.ops.find((op): op is ImageDrawOp => op.kind === "image");
+
+    expect(layout.blocks[0]?.estimatedHeight).toBe(106);
+    expect(imageOp?.rect).toEqual({
+      x: 140,
+      y: 8,
+      width: 120,
+      height: 90
+    });
   });
 
   it("keeps code block indentation and wraps long lines consistently", () => {

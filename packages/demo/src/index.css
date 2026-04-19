@@ -739,10 +739,6 @@ select {
   min-height: 0;
 }
 
-.sidebar.is-collapsed .sidebar-panel {
-  display: none;
-}
-
 .sidebar-panel {
   max-height: calc(100vh - 280px);
   min-height: 0;
@@ -770,22 +766,6 @@ select {
   flex: 1;
   overflow: auto;
   padding-right: 4px;
-}
-
-.sidebar-toggle {
-  border: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 999px;
-  background: rgba(27, 75, 114, 0.1);
-  color: #18344f;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.sidebar-toggle-floating {
-  margin-top: 0;
-  box-shadow: 0 14px 34px rgba(37, 48, 62, 0.12);
 }
 
 .reader-toolbar {
@@ -1020,6 +1000,13 @@ select {
   padding: 0 10px;
   border-radius: 12px;
   font-size: 0.78rem;
+}
+
+.page-total {
+  min-width: 3.75rem;
+  color: #5f6c7b;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .page-range {

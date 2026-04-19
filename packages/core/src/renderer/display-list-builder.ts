@@ -25,6 +25,7 @@ import {
   type ReadingStyleProfile
 } from "./reading-style-profile";
 import { resolveImageLayout } from "../utils/image-layout";
+import type { IntrinsicImageSize } from "../utils/image-intrinsic-size";
 import { wrapPreformattedTextWithOffsets } from "../utils/preformatted-text";
 import { extractBlockText } from "../utils/block-text";
 import {
@@ -50,6 +51,9 @@ type BuilderOptions = {
   locatorMap?: Map<string, Locator>;
   resolveImageLoaded?: (src: string) => boolean;
   resolveImageUrl?: (src: string) => string;
+  resolveImageIntrinsicSize?: (
+    src: string
+  ) => IntrinsicImageSize | null | undefined;
   highlightedBlockIds?: Set<string>;
   highlightRangesByBlock?: Map<string, BlockHighlightRange[]>;
   underlinedBlockIds?: Set<string>;
@@ -89,6 +93,7 @@ export class DisplayListBuilder {
             locator: options.locatorMap?.get(block.id),
             resolveImageLoaded: options.resolveImageLoaded,
             resolveImageUrl: options.resolveImageUrl,
+            resolveImageIntrinsicSize: options.resolveImageIntrinsicSize,
             highlighted: options.highlightedBlockIds?.has(block.id) ?? false,
             highlightRanges: options.highlightRangesByBlock?.get(block.id) ?? [],
             underlined: options.underlinedBlockIds?.has(block.id) ?? false,
@@ -107,6 +112,7 @@ export class DisplayListBuilder {
             locator: options.locatorMap?.get(block.id),
             resolveImageLoaded: options.resolveImageLoaded,
             resolveImageUrl: options.resolveImageUrl,
+            resolveImageIntrinsicSize: options.resolveImageIntrinsicSize,
             highlighted: options.highlightedBlockIds?.has(block.id) ?? false,
             highlightRanges: options.highlightRangesByBlock?.get(block.id) ?? [],
             underlined: options.underlinedBlockIds?.has(block.id) ?? false,
@@ -141,6 +147,9 @@ export class DisplayListBuilder {
     locator: Locator | undefined;
     resolveImageLoaded: ((src: string) => boolean) | undefined;
     resolveImageUrl: ((src: string) => string) | undefined;
+    resolveImageIntrinsicSize:
+      | ((src: string) => IntrinsicImageSize | null | undefined)
+      | undefined;
     highlighted: boolean;
     highlightRanges: BlockHighlightRange[];
     underlined: boolean;
@@ -340,6 +349,9 @@ export class DisplayListBuilder {
     locator: Locator | undefined;
     resolveImageLoaded: ((src: string) => boolean) | undefined;
     resolveImageUrl: ((src: string) => string) | undefined;
+    resolveImageIntrinsicSize:
+      | ((src: string) => IntrinsicImageSize | null | undefined)
+      | undefined;
     highlighted: boolean;
     highlightRanges: BlockHighlightRange[];
     underlined: boolean;
@@ -411,12 +423,10 @@ export class DisplayListBuilder {
     switch (input.block.kind) {
       case "image": {
         const renderSrc = input.resolveImageUrl?.(input.block.src) ?? input.block.src;
-        const intrinsicSize = resolveImageIntrinsicSize(input.block);
         const imageLayout = resolveImageLayout({
           availableWidth: width,
           viewportHeight: input.viewportHeight,
-          ...(intrinsicSize.width ? { intrinsicWidth: intrinsicSize.width } : {}),
-          ...(intrinsicSize.height ? { intrinsicHeight: intrinsicSize.height } : {}),
+          ...resolveImageIntrinsicSize(input.block, input.resolveImageIntrinsicSize),
           fillWidth: this.isCoverImageBlock(input.section, input.block)
         });
         const imageRect = {
@@ -617,6 +627,7 @@ export class DisplayListBuilder {
             },
             resolveImageLoaded: input.resolveImageLoaded,
             resolveImageUrl: input.resolveImageUrl,
+            resolveImageIntrinsicSize: input.resolveImageIntrinsicSize,
             highlighted: input.highlighted,
             underlined: input.underlined,
             active: input.active,
@@ -934,6 +945,9 @@ export class DisplayListBuilder {
     theme: Theme;
     resolveImageLoaded: ((src: string) => boolean) | undefined;
     resolveImageUrl: ((src: string) => string) | undefined;
+    resolveImageIntrinsicSize:
+      | ((src: string) => IntrinsicImageSize | null | undefined)
+      | undefined;
     highlighted: boolean;
     underlined: boolean;
     active: boolean;
@@ -945,12 +959,10 @@ export class DisplayListBuilder {
     for (const child of input.block.blocks) {
       if (child.kind === "image") {
         const renderSrc = input.resolveImageUrl?.(child.src) ?? child.src
-        const intrinsicSize = resolveImageIntrinsicSize(child)
         const imageLayout = resolveImageLayout({
           availableWidth: input.width,
           viewportHeight: input.viewportHeight,
-          ...(intrinsicSize.width ? { intrinsicWidth: intrinsicSize.width } : {}),
-          ...(intrinsicSize.height ? { intrinsicHeight: intrinsicSize.height } : {})
+          ...resolveImageIntrinsicSize(child, input.resolveImageIntrinsicSize)
         })
         const imageRect = {
           x: input.x + imageLayout.xOffset,
@@ -1261,23 +1273,33 @@ export class DisplayListBuilder {
   }
 }
 
-function resolveImageIntrinsicSize(image: {
-  width?: number;
-  height?: number;
-  style?: {
+function resolveImageIntrinsicSize(
+  image: {
     width?: number;
     height?: number;
-  };
-}): {
-  width?: number;
-  height?: number;
+    style?: {
+      width?: number;
+      height?: number;
+    };
+    src?: string;
+  },
+  resolveResourceIntrinsicSize?: (
+    src: string
+  ) => IntrinsicImageSize | null | undefined
+): {
+  intrinsicWidth?: number;
+  intrinsicHeight?: number;
 } {
-  const width = image.style?.width ?? image.width;
-  const height = image.style?.height ?? image.height;
+  const resolvedSize =
+    image.src && resolveResourceIntrinsicSize
+      ? resolveResourceIntrinsicSize(image.src)
+      : undefined
+  const width = image.style?.width ?? image.width ?? resolvedSize?.width;
+  const height = image.style?.height ?? image.height ?? resolvedSize?.height;
 
   return {
-    ...(typeof width === "number" && width > 0 ? { width } : {}),
-    ...(typeof height === "number" && height > 0 ? { height } : {})
+    ...(typeof width === "number" && width > 0 ? { intrinsicWidth: width } : {}),
+    ...(typeof height === "number" && height > 0 ? { intrinsicHeight: height } : {})
   };
 }
 

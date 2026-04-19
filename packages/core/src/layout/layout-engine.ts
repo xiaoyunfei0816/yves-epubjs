@@ -24,6 +24,7 @@ import type {
 import { normalizeLocator } from "../runtime/locator";
 import { buildReadingStyleProfile } from "../renderer/reading-style-profile";
 import { resolveImageLayout } from "../utils/image-layout";
+import type { IntrinsicImageSize } from "../utils/image-intrinsic-size";
 import { countWrappedPreformattedLines } from "../utils/preformatted-text";
 import { extractBlockText } from "../utils/block-text";
 import { estimateWrappedTextHeight, extractFontSize } from "../utils/text-wrap";
@@ -97,6 +98,9 @@ export type LayoutInput = {
   viewportHeight: number;
   typography: TypographyOptions;
   fontFamily: string;
+  resolveImageIntrinsicSize?: (
+    src: string
+  ) => IntrinsicImageSize | null | undefined;
 };
 
 type InlineStyleState = {
@@ -212,8 +216,7 @@ export class LayoutEngine {
         const imageLayout = resolveImageLayout({
           availableWidth: contentWidth,
           viewportHeight: input.viewportHeight,
-          ...(coverImage.width ? { intrinsicWidth: coverImage.width } : {}),
-          ...(coverImage.height ? { intrinsicHeight: coverImage.height } : {}),
+          ...resolveImageIntrinsicSize(coverImage, input.resolveImageIntrinsicSize),
           fillWidth: true
         });
         const font = this.buildFont(
@@ -847,16 +850,10 @@ export class LayoutEngine {
 
     switch (block.kind) {
       case "image": {
-        const intrinsicSize = resolveImageIntrinsicSize(block);
         return resolveImageLayout({
           availableWidth: Math.max(1, contentWidth),
           viewportHeight: input.viewportHeight,
-          ...(intrinsicSize.width
-            ? { intrinsicWidth: intrinsicSize.width }
-            : {}),
-          ...(intrinsicSize.height
-            ? { intrinsicHeight: intrinsicSize.height }
-            : {}),
+          ...resolveImageIntrinsicSize(block, input.resolveImageIntrinsicSize),
           fillWidth: this.isCoverImageBlock(input.section, block)
         }).blockHeight;
       }
@@ -923,7 +920,8 @@ export class LayoutEngine {
             input.viewportWidth,
             input.viewportHeight,
             typography,
-            styleProfile
+            styleProfile,
+            input.resolveImageIntrinsicSize
           )
         );
       case "aside":
@@ -1148,23 +1146,33 @@ function resolveInlineImageDimension(input: {
   return input.fallback;
 }
 
-function resolveImageIntrinsicSize(image: {
-  width?: number;
-  height?: number;
-  style?: {
+function resolveImageIntrinsicSize(
+  image: {
     width?: number;
     height?: number;
-  };
-}): {
-  width?: number;
-  height?: number;
+    style?: {
+      width?: number;
+      height?: number;
+    };
+    src?: string;
+  },
+  resolveResourceIntrinsicSize?: (
+    src: string
+  ) => IntrinsicImageSize | null | undefined
+): {
+  intrinsicWidth?: number;
+  intrinsicHeight?: number;
 } {
-  const width = image.style?.width ?? image.width;
-  const height = image.style?.height ?? image.height;
+  const resolvedSize =
+    image.src && resolveResourceIntrinsicSize
+      ? resolveResourceIntrinsicSize(image.src)
+      : undefined
+  const width = image.style?.width ?? image.width ?? resolvedSize?.width;
+  const height = image.style?.height ?? image.height ?? resolvedSize?.height;
 
   return {
-    ...(typeof width === "number" && width > 0 ? { width } : {}),
-    ...(typeof height === "number" && height > 0 ? { height } : {})
+    ...(typeof width === "number" && width > 0 ? { intrinsicWidth: width } : {}),
+    ...(typeof height === "number" && height > 0 ? { intrinsicHeight: height } : {})
   };
 }
 
@@ -1274,7 +1282,10 @@ function estimateFigureBlockHeight(
   viewportWidth: number,
   viewportHeight: number,
   typography: TypographyOptions,
-  styleProfile: ReturnType<typeof buildReadingStyleProfile>
+  styleProfile: ReturnType<typeof buildReadingStyleProfile>,
+  resolveResourceIntrinsicSize?: (
+    src: string
+  ) => IntrinsicImageSize | null | undefined
 ): number {
   const contentWidth = Math.max(
     40,
@@ -1287,17 +1298,11 @@ function estimateFigureBlockHeight(
 
   for (const child of block.blocks) {
     if (child.kind === "image") {
-      const intrinsicSize = resolveImageIntrinsicSize(child);
       total +=
         resolveImageLayout({
           availableWidth: contentWidth,
           viewportHeight,
-          ...(intrinsicSize.width
-            ? { intrinsicWidth: intrinsicSize.width }
-            : {}),
-          ...(intrinsicSize.height
-            ? { intrinsicHeight: intrinsicSize.height }
-            : {})
+          ...resolveImageIntrinsicSize(child, resolveResourceIntrinsicSize)
         }).height + styleProfile.media.blockSpacing;
       continue;
     }

@@ -249,12 +249,9 @@ export function App(): JSX.Element {
               <div className="reading-drawer-body">
                 {activeDrawer === "contents" ? (
                   <ReaderSidebar
-                    collapsed={false}
                     toc={snapshot.toc}
                     activeId={activeTocId}
                     expandedIds={expandedTocIds}
-                    onCollapse={() => setActiveDrawer(null)}
-                    onExpand={() => undefined}
                     onToggle={(id) => {
                       setExpandedTocIds((current) => toggleId(current, id))
                     }}

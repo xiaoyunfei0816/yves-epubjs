@@ -10,6 +10,7 @@ import type {
   Theme,
   TypographyOptions
 } from "../model/types"
+import type { IntrinsicImageSize } from "../utils/image-intrinsic-size"
 import { normalizeLocator } from "./locator"
 import type { SectionDisplayList } from "../renderer/draw-ops"
 
@@ -205,6 +206,9 @@ export function buildPageDisplayList(options: {
   activeBlockId: string | undefined
   resolveImageLoaded: (src: string) => boolean
   resolveImageUrl: (src: string) => string
+  resolveImageIntrinsicSize: (
+    src: string
+  ) => IntrinsicImageSize | null | undefined
   estimateBlockHeight: (block: BlockNode) => number
   buildSectionDisplayList: (input: {
     section: SectionDocument
@@ -220,6 +224,9 @@ export function buildPageDisplayList(options: {
     activeBlockId: string | undefined
     resolveImageLoaded: (src: string) => boolean
     resolveImageUrl: (src: string) => string
+    resolveImageIntrinsicSize: (
+      src: string
+    ) => IntrinsicImageSize | null | undefined
   }) => SectionDisplayList
 }): SectionDisplayList {
   const blocks = options.page.blocks.map((slice) =>
@@ -262,7 +269,8 @@ export function buildPageDisplayList(options: {
     underlinedBlockIds: options.underlinedBlockIds,
     activeBlockId: options.activeBlockId,
     resolveImageLoaded: options.resolveImageLoaded,
-    resolveImageUrl: options.resolveImageUrl
+    resolveImageUrl: options.resolveImageUrl,
+    resolveImageIntrinsicSize: options.resolveImageIntrinsicSize
   })
 }
 
@@ -305,6 +313,13 @@ function findPretextLineBreak(
       totalHeight +
       lineHeight +
       (nextIndex === block.lines.length ? fixedBottom : 0)
+    if (
+      nextHeight > availableHeight &&
+      index === start &&
+      lineContainsImage(block.lines[index])
+    ) {
+      return start
+    }
     if (totalHeight > fixedTop && nextHeight > availableHeight) {
       break
     }
@@ -350,4 +365,10 @@ function estimatePretextSliceHeight(
 
 function getPretextBlockTrailingAfterContent(block: LayoutPretextBlock): number {
   return Math.max(0, getPretextBlockTrailingSpace(block) - block.paddingTop)
+}
+
+function lineContainsImage(
+  line: LayoutPretextBlock["lines"][number] | undefined
+): boolean {
+  return Boolean(line?.fragments.some((fragment) => fragment.image))
 }

@@ -17,9 +17,7 @@ type ImageLayout = {
 const IMAGE_VERTICAL_PADDING = 16;
 const IMAGE_VERTICAL_OFFSET = IMAGE_VERTICAL_PADDING * 0.5;
 const DEFAULT_IMAGE_HEIGHT_RATIO = 0.66;
-const NORMAL_IMAGE_WIDTH_RATIO = 0.7;
-const WIDE_IMAGE_WIDTH_RATIO = 0.95;
-const PORTRAIT_IMAGE_WIDTH_RATIO = 0.9;
+const UNKNOWN_IMAGE_WIDTH_RATIO = 0.7;
 const MAX_IMAGE_HEIGHT_RATIO = 0.78;
 const MAX_IMAGE_HEIGHT_PX = 900;
 const MIN_IMAGE_WIDTH_WHEN_UNKNOWN = 120;
@@ -42,19 +40,15 @@ export function resolveImageLayout(input: ImageLayoutInput): ImageLayout {
   if (input.fillWidth) {
     width = availableWidth
   } else {
-    let widthRatio = NORMAL_IMAGE_WIDTH_RATIO;
-    if (aspectRatio && aspectRatio >= 1.4) {
-      widthRatio = WIDE_IMAGE_WIDTH_RATIO;
-    } else if (aspectRatio && aspectRatio <= 0.85) {
-      widthRatio = PORTRAIT_IMAGE_WIDTH_RATIO;
+    if (intrinsicWidth) {
+      width = Math.max(1, Math.min(intrinsicWidth, availableWidth))
+    } else {
+      const rawWidth = Math.min(
+        availableWidth,
+        Math.max(MIN_IMAGE_WIDTH_WHEN_UNKNOWN, availableWidth * UNKNOWN_IMAGE_WIDTH_RATIO)
+      )
+      width = rawWidth
     }
-
-    const widthCapByLayout = Math.min(availableWidth, availableWidth * widthRatio);
-    const widthCapByIntrinsic = intrinsicWidth ?? Number.POSITIVE_INFINITY;
-    const rawWidth = Math.min(widthCapByLayout, widthCapByIntrinsic);
-    width = intrinsicWidth
-      ? Math.max(1, rawWidth)
-      : Math.min(availableWidth, Math.max(MIN_IMAGE_WIDTH_WHEN_UNKNOWN, rawWidth));
   }
   const uncappedHeight = width * heightRatio;
   const maxHeight = Math.min(MAX_IMAGE_HEIGHT_PX, viewportHeight * MAX_IMAGE_HEIGHT_RATIO);

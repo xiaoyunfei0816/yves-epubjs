@@ -81,6 +81,9 @@ export function createDomChapterRenderInput(
     theme: options.theme,
     typography: options.typography,
     fontFamily: options.fontFamily,
+    ...(typeof options.availableHeight === "number"
+      ? { contentViewportHeight: options.availableHeight }
+      : {}),
     resolveAttributeValue: ({ tagName, attributeName, value }) =>
       resolveDomAttributeValue({
         sectionHref: options.section.href,
