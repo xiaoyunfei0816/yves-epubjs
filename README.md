@@ -164,6 +164,36 @@ reader.destroy()
 - [Reader Capability Matrix](docs-pretext-epub-20260414/2026-04-18-reader-capability-matrix.md)
 - [真实 EPUB QA 记录](docs/real-books-qa-2026-04-18.md)
 
+## 名词解释
+
+- `EPUB`：常见电子书格式，本质上是一个打包后的 ZIP 容器，内部通常包含 OPF、导航文件、XHTML 内容和资源文件
+- `Pretext`：这个项目使用的文本布局内核，主要负责文本测量、换行和排版，不负责完整 EPUB 结构解析
+- `OPF`：EPUB 的 package document，描述书籍元数据、manifest 和 spine
+- `NAV`：EPUB 3 常用导航文档，通常提供目录结构
+- `NCX`：较旧 EPUB 中常见的目录导航格式，通常作为 NAV 的兼容来源
+- `XHTML`：EPUB 章节内容常用的标记格式
+- `TOC`：`Table of Contents`，也就是目录
+- `runtime`：阅读器运行时层，负责当前阅读位置、搜索、书签、批注、偏好等状态和行为
+- `locator`：阅读器内部统一的位置描述，用来支撑跳转、恢复位置、书签、搜索命中和批注定位
+- `decoration`：附加在正文上的视觉标记，比如搜索高亮、选区高亮、活动命中态
+- `overlay`：覆盖在阅读视口上的额外可视层，通常用于绘制搜索命中或批注高亮框
+- `scroll`：滚动阅读模式，内容按连续文档流上下滚动
+- `paginated`：分页阅读模式，内容按页切分，支持前后翻页
+- `canvas` 渲染：把章节绘制到 Canvas 上，便于统一布局和性能控制
+- `dom` 渲染：把章节作为 DOM 内容挂到页面里，适合复杂结构或复杂样式章节
+- `hybrid` / 混合渲染：按章节在 `canvas` 和 `dom` 之间做路由，而不是整本书只走单一路径
+- `publisher styles`：原书自带的样式规则。阅读器需要决定保留多少、覆盖多少
+- `reflowable`：可重排版式，文字会随容器尺寸、字号等设置重新排版
+- `pre-paginated`：固定分页/固定版式内容，页面尺寸和元素位置通常更接近纸面设计稿
+- `synthetic spread` / `spread`：双页展开显示，一次展示左右两页，常见于大屏、横屏或固定版式场景
+- `RTL`：`Right-To-Left`，从右到左的阅读方向，常见于阿拉伯语、希伯来语等内容
+- `FXL`：`Fixed Layout`，固定版式 EPUB，通常不按普通文本书那样自由重排
+- `TTS`：`Text-To-Speech`，把文本交给语音引擎朗读
+- `Media Overlay`：EPUB 中的音频与文本同步朗读能力，通常比普通 TTS 多一层时间轴同步
+- `OPDS`：`Open Publication Distribution System`，用于在线书库、书目分发、元数据获取和下载，不属于阅读排版内核本身
+- `DRM`：数字版权保护，受保护内容通常需要授权和解密后才能阅读
+- `LCP`：一种 EPUB 领域常见的 DRM 方案，支持它意味着要处理许可证、密钥和内容解密链路
+
 ## 当前边界
 
 以下方向在仓库里有明确边界，不应默认视为“已经支持”：
