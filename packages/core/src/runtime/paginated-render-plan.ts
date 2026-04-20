@@ -206,7 +206,7 @@ export function buildPageDisplayList(options: {
   activeBlockId: string | undefined
   resolveImageLoaded: (src: string) => boolean
   resolveImageUrl: (src: string) => string
-  resolveImageIntrinsicSize: (
+  resolveImageIntrinsicSize?: (
     src: string
   ) => IntrinsicImageSize | null | undefined
   estimateBlockHeight: (block: BlockNode) => number
@@ -224,7 +224,7 @@ export function buildPageDisplayList(options: {
     activeBlockId: string | undefined
     resolveImageLoaded: (src: string) => boolean
     resolveImageUrl: (src: string) => string
-    resolveImageIntrinsicSize: (
+    resolveImageIntrinsicSize?: (
       src: string
     ) => IntrinsicImageSize | null | undefined
   }) => SectionDisplayList
@@ -270,7 +270,9 @@ export function buildPageDisplayList(options: {
     activeBlockId: options.activeBlockId,
     resolveImageLoaded: options.resolveImageLoaded,
     resolveImageUrl: options.resolveImageUrl,
-    resolveImageIntrinsicSize: options.resolveImageIntrinsicSize
+    ...(options.resolveImageIntrinsicSize
+      ? { resolveImageIntrinsicSize: options.resolveImageIntrinsicSize }
+      : {})
   })
 }
 
