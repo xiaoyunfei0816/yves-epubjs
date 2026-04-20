@@ -631,6 +631,49 @@ export type VisibleSectionDiagnostics = RenderDiagnostics & {
   isCurrent: boolean;
 };
 
+export type ReadingProgressSnapshot = {
+  overallProgress: number;
+  sectionProgress: number;
+  spineIndex: number;
+  sectionId: string;
+  sectionHref: string;
+  currentPage?: number;
+  totalPages?: number;
+};
+
+export type TocTarget = {
+  id: string;
+  label: string;
+  href: string;
+  depth: number;
+  parentId?: string;
+  locator: Locator;
+};
+
+export type SectionRenderedEvent = {
+  spineIndex: number;
+  sectionId: string;
+  sectionHref: string;
+  mode: ReadingMode;
+  backend: "dom" | "canvas";
+  diagnostics: RenderDiagnostics | null;
+  containerElement?: HTMLElement;
+  contentElement?: HTMLElement;
+  isCurrent: boolean;
+};
+
+export type SectionRelocatedEvent = {
+  spineIndex: number;
+  sectionId: string;
+  sectionHref: string;
+  locator: Locator | null;
+  mode: ReadingMode;
+  backend: "dom" | "canvas";
+  diagnostics: RenderDiagnostics | null;
+  containerElement?: HTMLElement;
+  contentElement?: HTMLElement;
+};
+
 export type ReaderEventMap = {
   opened: { book: Book };
   rendered: { mode: ReadingMode };
@@ -673,4 +716,6 @@ export type ReaderOptions = {
     input: ReaderEventMap["textSelectionChanged"]
   ) => void | Promise<void>;
   onExternalLink?: (input: ReaderEventMap["externalLinkActivated"]) => void | Promise<void>;
+  onSectionRendered?: (input: SectionRenderedEvent) => void | Promise<void>;
+  onSectionRelocated?: (input: SectionRelocatedEvent) => void | Promise<void>;
 };

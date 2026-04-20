@@ -3,6 +3,7 @@ import type { Book, SectionDocument } from "../src/model/types"
 import { parseXhtmlDocument } from "../src/parser/xhtml-parser"
 import {
   createBlockLocator,
+  flattenTocTargets,
   findRenderedAnchorTarget,
   resolveBookHrefLocator
 } from "../src/runtime/navigation-target"
@@ -109,5 +110,84 @@ describe("navigation target helpers", () => {
     expect(findRenderedAnchorTarget(container, "legacy-anchor")?.getAttribute("name")).toBe(
       "legacy-anchor"
     )
+  })
+
+  it("flattens nested toc items into href-resolved targets", () => {
+    const firstSection: SectionDocument = {
+      id: "section-1",
+      href: "OPS/chapter-1.xhtml",
+      title: "Chapter 1",
+      blocks: [
+        {
+          id: "text-1",
+          kind: "text",
+          inlines: [{ kind: "text", text: "Intro" }]
+        }
+      ],
+      anchors: {
+        intro: "text-1"
+      }
+    }
+    const secondSection: SectionDocument = {
+      id: "section-2",
+      href: "OPS/chapter-2.xhtml",
+      title: "Chapter 2",
+      blocks: [
+        {
+          id: "text-2",
+          kind: "text",
+          inlines: [{ kind: "text", text: "Details" }]
+        }
+      ],
+      anchors: {
+        details: "text-2"
+      }
+    }
+    const book: Book = {
+      ...createBook([firstSection, secondSection]),
+      toc: [
+        {
+          id: "toc-1",
+          label: "Chapter 1",
+          href: "OPS/chapter-1.xhtml#intro",
+          children: [
+            {
+              id: "toc-2",
+              label: "Chapter 2",
+              href: "OPS/chapter-2.xhtml#details",
+              children: []
+            }
+          ]
+        }
+      ]
+    }
+
+    expect(flattenTocTargets(book)).toEqual([
+      {
+        id: "toc-1",
+        label: "Chapter 1",
+        href: "OPS/chapter-1.xhtml#intro",
+        depth: 0,
+        locator: {
+          spineIndex: 0,
+          blockId: "text-1",
+          anchorId: "intro",
+          progressInSection: 0
+        }
+      },
+      {
+        id: "toc-2",
+        label: "Chapter 2",
+        href: "OPS/chapter-2.xhtml#details",
+        depth: 1,
+        parentId: "toc-1",
+        locator: {
+          spineIndex: 1,
+          blockId: "text-2",
+          anchorId: "details",
+          progressInSection: 0
+        }
+      }
+    ])
   })
 })

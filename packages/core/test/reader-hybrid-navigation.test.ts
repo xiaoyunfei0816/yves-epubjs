@@ -253,6 +253,38 @@ function createDomMediaReaderFixture(mode: "scroll" | "paginated" = "paginated")
 }
 
 describe("EpubReader hybrid navigation", () => {
+  it("exposes toc targets with resolved locators for mixed chapters", () => {
+    const { reader } = createHybridReaderFixture()
+
+    const targets = reader.getTocTargets()
+
+    expect(targets).toHaveLength(2)
+    expect(targets[0]).toMatchObject({
+      id: "toc-simple",
+      label: "Simple",
+      href: "OPS/simple.xhtml#intro",
+      depth: 0,
+      locator: {
+        spineIndex: 0,
+        anchorId: "intro",
+        progressInSection: 0
+      }
+    })
+    expect(targets[0]?.locator.blockId).toBeTruthy()
+    expect(targets[1]).toMatchObject({
+      id: "toc-complex",
+      label: "Complex",
+      href: "OPS/complex.xhtml#details",
+      depth: 0,
+      locator: {
+        spineIndex: 1,
+        anchorId: "details",
+        progressInSection: 1
+      }
+    })
+    expect(targets[1]?.locator.blockId).toBeTruthy()
+  })
+
   it("keeps toc navigation stable across canvas and dom chapters", async () => {
     const { reader, container } = createHybridReaderFixture();
 
@@ -271,6 +303,22 @@ describe("EpubReader hybrid navigation", () => {
     expect(reader.getCurrentLocation()?.blockId).toBeTruthy();
     expect(container.dataset.renderMode).toBe("canvas");
   });
+
+  it("navigates by href across canvas and dom sections", async () => {
+    const { reader } = createHybridReaderFixture()
+
+    const simpleLocator = await reader.goToHref("OPS/simple.xhtml#intro")
+    expect(simpleLocator?.spineIndex).toBe(0)
+    expect(simpleLocator?.anchorId).toBe("intro")
+    expect(reader.getCurrentLocation()?.spineIndex).toBe(0)
+
+    const complexLocator = await reader.goToHref("OPS/complex.xhtml#details")
+    expect(complexLocator?.spineIndex).toBe(1)
+    expect(complexLocator?.anchorId).toBe("details")
+    expect(reader.getCurrentLocation()?.spineIndex).toBe(1)
+    expect(reader.getCurrentLocation()?.anchorId).toBe("details")
+    expect(reader.getCurrentLocation()?.blockId).toBeTruthy()
+  })
 
   it("uses rendered dom anchor targets for toc jumps before falling back to section progress", async () => {
     const originalOffsetTop = Object.getOwnPropertyDescriptor(

@@ -1,4 +1,4 @@
-import type { Book, Locator, SectionDocument } from "../model/types"
+import type { Book, Locator, SectionDocument, TocTarget, TocItem } from "../model/types"
 import {
   estimateSectionProgressForBlock,
   findBlockIdForAnchor,
@@ -72,6 +72,14 @@ export function findRenderedAnchorTarget(
   )
 }
 
+export function flattenTocTargets(book: Book): TocTarget[] {
+  return flattenTocItems({
+    book,
+    items: book.toc,
+    depth: 0
+  })
+}
+
 function splitHrefFragment(href: string): [string, string | null] {
   const [baseHref, fragment] = href.split("#", 2)
   return [baseHref ?? href, fragment ?? null]
@@ -79,4 +87,42 @@ function splitHrefFragment(href: string): [string, string | null] {
 
 function escapeAttributeSelectorValue(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')
+}
+
+function flattenTocItems(input: {
+  book: Book
+  items: TocItem[]
+  depth: number
+  parentId?: string
+}): TocTarget[] {
+  const targets: TocTarget[] = []
+
+  for (const item of input.items) {
+    const locator = resolveBookHrefLocator({
+      book: input.book,
+      currentSectionIndex: 0,
+      href: item.href
+    })
+    if (locator) {
+      targets.push({
+        id: item.id,
+        label: item.label,
+        href: item.href,
+        depth: input.depth,
+        ...(input.parentId ? { parentId: input.parentId } : {}),
+        locator
+      })
+    }
+
+    targets.push(
+      ...flattenTocItems({
+        book: input.book,
+        items: item.children,
+        depth: input.depth + 1,
+        parentId: item.id
+      })
+    )
+  }
+
+  return targets
 }

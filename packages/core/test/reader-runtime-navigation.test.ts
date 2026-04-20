@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
-import type { Book, SectionDocument } from "../src/model/types"
+import type {
+  Book,
+  SectionDocument,
+  SectionRelocatedEvent
+} from "../src/model/types"
 import {
   EpubReader,
   createSharedChapterRenderInput,
@@ -41,6 +45,90 @@ const DOM_CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
   </html>`
 
 describe("EpubReader runtime navigation", () => {
+  it("notifies section relocation hooks and isolates hook failures", async () => {
+    const container = document.createElement("div")
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 260
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 180
+    })
+    document.body.appendChild(container)
+
+    const onSectionRelocated = vi.fn<
+      [SectionRelocatedEvent],
+      void
+    >(() => {
+      throw new Error("hook failure")
+    })
+    const reader = new EpubReader({
+      container,
+      mode: "paginated",
+      onSectionRelocated
+    })
+    const firstInput = createSharedChapterRenderInput({
+      href: "OPS/chapter-1.xhtml",
+      content: createCanvasChapter("Chapter 1", 20)
+    })
+    const secondInput = createSharedChapterRenderInput({
+      href: "OPS/chapter-2.xhtml",
+      content: createCanvasChapter("Chapter 2", 20)
+    })
+    const firstSection: SectionDocument = {
+      ...toCanvasChapterRenderInput(firstInput).section,
+      id: "section-1"
+    }
+    const secondSection: SectionDocument = {
+      ...toCanvasChapterRenderInput(secondInput).section,
+      id: "section-2"
+    }
+
+    const book: Book = {
+      metadata: { title: "Relocation Hook" },
+      manifest: [],
+      spine: [
+        { idref: "item-1", href: firstSection.href, linear: true },
+        { idref: "item-2", href: secondSection.href, linear: true }
+      ],
+      toc: [],
+      sections: [firstSection, secondSection]
+    }
+
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+      }
+    ).book = book
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+      }
+    ).chapterRenderInputs = [firstInput, secondInput]
+
+    await reader.render()
+    await reader.goToLocation({
+      spineIndex: 1,
+      progressInSection: 0
+    })
+
+    expect(onSectionRelocated).toHaveBeenCalled()
+    expect(onSectionRelocated.mock.calls.at(-1)?.[0]).toMatchObject({
+      spineIndex: 1,
+      sectionId: "section-2",
+      sectionHref: "OPS/chapter-2.xhtml",
+      backend: "canvas",
+      mode: "paginated",
+      locator: {
+        spineIndex: 1
+      }
+    })
+    expect(reader.getCurrentLocation()?.spineIndex).toBe(1)
+  })
+
   it("does not suppress the first user scroll relocation after an initial top-of-book render", async () => {
     const container = document.createElement("div")
     Object.defineProperty(container, "clientWidth", {

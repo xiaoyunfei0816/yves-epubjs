@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Book, SectionDocument } from "../src/model/types";
 import {
   EpubReader,
@@ -33,6 +33,92 @@ const COMPLEX_CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
   </html>`;
 
 describe("EpubReader chapter render routing", () => {
+  it("emits section rendered hooks for canvas and dom render paths", async () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 320
+    });
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 480
+    });
+    document.body.appendChild(container);
+
+    const onSectionRendered = vi.fn();
+    const simpleInput = createSharedChapterRenderInput({
+      href: "OPS/simple.xhtml",
+      content: SIMPLE_CHAPTER
+    });
+    const complexInput = createSharedChapterRenderInput({
+      href: "OPS/complex.xhtml",
+      content: COMPLEX_CHAPTER
+    });
+    const simpleSection: SectionDocument = {
+      ...toCanvasChapterRenderInput(simpleInput).section,
+      id: "section-1"
+    };
+    const complexSection: SectionDocument = {
+      ...toCanvasChapterRenderInput(complexInput).section,
+      id: "section-2"
+    };
+
+    const book: Book = {
+      metadata: { title: "Rendered Hooks" },
+      manifest: [],
+      spine: [
+        { idref: "item-1", href: simpleSection.href, linear: true },
+        { idref: "item-2", href: complexSection.href, linear: true }
+      ],
+      toc: [],
+      sections: [simpleSection, complexSection]
+    };
+
+    const reader = new EpubReader({
+      container,
+      mode: "scroll",
+      onSectionRendered
+    });
+    (
+      reader as unknown as {
+        book: Book;
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[];
+      }
+    ).book = book;
+    (
+      reader as unknown as {
+        book: Book;
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[];
+      }
+    ).chapterRenderInputs = [simpleInput, complexInput];
+
+    await reader.render();
+
+    expect(onSectionRendered).toHaveBeenCalledWith(expect.objectContaining({
+      spineIndex: 0,
+      sectionId: "section-1",
+      sectionHref: "OPS/simple.xhtml",
+      backend: "canvas",
+      mode: "scroll",
+      isCurrent: true
+    }));
+
+    await reader.goToLocation({
+      spineIndex: 1,
+      progressInSection: 0
+    });
+
+    expect(onSectionRendered).toHaveBeenCalledWith(expect.objectContaining({
+      spineIndex: 1,
+      sectionId: "section-2",
+      sectionHref: "OPS/complex.xhtml",
+      backend: "dom",
+      mode: "scroll",
+      isCurrent: true,
+      contentElement: expect.any(HTMLElement)
+    }));
+  });
+
   it("keeps stylesheet-backed simple chapters on the canvas path", async () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", {

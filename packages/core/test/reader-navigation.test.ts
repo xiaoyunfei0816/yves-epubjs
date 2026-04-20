@@ -301,4 +301,39 @@ describe("EpubReader reading navigation", () => {
     expect(reader.getPaginationInfo().currentPage).toBe(targetPage)
     expect(reader.getReadingNavigationContext()?.pageProgression).toBe("rtl")
   })
+
+  it("reports paginated overall progress and supports percentage jumps", async () => {
+    const container = createContainer()
+    const reader = new EpubReader({
+      container,
+      mode: "paginated"
+    })
+    const section = createPagedSection()
+
+    ;(reader as unknown as { book: Book }).book = {
+      metadata: {
+        title: "Paginated Progress"
+      },
+      manifest: [],
+      spine: [{ idref: "item-1", href: section.href, linear: true }],
+      toc: [],
+      sections: [section]
+    }
+
+    await reader.render()
+
+    const startSnapshot = reader.getReadingProgress()
+    expect(startSnapshot?.overallProgress).toBe(0)
+    expect(startSnapshot?.currentPage).toBe(1)
+    expect((startSnapshot?.totalPages ?? 0)).toBeGreaterThan(1)
+
+    const endLocator = await reader.goToProgress(1)
+    expect(endLocator?.spineIndex).toBe(0)
+    expect(reader.getPaginationInfo().currentPage).toBeGreaterThan(1)
+    expect(reader.getReadingProgress()?.overallProgress).toBe(1)
+
+    await reader.goToProgress(0)
+    expect(reader.getPaginationInfo().currentPage).toBe(1)
+    expect(reader.getReadingProgress()?.overallProgress).toBe(0)
+  })
 })

@@ -32,6 +32,12 @@ const COMPLEX_CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
   </html>`;
 
 describe("EpubReader hybrid progress", () => {
+  it("returns null progress before a book is opened", () => {
+    const reader = new EpubReader()
+
+    expect(reader.getReadingProgress()).toBeNull();
+  });
+
   it("preserves section progress when relocating into a dom chapter", async () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", {
@@ -387,5 +393,93 @@ describe("EpubReader hybrid progress", () => {
         );
       }
     }
+  });
+
+  it("reports overall progress and jumps by percentage across mixed chapters", async () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 320
+    });
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 400
+    });
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 0
+    });
+    document.body.appendChild(container);
+
+    const simpleInput = createSharedChapterRenderInput({
+      href: "OPS/simple.xhtml",
+      content: SIMPLE_CHAPTER
+    });
+    const complexInput = createSharedChapterRenderInput({
+      href: "OPS/complex.xhtml",
+      content: COMPLEX_CHAPTER
+    });
+    const simpleSection: SectionDocument = {
+      ...toCanvasChapterRenderInput(simpleInput).section,
+      id: "section-1"
+    };
+    const complexSection: SectionDocument = {
+      ...toCanvasChapterRenderInput(complexInput).section,
+      id: "section-2"
+    };
+
+    const book: Book = {
+      metadata: { title: "Hybrid Overall Progress" },
+      manifest: [],
+      spine: [
+        { idref: "item-1", href: simpleSection.href, linear: true },
+        { idref: "item-2", href: complexSection.href, linear: true }
+      ],
+      toc: [],
+      sections: [simpleSection, complexSection]
+    };
+
+    const reader = new EpubReader({ container, mode: "scroll" });
+    (
+      reader as unknown as {
+        book: Book;
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[];
+      }
+    ).book = book;
+    (
+      reader as unknown as {
+        book: Book;
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[];
+      }
+    ).chapterRenderInputs = [simpleInput, complexInput];
+
+    await reader.render();
+    expect(reader.getReadingProgress()?.overallProgress).toBe(0);
+
+    const targetLocator = await reader.goToProgress(0.75);
+    expect(targetLocator?.spineIndex).toBe(1);
+    expect(targetLocator?.progressInSection).toBeCloseTo(0.5, 3);
+    expect(reader.getCurrentLocation()?.spineIndex).toBe(1);
+
+    const domSection = container.querySelector(".epub-dom-section") as HTMLElement | null;
+    const domWrapper = container.querySelector(
+      'article[data-section-id="section-2"]'
+    ) as HTMLElement | null;
+    expect(domSection).toBeTruthy();
+    expect(domWrapper).toBeTruthy();
+    Object.defineProperty(domWrapper!, "offsetHeight", {
+      configurable: true,
+      value: 400
+    });
+    Object.defineProperty(domSection!, "scrollHeight", {
+      configurable: true,
+      value: 400
+    });
+
+    const snapshot = reader.getReadingProgress();
+    expect(snapshot?.spineIndex).toBe(1);
+    expect(snapshot?.sectionProgress).toBeCloseTo(0.5, 3);
+    expect(snapshot?.overallProgress).toBeCloseTo(0.75, 3);
   });
 });

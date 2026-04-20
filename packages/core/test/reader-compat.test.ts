@@ -1,8 +1,22 @@
 import { describe, expect, it } from "vitest"
-import type { Book, SectionDocument } from "../src/model/types"
+import type { Book, ReaderOptions, SectionDocument } from "../src/model/types"
 import { EpubReader } from "../src/runtime/reader"
 
 describe("EpubReader compatibility behavior", () => {
+  it("exposes citic integration contracts on the public reader surface", () => {
+    const options: ReaderOptions = {
+      onSectionRendered: async () => {},
+      onSectionRelocated: async () => {}
+    }
+    const reader = new EpubReader(options)
+
+    expect(typeof reader.getReadingProgress).toBe("function")
+    expect(typeof reader.goToProgress).toBe("function")
+    expect(typeof reader.goToHref).toBe("function")
+    expect(typeof reader.resolveHrefLocator).toBe("function")
+    expect(typeof reader.getTocTargets).toBe("function")
+  })
+
   it("searches text from figure captions, tables, definition lists, and inline image alt text", async () => {
     const container = document.createElement("div")
     Object.defineProperty(container, "clientWidth", {
