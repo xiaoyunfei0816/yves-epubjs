@@ -55,4 +55,27 @@ describe("style rule matcher", () => {
       "#intro"
     ])
   })
+
+  it("skips unsupported selectors while still matching supported rules", () => {
+    const document = parseHtmlDocument(`
+      <html>
+        <body>
+          <p class="lead">Hello</p>
+        </body>
+      </html>
+    `)
+    const paragraph = selectFirstHtmlElement("p", document)
+    expect(paragraph).toBeTruthy()
+
+    const stylesheet = parseCssStyleSheet(`
+      :lang(ja) { font-family: serif; }
+      p.lead { color: #333; }
+    `)
+
+    const matchedRules = paragraph
+      ? collectMatchedCssRules(paragraph, [stylesheet])
+      : []
+
+    expect(matchedRules.map((rule) => rule.selector)).toEqual(["p.lead"])
+  })
 })

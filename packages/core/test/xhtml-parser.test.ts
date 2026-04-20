@@ -457,4 +457,27 @@ describe("parseXhtmlDocument", () => {
       ]
     });
   });
+
+  it("ignores unsupported stylesheet selectors without aborting chapter parsing", () => {
+    const xml = `<?xml version="1.0"?>
+      <html>
+        <body>
+          <p class="lead">Hello</p>
+        </body>
+      </html>`;
+    const stylesheet = parseCssStyleSheet(`
+      :lang(ja) { font-family: serif; }
+      p.lead { color: #333; }
+    `);
+
+    const section = parseXhtmlDocument(xml, "OPS/chapter.xhtml", [stylesheet]);
+
+    expect(section.blocks[0]).toMatchObject({
+      kind: "text",
+      style: {
+        color: "#333"
+      },
+      inlines: [{ kind: "text", text: "Hello" }]
+    });
+  });
 });

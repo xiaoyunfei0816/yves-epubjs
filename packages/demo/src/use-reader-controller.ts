@@ -388,22 +388,34 @@ export function useReaderController(
       ...current,
       metaText: "Opening EPUB..."
     }))
-    await reader.open(file)
-    await reader.render()
-    const publicationId = reader.getPublicationId()
-    const mergedPreferences = loadStoredReaderPreferences(publicationId ?? undefined)
-    if (mergedPreferences) {
-      const settings = await reader.restorePreferences(mergedPreferences)
-      syncPreferenceState(settings)
-      persistReaderPreferences({
-        preferences: reader.getPreferences(),
-        ...(publicationId ? { publicationId } : {})
-      })
+    try {
+      await reader.open(file)
+      await reader.render()
+      const publicationId = reader.getPublicationId()
+      const mergedPreferences = loadStoredReaderPreferences(publicationId ?? undefined)
+      if (mergedPreferences) {
+        const settings = await reader.restorePreferences(mergedPreferences)
+        syncPreferenceState(settings)
+        persistReaderPreferences({
+          preferences: reader.getPreferences(),
+          ...(publicationId ? { publicationId } : {})
+        })
+      }
+      const restoredBookmark = publicationId ? loadBookmark(publicationId) : null
+      setSavedBookmark(restoredBookmark)
+      setBookmarkStatus(restoredBookmark ? "Saved bookmark available" : "No bookmark saved")
+      setHighlightStatus("No highlights saved")
+    } catch (error) {
+      const message = getOpenFileErrorMessage(error)
+      console.error("Failed to open EPUB", error)
+      setSavedBookmark(null)
+      setBookmarkStatus("Open failed")
+      setHighlightStatus("No highlights saved")
+      setSnapshot((current) => ({
+        ...current,
+        metaText: `Open failed · ${message}`
+      }))
     }
-    const restoredBookmark = publicationId ? loadBookmark(publicationId) : null
-    setSavedBookmark(restoredBookmark)
-    setBookmarkStatus(restoredBookmark ? "Saved bookmark available" : "No bookmark saved")
-    setHighlightStatus("No highlights saved")
   }
 
   async function goToPage(page: number): Promise<void> {
@@ -686,6 +698,14 @@ export function useReaderController(
     setDebugMode,
     clearHighlights
   }
+}
+
+function getOpenFileErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim()
+  }
+
+  return "Unknown parser error"
 }
 
 function getInitialDemoPreferenceState(): DemoPreferenceState {

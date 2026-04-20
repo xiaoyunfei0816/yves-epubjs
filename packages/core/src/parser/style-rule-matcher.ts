@@ -72,7 +72,7 @@ export function collectMatchedCssRules(
   for (const stylesheet of stylesheets) {
     for (const rule of getCssTopLevelRules(stylesheet)) {
       const matchingSelectors = splitRuleSelectors(rule).filter((selector) =>
-        matchesHtmlSelector(element, selector)
+        safelyMatchesHtmlSelector(element, selector)
       )
 
       if (matchingSelectors.length === 0) {
@@ -114,4 +114,15 @@ export function collectMatchedCssRules(
 
     return left.sourceOrder - right.sourceOrder
   })
+}
+
+function safelyMatchesHtmlSelector(
+  element: HtmlDomElement,
+  selector: string
+): boolean {
+  try {
+    return matchesHtmlSelector(element, selector)
+  } catch {
+    return false
+  }
 }
