@@ -346,6 +346,7 @@ export class EpubReader {
     }
 
     const parsed = await this.parser.parseDetailed(parserInput)
+    this.layoutEngine.clearCache()
     this.book = parsed.book
     this.rebuildSectionIndex()
     this.sourceName = normalized.sourceName ?? null
@@ -1417,6 +1418,7 @@ export class EpubReader {
       )
     }
     this.book = null
+    this.layoutEngine.clearCache()
     this.resources = null
     this.imageIntrinsicSizeCache.clear()
     this.pendingImageIntrinsicSizePaths.clear()

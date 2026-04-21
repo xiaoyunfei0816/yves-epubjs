@@ -46,6 +46,68 @@ function createSection(): SectionDocument {
 }
 
 describe("pretext layout integration", () => {
+  it("keeps compiled block caches scoped to each section when block ids repeat", () => {
+    const engine = new LayoutEngine()
+    const firstSection: SectionDocument = {
+      id: "section-a",
+      href: "OPS/section-a.xhtml",
+      anchors: {},
+      blocks: [
+        {
+          id: "text-1",
+          kind: "text",
+          inlines: [{ kind: "text", text: "First section paragraph." }]
+        }
+      ]
+    }
+    const secondSection: SectionDocument = {
+      id: "section-b",
+      href: "OPS/section-b.xhtml",
+      anchors: {},
+      blocks: [
+        {
+          id: "text-1",
+          kind: "text",
+          inlines: [{ kind: "text", text: "Second section paragraph." }]
+        }
+      ]
+    }
+
+    const firstLayout = engine.layout(
+      {
+        section: firstSection,
+        spineIndex: 0,
+        viewportWidth: 320,
+        viewportHeight: 600,
+        typography,
+        fontFamily: "serif"
+      },
+      "scroll"
+    )
+    const secondLayout = engine.layout(
+      {
+        section: secondSection,
+        spineIndex: 1,
+        viewportWidth: 320,
+        viewportHeight: 600,
+        typography,
+        fontFamily: "serif"
+      },
+      "scroll"
+    )
+
+    const firstBlock = firstLayout.blocks[0]
+    const secondBlock = secondLayout.blocks[0]
+    expect(firstBlock?.type).toBe("pretext")
+    expect(secondBlock?.type).toBe("pretext")
+    expect(firstBlock?.type === "pretext" && collectRenderedLineText(firstBlock)).toContain(
+      "First section paragraph."
+    )
+    expect(
+      secondBlock?.type === "pretext" && collectRenderedLineText(secondBlock)
+    ).toContain("Second section paragraph.")
+  })
+
   it("lays out text-like blocks with pretext line data", () => {
     const engine = new LayoutEngine();
     const section = createSection();
@@ -3287,3 +3349,10 @@ describe("pretext layout integration", () => {
     }
   });
 });
+
+function collectRenderedLineText(block: LayoutPretextBlock): string {
+  return block.lines
+    .flatMap((line) => line.fragments)
+    .map((fragment) => fragment.text)
+    .join("")
+}

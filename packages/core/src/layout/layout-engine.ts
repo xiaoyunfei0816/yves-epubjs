@@ -139,6 +139,10 @@ const DEFAULT_ALIGNMENT_THEME = {
 export class LayoutEngine {
   private readonly compiledBlocks = new Map<string, CompiledBlock>();
 
+  clearCache(): void {
+    this.compiledBlocks.clear()
+  }
+
   layout(input: LayoutInput, mode: ReadingMode): LayoutResult {
     const width = Math.max(120, Math.floor(input.viewportWidth));
     const blocks: LayoutBlock[] = [];
@@ -448,7 +452,8 @@ export class LayoutEngine {
         ...(block.style?.backgroundColor
           ? { backgroundColor: block.style.backgroundColor }
           : {})
-      }
+      },
+      input.resolveImageIntrinsicSize
     );
 
     const compiled = {
@@ -467,7 +472,10 @@ export class LayoutEngine {
       fontFamily: string;
       fontSize: number;
     },
-    state: InlineStyleState
+    state: InlineStyleState,
+    resolveResourceIntrinsicSize?: (
+      src: string
+    ) => IntrinsicImageSize | null | undefined
   ): CompiledSegment[] {
     const segments: CompiledSegment[] = [];
     const items: RichInlineItem[] = [];
@@ -515,6 +523,7 @@ export class LayoutEngine {
       inlines,
       typography,
       state,
+      resolveResourceIntrinsicSize,
       items,
       sources,
       flushSegment
@@ -534,6 +543,9 @@ export class LayoutEngine {
       fontSize: number;
     },
     state: InlineStyleState,
+    resolveResourceIntrinsicSize: ((
+      src: string
+    ) => IntrinsicImageSize | null | undefined) | undefined,
     items: RichInlineItem[],
     sources: RichInlineSource[],
     breakLine: () => void
@@ -624,6 +636,7 @@ export class LayoutEngine {
                   ? { verticalAlign: "sup" as const }
                   : {})
             },
+            resolveResourceIntrinsicSize,
             items,
             sources,
             breakLine
@@ -644,6 +657,7 @@ export class LayoutEngine {
                 ? { backgroundColor: inline.style.backgroundColor }
                 : {})
             },
+            resolveResourceIntrinsicSize,
             items,
             sources,
             breakLine
@@ -658,6 +672,7 @@ export class LayoutEngine {
               href: inline.href,
               ...(inline.title ? { title: inline.title } : {})
             },
+            resolveResourceIntrinsicSize,
             items,
             sources,
             breakLine
@@ -710,7 +725,8 @@ export class LayoutEngine {
               typography.fontSize * (state.fontScale ?? 1);
             const imageMetrics = resolveInlineImageMetrics(
               inline,
-              Math.max(14, effectiveFontSize * 1.05)
+              Math.max(14, effectiveFontSize * 1.05),
+              resolveResourceIntrinsicSize
             );
             const font = this.buildFont(
               typography.fontFamily,
@@ -771,6 +787,8 @@ export class LayoutEngine {
   ): string {
     const kindSuffix = block.kind === "heading" ? `:h${block.level}` : ":p";
     return [
+      input.section.href,
+      input.section.id,
       block.id,
       kindSuffix,
       input.fontFamily,
@@ -787,8 +805,74 @@ export class LayoutEngine {
       block.style?.paddingLeft ?? "",
       block.style?.paddingRight ?? "",
       block.style?.paddingTop ?? "",
-      block.style?.paddingBottom ?? ""
+      block.style?.paddingBottom ?? "",
+      this.buildInlineImageCacheSignature(
+        block.inlines,
+        input.resolveImageIntrinsicSize
+      )
     ].join("|");
+  }
+
+  private buildInlineImageCacheSignature(
+    inlines: InlineNode[],
+    resolveResourceIntrinsicSize?: (
+      src: string
+    ) => IntrinsicImageSize | null | undefined
+  ): string {
+    const signatures: string[] = []
+    this.collectInlineImageCacheSignatures(
+      inlines,
+      resolveResourceIntrinsicSize,
+      signatures
+    )
+    return signatures.join(",")
+  }
+
+  private collectInlineImageCacheSignatures(
+    inlines: InlineNode[],
+    resolveResourceIntrinsicSize: ((
+      src: string
+    ) => IntrinsicImageSize | null | undefined) | undefined,
+    signatures: string[]
+  ): void {
+    for (const inline of inlines) {
+      switch (inline.kind) {
+        case "image": {
+          const resolved = resolveImageIntrinsicSize(
+            inline,
+            resolveResourceIntrinsicSize
+          )
+          const width =
+            typeof resolved.intrinsicWidth === "number"
+              ? resolved.intrinsicWidth
+              : "?"
+          const height =
+            typeof resolved.intrinsicHeight === "number"
+              ? resolved.intrinsicHeight
+              : "?"
+          signatures.push(`${inline.src}:${width}x${height}`)
+          break
+        }
+        case "emphasis":
+        case "span":
+        case "sub":
+        case "sup":
+        case "small":
+        case "mark":
+        case "del":
+        case "ins":
+        case "strong":
+        case "link":
+          this.collectInlineImageCacheSignatures(
+            inline.children,
+            resolveResourceIntrinsicSize,
+            signatures
+          )
+          break
+        default:
+          break
+      }
+    }
   }
 
   private containsUnsupportedInline(inlines: InlineNode[]): boolean {
@@ -1077,15 +1161,22 @@ function sourceToFragmentOptions(source: RichInlineSource | undefined): {
 
 function resolveInlineImageMetrics(
   inline: Extract<InlineNode, { kind: "image" }>,
-  fallbackHeight: number
+  fallbackHeight: number,
+  resolveResourceIntrinsicSize?: (
+    src: string
+  ) => IntrinsicImageSize | null | undefined
 ): {
   width: number;
   height: number;
   marginLeft: number;
   marginRight: number;
 } {
-  const intrinsicWidth = inline.width;
-  const intrinsicHeight = inline.height;
+  const resolvedSize =
+    inline.src && resolveResourceIntrinsicSize
+      ? resolveResourceIntrinsicSize(inline.src)
+      : undefined
+  const intrinsicWidth = inline.width ?? resolvedSize?.width
+  const intrinsicHeight = inline.height ?? resolvedSize?.height
   const styledWidth = inline.style?.width;
   const styledHeight = inline.style?.height;
   const width = resolveInlineImageDimension({

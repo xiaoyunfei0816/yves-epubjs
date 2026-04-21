@@ -287,6 +287,75 @@ describe("image layout strategy", () => {
     expect(inlineImageOp?.rect.height).toBe(20);
   });
 
+  it("recomputes inline image geometry when resource intrinsic sizes become available", () => {
+    const section: SectionDocument = {
+      id: "section-inline-image-resource",
+      href: "OPS/inline-image-resource.xhtml",
+      anchors: {},
+      blocks: [
+        {
+          id: "text-inline-image-resource",
+          kind: "text",
+          style: {
+            textAlign: "center"
+          },
+          inlines: [
+            {
+              kind: "image",
+              src: "OPS/images/header.jpg",
+              alt: "Header"
+            }
+          ]
+        }
+      ]
+    }
+
+    const engine = new LayoutEngine()
+    const firstLayout = engine.layout(
+      {
+        section,
+        spineIndex: 0,
+        viewportWidth: 720,
+        viewportHeight: 800,
+        typography,
+        fontFamily: "serif",
+        resolveImageIntrinsicSize: () => undefined
+      },
+      "scroll"
+    )
+    const secondLayout = engine.layout(
+      {
+        section,
+        spineIndex: 0,
+        viewportWidth: 720,
+        viewportHeight: 800,
+        typography,
+        fontFamily: "serif",
+        resolveImageIntrinsicSize: () => ({
+          width: 441,
+          height: 177
+        })
+      },
+      "scroll"
+    )
+
+    const firstImage =
+      firstLayout.blocks[0]?.type === "pretext"
+        ? firstLayout.blocks[0].lines[0]?.fragments[0]?.image
+        : undefined
+    const secondImage =
+      secondLayout.blocks[0]?.type === "pretext"
+        ? secondLayout.blocks[0].lines[0]?.fragments[0]?.image
+        : undefined
+
+    expect(firstImage?.width ?? 0).toBeLessThan(40)
+    expect(secondImage?.width).toBe(441)
+    expect(secondImage?.height).toBe(177)
+    expect((secondImage?.width ?? 0) - (firstImage?.width ?? 0)).toBeGreaterThan(
+      300
+    )
+  })
+
   it("reserves full block height for centered legacy image paragraphs", () => {
     const section: SectionDocument = {
       id: "section-legacy-image-paragraph",
