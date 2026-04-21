@@ -200,6 +200,7 @@ export class EpubReader {
   private annotations: Annotation[] = []
   private resources: {
     readBinary(path: string): Promise<Uint8Array>
+    exists(path: string): boolean
   } | null = null
   private chapterRenderInputs: SharedChapterRenderInput[] = []
   private locator: Locator | null = null
@@ -306,6 +307,7 @@ export class EpubReader {
     this.renderableResourceManager = new RenderableResourceManager({
       getContainer: () => this.options.container,
       readBinary: (path) => this.resources?.readBinary(path) ?? null,
+      hasBinary: (path) => this.resources?.exists(path) ?? null,
       shouldTrackDomLayoutChanges: () =>
         this.lastChapterRenderDecision?.mode === "dom" &&
         (this.mode === "paginated" || Boolean(this.locator?.anchorId)),
@@ -3016,6 +3018,11 @@ export class EpubReader {
     }
 
     if (!this.resources || this.pendingImageIntrinsicSizePaths.has(src)) {
+      return undefined
+    }
+
+    if (!this.resources.exists(src)) {
+      this.imageIntrinsicSizeCache.set(src, null)
       return undefined
     }
 

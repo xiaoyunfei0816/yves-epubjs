@@ -5,6 +5,7 @@ export type RenderableResourceConsumer = "canvas" | "dom"
 type RenderableResourceManagerOptions = {
   getContainer: () => HTMLElement | null | undefined
   readBinary: (path: string) => Promise<Uint8Array> | null
+  hasBinary?: (path: string) => boolean | null | undefined
   shouldTrackDomLayoutChanges: () => boolean
   onCanvasResourceResolved: () => void
   onDomLayoutChange: () => void
@@ -25,6 +26,10 @@ export class RenderableResourceManager {
     path: string,
     consumer: RenderableResourceConsumer
   ): string {
+    if (this.options.hasBinary?.(path) === false) {
+      return path
+    }
+
     const readBinary = this.options.readBinary(path)
     if (!readBinary || typeof Blob === "undefined" || typeof URL === "undefined") {
       return path

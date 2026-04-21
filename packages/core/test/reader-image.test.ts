@@ -45,6 +45,37 @@ describe("EpubReader image resources", () => {
     URL.revokeObjectURL = originalRevokeObjectURL
   })
 
+  it("tolerates missing image resources without throwing", async () => {
+    const container = document.createElement("div")
+    const reader = new EpubReader({ container })
+    const resources = new InMemoryResourceContainer({})
+
+    ;(
+      reader as unknown as {
+        resources: typeof resources
+        resolveDomResourceUrl(path: string): string
+        resolveImageIntrinsicSizeForLayout(path: string): { width: number; height: number } | null | undefined
+      }
+    ).resources = resources
+
+    const state = reader as unknown as {
+      resolveDomResourceUrl(path: string): string
+      resolveImageIntrinsicSizeForLayout(path: string): { width: number; height: number } | null | undefined
+    }
+
+    expect(() => state.resolveDomResourceUrl("OPS/images/missing.png")).not.toThrow()
+    expect(state.resolveDomResourceUrl("OPS/images/missing.png")).toBe(
+      "OPS/images/missing.png"
+    )
+
+    expect(
+      state.resolveImageIntrinsicSizeForLayout("OPS/images/missing.png")
+    ).toBeUndefined()
+    expect(
+      state.resolveImageIntrinsicSizeForLayout("OPS/images/missing.png")
+    ).toBeNull()
+  })
+
   it("uses resolved blob URLs for canvas image rendering and hit testing", async () => {
     const createObjectURL = vi.fn(() => "blob:cover-image")
     const revokeObjectURL = vi.fn()

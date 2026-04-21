@@ -102,4 +102,21 @@ describe("RenderableResourceManager", () => {
       value: originalRevokeObjectUrl
     })
   })
+
+  it("skips missing resources without invoking binary reads", async () => {
+    const readBinary = vi.fn(async () => new Uint8Array([7, 8, 9]))
+    const manager = new RenderableResourceManager({
+      getContainer: () => null,
+      readBinary,
+      hasBinary: () => false,
+      shouldTrackDomLayoutChanges: () => false,
+      onCanvasResourceResolved: () => undefined,
+      onDomLayoutChange: () => undefined
+    })
+
+    expect(manager.resolveUrl("OPS/missing.png", "dom")).toBe("OPS/missing.png")
+    await Promise.resolve()
+    expect(readBinary).not.toHaveBeenCalled()
+    expect(manager.isReady("OPS/missing.png")).toBe(false)
+  })
 })
