@@ -23,18 +23,65 @@
 
 ## 当前能力
 
-截至当前仓库状态，已经可以稳定覆盖这些主路径：
+当前仓库已经形成一套可用的 EPUB 阅读器内核主链路，能力可以按几类理解：
 
-- 打开本地 EPUB 二进制输入：`File`、`Blob`、`ArrayBuffer`、`Uint8Array`
-- 解析 `OPF / NAV / NCX / XHTML`，输出统一 `Book` 模型
+### 1. 输入、解析与统一模型
+
+- 支持打开本地 EPUB 二进制输入：`File`、`Blob`、`ArrayBuffer`、`Uint8Array`
+- 解析 `container.xml`、`OPF`、`NAV`、`NCX`、`XHTML`
+- 解析书籍元数据、manifest、spine、目录、章节内容与资源引用
+- 输出统一 `Book / SectionDocument / Locator / Annotation / Bookmark` 等领域模型
+- 支持基于 `publicationId` 的书籍身份推导，便于宿主持久化阅读位置和偏好
+
+### 2. 阅读模式与渲染后端
+
 - 支持 `scroll` 和 `paginated` 两种阅读模式
-- 支持章节级 `canvas / dom` 混合渲染与诊断信息输出
-- 支持 TOC 导航、关键字搜索、搜索命中跳转
-- 支持统一 `locator`、位置恢复、书签创建与恢复
-- 支持高亮、批注、decoration overlay
-- 支持主题、字号、字距、词距、publisher styles 等阅读偏好
-- 提供 `lang / RTL` 基线能力和 accessibility snapshot
-- 提供 demo、Vitest、Playwright、fixture 共同覆盖核心行为
+- 支持章节级 `canvas / dom` 混合渲染，而不是整本书只绑定单一后端
+- 简单 reflowable 正文章节优先走 `canvas`
+- 固定版式、封面、单图页、复杂结构章节可自动回退到 `dom`
+- 支持渲染诊断输出，宿主可以看到当前章节使用的 backend 和原因
+- `scroll` 模式下已具备 section 窗口化与增量渲染能力
+- `paginated` 模式下已具备统一分页、翻页、页码跳转和重排能力
+
+### 3. 文本、图片与版面呈现
+
+- 基于 Pretext 进行正文文本测量、换行与排版
+- 已支持常见正文、标题、列表、代码、引用、图片等主路径呈现
+- 封面图和 `single-image` / 单图页会按阅读器视口完整显示，并随视口变化缩放
+- 正文图片采用“原尺寸优先，超出内容区再等比缩小”的策略
+- `canvas` 和 `dom` 路径都已接入图片资源尺寸解析与对应重排
+- 支持 `publisher styles` 开关与阅读器侧样式接管
+
+### 4. 导航、定位与阅读状态
+
+- 支持 TOC 导航、上一页/下一页、页码跳转、搜索命中跳转
+- 提供统一 `locator` 模型，覆盖 `section / progress / block / anchor / cfi` 多层精度
+- 支持位置恢复、书签创建与恢复、宿主侧 last-read 持久化
+- 支持 OPF `guide` 阅读起点恢复，不再强制从封面开始
+- 提供位置恢复诊断，宿主可以判断恢复是精确命中还是 fallback 命中
+- 提供 `relocated` 等运行时事件，便于宿主监听当前位置变化
+
+### 5. 搜索、标注与交互
+
+- 支持全文搜索、搜索结果列表、结果跳转
+- 支持搜索命中高亮和 overlay 映射
+- 支持高亮、下划线、批注、selection -> annotation 的主路径
+- 支持 `decoration` 分组管理，便于宿主叠加业务态标记
+- 支持 `canvas` / `dom` 两条路径下的基础 hit test、链接点击、图片点击定位
+
+### 6. 偏好、语言与可访问性
+
+- 支持主题、字号、字距、词距、字体族等阅读偏好
+- 支持 `publisher styles`、`mode`、`spreadMode`、`experimentalRtl` 等设置项
+- 提供 `lang / RTL` 基线能力
+- 提供 accessibility snapshot，便于抽取文本、图片 alt、caption 等可访问性信息
+
+### 7. 宿主集成与验证
+
+- `@pretext-epub/core` 已暴露 `open / render / destroy / next / prev / goToLocation / search / createBookmark / restoreBookmark` 等核心 API
+- demo 已覆盖打开、搜索、翻页、书签、恢复、高亮、批注、偏好切换等交互
+- core 已有 Vitest 覆盖解析、布局、定位、分页、渲染、恢复等关键行为
+- demo 已有 Playwright smoke tests，仓库中也保留真实 EPUB 回归记录
 
 当前仓库里也已经有针对 `pre-paginated`/固定版式场景、synthetic spread、真实 EPUB 回归验证的基础入口和 smoke coverage，但这些仍更接近“能力基线”而不是完整产品化功能。
 
