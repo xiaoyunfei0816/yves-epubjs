@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { Book, SectionDocument } from "../src/model/types"
 import { EpubReader } from "../src/runtime/reader"
 
@@ -221,6 +221,106 @@ describe("EpubReader reading navigation", () => {
     )
     await flushKeyboardNavigation()
     expect(rtlReader.getPaginationInfo().currentPage).toBe(1)
+  })
+
+  it("emits paginatedCenterTapped for center clicks without changing page", async () => {
+    const container = createContainer()
+    const onPaginatedCenterTap = vi.fn()
+    const reader = new EpubReader({
+      container,
+      mode: "paginated",
+      onPaginatedCenterTap
+    })
+    const section = createPagedSection()
+
+    ;(reader as unknown as { book: Book }).book = {
+      metadata: {
+        title: "Center Tap Reader",
+        language: "en"
+      },
+      manifest: [],
+      spine: [{ idref: "item-1", href: section.href, linear: true }],
+      toc: [],
+      sections: [section]
+    }
+
+    const centerTappedPayloads: Array<{
+      source: "dom" | "canvas"
+      offsetX: number
+      containerWidth: number
+      spineIndex: number | null
+    }> = []
+    reader.on("paginatedCenterTapped", (payload) => {
+      centerTappedPayloads.push({
+        source: payload.source,
+        offsetX: payload.offsetX,
+        containerWidth: payload.containerWidth,
+        spineIndex: payload.locator?.spineIndex ?? null
+      })
+    })
+
+    await reader.render()
+    expect(reader.getPaginationInfo().currentPage).toBe(1)
+
+    container.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, clientX: 130, clientY: 90 })
+    )
+    await flushKeyboardNavigation()
+
+    expect(reader.getPaginationInfo().currentPage).toBe(1)
+    expect(centerTappedPayloads).toEqual([
+      {
+        source: "canvas",
+        offsetX: 130,
+        containerWidth: 260,
+        spineIndex: 0
+      }
+    ])
+    expect(onPaginatedCenterTap).toHaveBeenCalledTimes(1)
+    expect(onPaginatedCenterTap).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "canvas",
+        offsetX: 130,
+        containerWidth: 260,
+        locator: expect.objectContaining({
+          spineIndex: 0
+        })
+      })
+    )
+  })
+
+  it("does not emit paginatedCenterTapped when edge click triggers page turn", async () => {
+    const container = createContainer()
+    const reader = new EpubReader({
+      container,
+      mode: "paginated"
+    })
+    const section = createPagedSection()
+
+    ;(reader as unknown as { book: Book }).book = {
+      metadata: {
+        title: "Edge Tap Reader",
+        language: "en"
+      },
+      manifest: [],
+      spine: [{ idref: "item-1", href: section.href, linear: true }],
+      toc: [],
+      sections: [section]
+    }
+
+    const centerTappedPayloads: unknown[] = []
+    reader.on("paginatedCenterTapped", (payload) => {
+      centerTappedPayloads.push(payload)
+    })
+
+    await reader.render()
+    container.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, clientX: 250, clientY: 90 })
+    )
+    await flushKeyboardNavigation()
+
+    expect(reader.getPaginationInfo().currentPage).toBe(2)
+    expect(centerTappedPayloads).toHaveLength(0)
   })
 
   it("keeps toc jumps and bookmark restore stable in rtl paginated mode", async () => {

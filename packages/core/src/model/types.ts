@@ -678,6 +678,14 @@ export type ReaderEventMap = {
   opened: { book: Book };
   rendered: { mode: ReadingMode };
   relocated: { locator: Locator | null };
+  paginatedCenterTapped: {
+    locator: Locator | null;
+    source: "dom" | "canvas";
+    offsetX: number;
+    containerWidth: number;
+    sectionId?: string;
+    sectionHref?: string;
+  };
   textSelectionChanged: {
     selection: ReaderTextSelectionSnapshot | null;
   };
@@ -714,6 +722,9 @@ export type ReaderOptions = {
   typography?: Partial<TypographyOptions>;
   onTextSelectionChanged?: (
     input: ReaderEventMap["textSelectionChanged"]
+  ) => void | Promise<void>;
+  onPaginatedCenterTap?: (
+    input: ReaderEventMap["paginatedCenterTapped"]
   ) => void | Promise<void>;
   onExternalLink?: (input: ReaderEventMap["externalLinkActivated"]) => void | Promise<void>;
   onSectionRendered?: (input: SectionRenderedEvent) => void | Promise<void>;
