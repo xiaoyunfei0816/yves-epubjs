@@ -6,6 +6,7 @@ import {
   type HtmlDomDocument,
   type HtmlDomElement
 } from "./html-dom-adapter"
+import { normalizeLegacyHtmlEntities } from "./legacy-html-entity-normalizer"
 
 export type XhtmlDomDocument = {
   document: HtmlDomDocument
@@ -22,7 +23,7 @@ export type XhtmlDomDocument = {
 }
 
 export function parseXhtmlDomDocument(xml: string): XhtmlDomDocument {
-  const document = parseHtmlDocument(xml, {
+  const document = parseHtmlDocument(normalizeLegacyHtmlEntities(xml), {
     xmlMode: true
   })
   const htmlElement = findHtmlElementsByTagName(document, "html")[0] ?? null

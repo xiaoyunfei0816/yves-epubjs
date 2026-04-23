@@ -480,4 +480,25 @@ describe("parseXhtmlDocument", () => {
       inlines: [{ kind: "text", text: "Hello" }]
     });
   });
+
+  it("converts common legacy HTML named entities into readable text in XHTML content", () => {
+    const xml = `<?xml version="1.0"?>
+      <html>
+        <body>
+          <p>&nbsp版权所有&nbsp; &ldquo;示例&rdquo; &mdash; 价格&nbsp;&yen;100，折扣&nbsp;&frac12;，版权&nbsp;&copy;2026</p>
+        </body>
+      </html>`
+
+    const section = parseXhtmlDocument(xml, "OPS/chapter.xhtml")
+
+    expect(section.blocks[0]).toMatchObject({
+      kind: "text",
+      inlines: [
+        {
+          kind: "text",
+          text: " 版权所有 “示例” — 价格 ¥100，折扣 ½，版权 ©2026"
+        }
+      ]
+    })
+  })
 });

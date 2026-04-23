@@ -58,4 +58,44 @@ describe("parseXhtmlDomDocument", () => {
     expect(images[0] && getHtmlElementAttribute(images[0], "src")).toBe("images/cover.png")
     expect(captions[0] && getHtmlNodeTextContent(captions[0])).toBe("Cover image")
   })
+
+  it("normalizes common legacy HTML named entities before XHTML parsing", () => {
+    const parsed = parseXhtmlDomDocument(`
+      <html>
+        <body>
+          <p title="Tom&nbsp;Jerry &ldquo;quoted&rdquo;">A&nbsp;B&ensp;C&mdash;D&hellip; &copy; &euro; &frac12;</p>
+          <p>&nbsp版权所有 &ldquo;示例&rdquo;</p>
+        </body>
+      </html>
+    `)
+
+    const paragraphs = parsed.bodyElement ? findHtmlElementsByTagName(parsed.bodyElement, "p") : []
+
+    expect(paragraphs).toHaveLength(2)
+    expect(paragraphs[0] && getHtmlElementAttribute(paragraphs[0], "title")).toBe(
+      "Tom\u00A0Jerry “quoted”"
+    )
+    expect(paragraphs[0] && getHtmlNodeTextContent(paragraphs[0])).toBe(
+      "A\u00A0B\u2002C—D… © € ½"
+    )
+    expect(paragraphs[1] && getHtmlNodeTextContent(paragraphs[1])).toBe(
+      "\u00A0版权所有 “示例”"
+    )
+  })
+
+  it("preserves XML builtin entities and unknown named entities", () => {
+    const parsed = parseXhtmlDomDocument(`
+      <html>
+        <body>
+          <p>&amp; &lt; &gt; &quot; &apos; &unknown; &madeup中文</p>
+        </body>
+      </html>
+    `)
+
+    const paragraphs = parsed.bodyElement ? findHtmlElementsByTagName(parsed.bodyElement, "p") : []
+
+    expect(paragraphs[0] && getHtmlNodeTextContent(paragraphs[0])).toBe(
+      `& < > " ' &unknown; &madeup中文`
+    )
+  })
 })
