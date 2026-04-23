@@ -35,6 +35,21 @@ export type CanvasRenderResult = {
   totalCanvasHeight: number;
 };
 
+type CanvasTextMetrics = {
+  fontSize: number;
+  actualAscent: number;
+  fontBoxAscent: number;
+  topInset: number;
+  selectionBoxHeight: number;
+};
+
+type CanvasTextMeasureContext = {
+  font: string;
+  measureText(text: string): TextMetrics;
+  save(): void;
+  restore(): void;
+};
+
 export class CanvasRenderer {
   private readonly imageCache = new Map<string, HTMLImageElement>();
   private paintVersion = 0;
@@ -394,13 +409,9 @@ export class CanvasRenderer {
       context.fillRect(op.rect.x, op.rect.y, op.rect.width, op.rect.height);
     }
     context.font = op.font;
-    const fontSize = extractFontSize(op.font);
-    const ascent = resolveTextAscent(context, op.text, fontSize);
-    const topInset = Math.min(
-      Math.max(fontSize * 0.08, 1),
-      Math.max(op.rect.height - ascent, 0)
-    );
-    const baselineY = op.y + topInset + ascent;
+    const metrics = resolveCanvasTextMetrics(op.font, op.text, op.rect.height, context);
+    const fontSize = metrics.fontSize;
+    const baselineY = op.y + metrics.topInset + metrics.actualAscent;
     context.textBaseline = "alphabetic";
     context.fillStyle = op.color;
     context.fillText(op.text, op.x, baselineY);
@@ -640,24 +651,6 @@ function extractFontSize(font: string): number {
   return match ? Number.parseFloat(match[1]!) : 16;
 }
 
-function resolveTextAscent(
-  context: CanvasRenderingContext2D,
-  text: string,
-  fontSize: number
-): number {
-  if (typeof context.measureText === "function") {
-    const metrics = context.measureText(text);
-    if (
-      Number.isFinite(metrics.actualBoundingBoxAscent) &&
-      metrics.actualBoundingBoxAscent > 0
-    ) {
-      return metrics.actualBoundingBoxAscent;
-    }
-  }
-
-  return fontSize * 0.82;
-}
-
 function createCanvasTextLayer(
   displayList: SectionDisplayList,
   options: {
@@ -693,9 +686,11 @@ function createCanvasTextLayer(
   layer.style.webkitTextFillColor = "transparent"
   layer.style.caretColor = "transparent"
 
+  const measureContext = createTextMeasureContext()
   const fragment = document.createDocumentFragment()
   for (const op of textOps) {
     const span = document.createElement("span")
+    const metrics = resolveCanvasTextMetrics(op.font, op.text, op.rect.height, measureContext ?? undefined)
     span.className = "epub-text-run"
     span.dataset.readerSectionId = op.sectionId
     span.dataset.readerBlockId = op.blockId
@@ -704,11 +699,11 @@ function createCanvasTextLayer(
     span.textContent = op.text
     span.style.position = "absolute"
     span.style.left = `${op.x}px`
-    span.style.top = `${op.y}px`
+    span.style.top = `${op.y + metrics.topInset - (metrics.fontBoxAscent - metrics.actualAscent)}px`
     span.style.width = `${Math.max(1, op.width)}px`
-    span.style.height = `${Math.max(1, op.rect.height)}px`
+    span.style.height = `${Math.max(1, metrics.selectionBoxHeight)}px`
     span.style.font = op.font
-    span.style.lineHeight = `${Math.max(1, op.rect.height)}px`
+    span.style.lineHeight = `${Math.max(1, metrics.selectionBoxHeight)}px`
     span.style.whiteSpace = "pre"
     span.style.color = "transparent"
     span.style.webkitTextFillColor = "transparent"
@@ -722,6 +717,89 @@ function createCanvasTextLayer(
   }
   layer.appendChild(fragment)
   return layer
+}
+
+const canvasTextMetricsCache = new Map<string, CanvasTextMetrics>()
+
+function resolveCanvasTextMetrics(
+  font: string,
+  text: string,
+  rectHeight: number,
+  context?: CanvasTextMeasureContext
+): CanvasTextMetrics {
+  const cacheKey = context ? null : `${font}\u0000${text}\u0000${rectHeight}`
+  if (cacheKey) {
+    const cached = canvasTextMetricsCache.get(cacheKey)
+    if (cached) {
+      return cached
+    }
+  }
+
+  const fontSize = extractFontSize(font)
+  let actualAscent = fontSize * 0.82
+  let fontBoxAscent = actualAscent
+  let selectionBoxHeight = fontSize
+  const measureContext = context ?? createTextMeasureContext()
+  if (measureContext && typeof measureContext.measureText === "function") {
+    measureContext.save()
+    measureContext.font = font
+    const measured = measureContext.measureText(text)
+    measureContext.restore()
+    if (
+      Number.isFinite(measured.actualBoundingBoxAscent) &&
+      measured.actualBoundingBoxAscent > 0
+    ) {
+      actualAscent = measured.actualBoundingBoxAscent
+    }
+    if (
+      Number.isFinite(measured.fontBoundingBoxAscent) &&
+      measured.fontBoundingBoxAscent > 0
+    ) {
+      fontBoxAscent = measured.fontBoundingBoxAscent
+    }
+    const fontBoxHeight = sumFiniteMetrics(
+      measured.fontBoundingBoxAscent,
+      measured.fontBoundingBoxDescent
+    )
+    const actualBoxHeight = sumFiniteMetrics(
+      measured.actualBoundingBoxAscent,
+      measured.actualBoundingBoxDescent
+    )
+    selectionBoxHeight =
+      fontBoxHeight > 0 ? fontBoxHeight : actualBoxHeight > 0 ? actualBoxHeight : fontSize
+  }
+
+  const topInset = Math.min(
+    Math.max(fontSize * 0.08, 1),
+    Math.max(rectHeight - actualAscent, 0)
+  )
+  const result = {
+    fontSize,
+    actualAscent,
+    fontBoxAscent,
+    topInset,
+    selectionBoxHeight
+  } satisfies CanvasTextMetrics
+  if (cacheKey) {
+    canvasTextMetricsCache.set(cacheKey, result)
+  }
+  return result
+}
+
+function createTextMeasureContext(): CanvasTextMeasureContext | null {
+  if (typeof document !== "undefined") {
+    return document.createElement("canvas").getContext("2d")
+  }
+  if (typeof OffscreenCanvas !== "undefined") {
+    return new OffscreenCanvas(1, 1).getContext("2d")
+  }
+  return null
+}
+
+function sumFiniteMetrics(first?: number, second?: number): number {
+  const safeFirst = typeof first === "number" && Number.isFinite(first) ? first : 0
+  const safeSecond = typeof second === "number" && Number.isFinite(second) ? second : 0
+  return safeFirst + safeSecond
 }
 
 function sliceByCharacterRange(text: string, start: number, end: number): string {
