@@ -33,9 +33,9 @@ const COMPLEX_CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
   </html>`;
 
 const LONG_DOM_CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
-  <html xmlns="http://www.w3.org/1999/xhtml">
+  <html xmlns="http://www.w3.org/1999/xhtml" class="book-root">
     <head><title>Long DOM</title></head>
-    <body>
+    <body class="background-img-center custom-theme" style="background-color: rgb(102, 61, 31); padding-left: 2px;">
       <section>
         <h1>Long DOM</h1>
         <table>
@@ -824,9 +824,13 @@ describe("EpubReader hybrid navigation", () => {
 
       expect(reader.getPaginationInfo().currentPage).toBe(2);
       expect(container.scrollTop).toBe(0);
-      expect(
-        container.querySelector<HTMLElement>(".epub-dom-page-viewport")?.style.height
-      ).toBe("430px");
+      const pageViewport = container.querySelector<HTMLElement>(
+        ".epub-dom-page-viewport"
+      );
+      expect(pageViewport?.style.height).toBe("430px");
+      expect(pageViewport?.classList.contains("book-root")).toBe(true);
+      expect(pageViewport?.classList.contains("background-img-center")).toBe(true);
+      expect(pageViewport?.style.backgroundColor).toBe("rgb(102, 61, 31)");
       expect(
         container.querySelector<HTMLElement>(".epub-dom-section")?.style.transform
       ).toBe("translateY(-430px)");

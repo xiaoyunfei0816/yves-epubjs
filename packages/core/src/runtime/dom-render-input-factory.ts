@@ -39,6 +39,22 @@ type PresentationViewport = {
 export function createDomChapterRenderInput(
   options: DomRenderInputFactoryOptions
 ): DomChapterRenderInput {
+  const htmlAttributes =
+    options.publisherStyles === "enabled"
+      ? resolveDomRootAttributes({
+          sectionHref: options.section.href,
+          attributes: options.input.preprocessed.htmlAttributes,
+          resolveDomResourceUrl: options.resolveDomResourceUrl
+        })
+      : undefined
+  const bodyAttributes =
+    options.publisherStyles === "enabled"
+      ? resolveDomRootAttributes({
+          sectionHref: options.section.href,
+          attributes: options.input.preprocessed.bodyAttributes,
+          resolveDomResourceUrl: options.resolveDomResourceUrl
+        })
+      : undefined
   const fixedLayoutFrame = resolveFixedLayoutFrame({
     section: options.section,
     ...(typeof options.availableWidth === "number"
@@ -58,6 +74,8 @@ export function createDomChapterRenderInput(
     ...(options.section.presentationRole
       ? { presentationRole: options.section.presentationRole }
       : {}),
+    ...(htmlAttributes ? { htmlAttributes } : {}),
+    ...(bodyAttributes ? { bodyAttributes } : {}),
     ...(options.publisherStyles === "enabled"
       ? {
           linkedStyleSheets: (options.input.linkedStyleSheets ?? []).map(
@@ -121,8 +139,35 @@ export function createDomChapterRenderInput(
     options.section
   )
   if (!presentationImage) {
-    return renderInput
+  return renderInput
+}
+
+function resolveDomRootAttributes(input: {
+  sectionHref: string
+  attributes: Record<string, string> | undefined
+  resolveDomResourceUrl: (path: string) => string
+}): Record<string, string> | undefined {
+  if (!input.attributes) {
+    return undefined
   }
+
+  const resolved: Record<string, string> = {}
+  for (const [name, value] of Object.entries(input.attributes)) {
+    const resolvedValue =
+      name === "style"
+        ? resolveDomCssUrlValues(
+            input.sectionHref,
+            value,
+            input.resolveDomResourceUrl
+          )
+        : value
+    if (resolvedValue.trim()) {
+      resolved[name] = resolvedValue
+    }
+  }
+
+  return Object.keys(resolved).length > 0 ? resolved : undefined
+}
 
   return {
     ...renderInput,

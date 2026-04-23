@@ -2,6 +2,7 @@ import { generate, parse } from "css-tree"
 import type { CssAstNode } from "../parser/css-ast-adapter"
 
 const DOM_STYLE_SCOPE_SELECTOR = ".epub-dom-section"
+const DOM_PAGE_VIEWPORT_SELECTOR = ".epub-dom-page-viewport"
 const KEYFRAME_SELECTOR_PATTERN = /^(?:from|to|\d+(?:\.\d+)?%)$/i
 const GLOBAL_AT_RULES_TO_DROP = new Set([
   "charset",
@@ -31,7 +32,10 @@ type MutableCssNode = CssAstNode & {
 
 export function scopeDomStyleSheetCss(
   value: string,
-  scopeSelector = DOM_STYLE_SCOPE_SELECTOR
+  scopeSelector = DOM_STYLE_SCOPE_SELECTOR,
+  options: {
+    rootBackgroundSelector?: string
+  } = {}
 ): string {
   if (!value.trim()) {
     return value
@@ -46,7 +50,7 @@ export function scopeDomStyleSheetCss(
     }) as MutableCssNode
 
     pruneGlobalAtRules(stylesheet)
-    scopeCssNode(stylesheet, false, scopeSelector)
+    scopeCssNode(stylesheet, false, scopeSelector, options.rootBackgroundSelector)
     return generate(stylesheet)
   } catch {
     return value
@@ -72,7 +76,8 @@ function pruneGlobalAtRules(root: MutableCssNode): void {
 function scopeCssNode(
   node: MutableCssNode | undefined,
   insideKeyframes: boolean,
-  scopeSelector: string
+  scopeSelector: string,
+  rootBackgroundSelector: string | undefined
 ): void {
   if (!node) {
     return
@@ -84,16 +89,22 @@ function scopeCssNode(
       insideKeyframes || atruleName === "keyframes" || atruleName.endsWith("keyframes")
 
     for (const child of getCssNodeListChildren(node.block)) {
-      scopeCssNode(child, nextInsideKeyframes, scopeSelector)
+      scopeCssNode(child, nextInsideKeyframes, scopeSelector, rootBackgroundSelector)
     }
     return
   }
 
   if (node.type === "Rule") {
     if (!insideKeyframes && isSelectorListNode(node.prelude)) {
+      const shouldRouteRootBackground =
+        Boolean(rootBackgroundSelector) && hasRootBackgroundDeclarations(node)
       const selectorText = getCssNodeListChildren(node.prelude)
-        .map((selectorNode: unknown) =>
-          scopeCssSelectorText(generate(selectorNode as Parameters<typeof generate>[0]), scopeSelector)
+        .flatMap((selectorNode: unknown) =>
+          scopeCssSelectorText(
+            generate(selectorNode as Parameters<typeof generate>[0]),
+            scopeSelector,
+            shouldRouteRootBackground ? rootBackgroundSelector : undefined
+          )
         )
         .join(", ")
       node.prelude = parse(selectorText, {
@@ -102,14 +113,18 @@ function scopeCssNode(
     }
 
     for (const child of getCssNodeListChildren(node.block)) {
-      scopeCssNode(child, insideKeyframes, scopeSelector)
+      scopeCssNode(child, insideKeyframes, scopeSelector, rootBackgroundSelector)
     }
     return
   }
 
   for (const child of getCssChildren(node)) {
-    scopeCssNode(child, insideKeyframes, scopeSelector)
+    scopeCssNode(child, insideKeyframes, scopeSelector, rootBackgroundSelector)
   }
+}
+
+export function getDomPageViewportSelector(): string {
+  return DOM_PAGE_VIEWPORT_SELECTOR
 }
 
 function getCssChildren(node: MutableCssNode): MutableCssNode[] {
@@ -135,29 +150,82 @@ function isSelectorListNode(node: CssAstNode | undefined): node is MutableCssNod
   return Boolean(node && node.type === "SelectorList")
 }
 
-function scopeCssSelectorText(selectorText: string, scopeSelector: string): string {
+function scopeCssSelectorText(
+  selectorText: string,
+  scopeSelector: string,
+  rootBackgroundSelector: string | undefined
+): string[] {
   const normalized = selectorText.trim()
   if (!normalized || KEYFRAME_SELECTOR_PATTERN.test(normalized)) {
-    return normalized
+    return [normalized]
   }
 
   if (normalized.startsWith(scopeSelector)) {
-    return normalized
+    return [normalized]
   }
 
-  const withoutRootSelector = normalized.replace(
-    /^(?:(?:html|body|:root)\s*)+/i,
-    ""
-  )
-  if (withoutRootSelector !== normalized) {
-    const remainder = withoutRootSelector.trimStart()
-    if (!remainder) {
-      return scopeSelector
+  const rootScopedSelector = scopeRootSelectorPrefix(normalized, scopeSelector)
+  if (rootScopedSelector) {
+    if (rootBackgroundSelector && rootScopedSelector.rootOnly) {
+      return [
+        rootScopedSelector.selector,
+        rootScopedSelector.selector.replace(scopeSelector, rootBackgroundSelector)
+      ]
     }
-    return `${scopeSelector} ${remainder}`.trim()
+    return [rootScopedSelector.selector]
   }
 
-  return `${scopeSelector} ${normalized}`
+  return [`${scopeSelector} ${normalized}`]
+}
+
+function scopeRootSelectorPrefix(
+  selectorText: string,
+  scopeSelector: string
+): { selector: string; rootOnly: boolean } | null {
+  let remaining = selectorText
+  let rootQualifiers = ""
+  let matchedRoot = false
+
+  let match = remaining.match(
+    /^\s*(html|body|:root)((?:[#.][a-zA-Z0-9_-]+|\[[^\]]+\]|:[a-zA-Z-]+(?:\([^)]*\))?)*)/i
+  )
+  while (match) {
+    matchedRoot = true
+    rootQualifiers += match[2] ?? ""
+    remaining = remaining.slice(match[0].length)
+    match = remaining.match(
+      /^\s*(html|body|:root)((?:[#.][a-zA-Z0-9_-]+|\[[^\]]+\]|:[a-zA-Z-]+(?:\([^)]*\))?)*)/i
+    )
+  }
+
+  if (!matchedRoot) {
+    return null
+  }
+
+  const remainder = remaining.trimStart()
+  if (!remainder) {
+    return {
+      selector: `${scopeSelector}${rootQualifiers}`,
+      rootOnly: true
+    }
+  }
+
+  if (remainder.startsWith(">") || remainder.startsWith("+") || remainder.startsWith("~")) {
+    return {
+      selector: `${scopeSelector}${rootQualifiers} ${remainder}`,
+      rootOnly: false
+    }
+  }
+
+  return {
+    selector: `${scopeSelector}${rootQualifiers} ${remainder}`.trim(),
+    rootOnly: false
+  }
+}
+
+function hasRootBackgroundDeclarations(rule: MutableCssNode): boolean {
+  const blockText = rule.block ? generate(rule.block as Parameters<typeof generate>[0]) : ""
+  return /(?:^|[{\s;])background(?:-|:)/i.test(blockText)
 }
 
 function shouldDropGlobalAtRule(name: unknown): boolean {

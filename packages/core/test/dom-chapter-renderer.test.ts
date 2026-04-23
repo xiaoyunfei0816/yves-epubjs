@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { DomChapterRenderer, buildDomChapterNormalizationCss } from "../src"
+import {
+  DomChapterRenderer,
+  buildDomChapterNormalizationCss,
+  serializeDomPageViewportAttributes
+} from "../src"
 
 describe("DomChapterRenderer", () => {
   it("mounts and clears a dom chapter section", () => {
@@ -100,6 +104,193 @@ describe("DomChapterRenderer", () => {
     renderer.clear(container)
 
     expect(container.querySelector("style[data-epub-dom-source]")).toBeFalsy()
+  })
+
+  it("maps html and body root attributes onto the rendered dom section", () => {
+    const renderer = new DomChapterRenderer()
+
+    const markup = renderer.createMarkup({
+      sectionId: "section-1",
+      sectionHref: "OPS/chapter.xhtml",
+      htmlAttributes: {
+        class: "book-root"
+      },
+      bodyAttributes: {
+        id: "page-body",
+        class: "background-img-center custom-theme",
+        style: "background-color: rgb(102, 61, 31); padding: 20px;"
+      },
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography: {
+        fontSize: 18,
+        lineHeight: 1.6,
+        paragraphSpacing: 12
+      },
+      fontFamily: '"Iowan Old Style", serif',
+      nodes: [
+        {
+          kind: "element",
+          tagName: "main",
+          attributes: {},
+          children: [{ kind: "text", text: "Hello" }]
+        }
+      ]
+    })
+
+    expect(markup).toContain(
+      'class="epub-dom-section book-root background-img-center custom-theme"'
+    )
+    expect(markup).toContain('id="page-body"')
+    expect(markup).toContain("background-color: rgb(102, 61, 31); padding: 20px")
+  })
+
+  it("scopes body-qualified selectors onto the rendered dom section itself", () => {
+    const renderer = new DomChapterRenderer()
+
+    const markup = renderer.createMarkup({
+      sectionId: "section-1",
+      sectionHref: "OPS/chapter.xhtml",
+      linkedStyleSheets: [
+        {
+          href: "OPS/styles/chapter.css",
+          text: [
+            "body.background-img-center-custom-theme { background: #663d1f; }",
+            "body.background-img-center-custom-theme > main { width: 600px; }",
+            "html.book-root body.custom-theme .title { color: #321; }"
+          ].join("\n")
+        }
+      ],
+      bodyAttributes: {
+        class: "background-img-center-custom-theme custom-theme"
+      },
+      htmlAttributes: {
+        class: "book-root"
+      },
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography: {
+        fontSize: 18,
+        lineHeight: 1.6,
+        paragraphSpacing: 12
+      },
+      fontFamily: '"Iowan Old Style", serif',
+      nodes: [
+        {
+          kind: "element",
+          tagName: "main",
+          attributes: {},
+          children: [{ kind: "text", text: "Hello" }]
+        }
+      ]
+    })
+
+    expect(markup).toContain(
+      ".epub-dom-section.background-img-center-custom-theme{background:#663d1f}"
+    )
+    expect(markup).toContain(
+      ".epub-dom-section.background-img-center-custom-theme>main{width:600px}"
+    )
+    expect(markup).toContain(
+      ".epub-dom-section.book-root.custom-theme .title{color:#321}"
+    )
+  })
+
+  it("also routes paginated root background selectors to the page viewport", () => {
+    const renderer = new DomChapterRenderer()
+
+    const markup = renderer.createMarkup(
+      {
+        sectionId: "section-1",
+        sectionHref: "OPS/chapter.xhtml",
+        linkedStyleSheets: [
+          {
+            href: "OPS/styles/chapter.css",
+            text: [
+              "body.background-img-center-custom-theme { background: #663d1f; }",
+              "body.background-img-center-custom-theme > main { width: 600px; }"
+            ].join("\n")
+          }
+        ],
+        bodyAttributes: {
+          class: "background-img-center-custom-theme custom-theme"
+        },
+        theme: {
+          color: "#1f2328",
+          background: "#fffdf7"
+        },
+        typography: {
+          fontSize: 18,
+          lineHeight: 1.6,
+          paragraphSpacing: 12
+        },
+        fontFamily: '"Iowan Old Style", serif',
+        nodes: [
+          {
+            kind: "element",
+            tagName: "main",
+            attributes: {},
+            children: [{ kind: "text", text: "Hello" }]
+          }
+        ]
+      },
+      {
+        rootBackgroundTarget: "page-viewport"
+      }
+    )
+
+    expect(markup).toContain(
+      ".epub-dom-section.background-img-center-custom-theme,.epub-dom-page-viewport.background-img-center-custom-theme{background:#663d1f}"
+    )
+    expect(markup).toContain(
+      ".epub-dom-section.background-img-center-custom-theme>main{width:600px}"
+    )
+  })
+
+  it("serializes page viewport root classes and background inline style only", () => {
+    const attributes = serializeDomPageViewportAttributes(
+      {
+        sectionId: "section-1",
+        sectionHref: "OPS/chapter.xhtml",
+        htmlAttributes: {
+          class: "book-root",
+          style: "background-image: url(data:image/svg+xml;utf8,<svg></svg>);"
+        },
+        bodyAttributes: {
+          class: "background-img-center custom-theme",
+          style: "background-color: rgb(102, 61, 31); padding: 20px;"
+        },
+        theme: {
+          color: "#1f2328",
+          background: "#fffdf7"
+        },
+        typography: {
+          fontSize: 18,
+          lineHeight: 1.6,
+          paragraphSpacing: 12
+        },
+        fontFamily: '"Iowan Old Style", serif',
+        nodes: []
+      },
+      {
+        pageHeight: 720,
+        pageNumberInSection: 3
+      }
+    )
+
+    expect(attributes).toContain(
+      'class="epub-dom-page-viewport book-root background-img-center custom-theme"'
+    )
+    expect(attributes).toContain('data-page-viewport="true"')
+    expect(attributes).toContain('data-page-number-in-section="3"')
+    expect(attributes).toContain("height: 720px")
+    expect(attributes).toContain("background-image: url(data:image/svg+xml;utf8,&lt;svg&gt;&lt;/svg&gt;)")
+    expect(attributes).toContain("background-color: rgb(102, 61, 31)")
+    expect(attributes).not.toContain("padding: 20px")
   })
 
   it("scopes inline style tags to the rendered chapter root", () => {

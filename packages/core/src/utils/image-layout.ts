@@ -29,8 +29,6 @@ export function resolveImageLayout(input: ImageLayoutInput): ImageLayout {
     input.intrinsicWidth && input.intrinsicWidth > 0 ? input.intrinsicWidth : undefined;
   const intrinsicHeight =
     input.intrinsicHeight && input.intrinsicHeight > 0 ? input.intrinsicHeight : undefined;
-  const aspectRatio =
-    intrinsicWidth && intrinsicHeight ? intrinsicWidth / intrinsicHeight : undefined;
   const heightRatio =
     intrinsicWidth && intrinsicHeight
       ? intrinsicHeight / intrinsicWidth

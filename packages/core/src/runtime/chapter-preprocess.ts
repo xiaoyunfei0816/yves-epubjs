@@ -26,6 +26,8 @@ export type PreprocessedChapter = {
   lang?: string;
   dir?: "ltr" | "rtl";
   rootTagName?: string;
+  htmlAttributes?: Record<string, string>;
+  bodyAttributes?: Record<string, string>;
   nodes: PreprocessedChapterNode[];
 };
 
@@ -35,6 +37,12 @@ export function preprocessChapterDocument(input: {
 }): PreprocessedChapter {
   const parsed = parseXhtmlDomDocument(input.content);
   const root = parsed.bodyElement ?? parsed.htmlElement;
+  const htmlAttributes = parsed.htmlElement
+    ? normalizeRootAttributes(parsed.htmlElement.attribs)
+    : {};
+  const bodyAttributes = parsed.bodyElement
+    ? normalizeRootAttributes(parsed.bodyElement.attribs)
+    : {};
 
   return {
     href: input.href,
@@ -42,6 +50,8 @@ export function preprocessChapterDocument(input: {
     ...(parsed.lang ? { lang: parsed.lang } : {}),
     ...(parsed.dir ? { dir: parsed.dir } : {}),
     ...(root ? { rootTagName: getHtmlTagName(root) } : {}),
+    ...(Object.keys(htmlAttributes).length > 0 ? { htmlAttributes } : {}),
+    ...(Object.keys(bodyAttributes).length > 0 ? { bodyAttributes } : {}),
     nodes: root ? preprocessChapterChildren(root) : []
   };
 }
@@ -106,10 +116,35 @@ function normalizeAttributes(attributes: Record<string, string>): Record<string,
   return normalized;
 }
 
+function normalizeRootAttributes(attributes: Record<string, string>): Record<string, string> {
+  const normalized = normalizeAttributes(attributes);
+  const safeRootAttributes: Record<string, string> = {};
+
+  for (const [name, value] of Object.entries(normalized)) {
+    if (isSupportedRootAttributeName(name)) {
+      safeRootAttributes[name] = value;
+    }
+  }
+
+  return safeRootAttributes;
+}
+
 function isUnsafeChapterTag(tagName: string): boolean {
   return tagName.trim().toLowerCase() === "script"
 }
 
 function isUnsafeAttributeName(attributeName: string): boolean {
   return attributeName.trim().toLowerCase().startsWith("on")
+}
+
+function isSupportedRootAttributeName(attributeName: string): boolean {
+  const normalized = attributeName.trim().toLowerCase();
+  return (
+    normalized === "id" ||
+    normalized === "class" ||
+    normalized === "style" ||
+    normalized === "lang" ||
+    normalized === "xml:lang" ||
+    normalized === "dir"
+  );
 }

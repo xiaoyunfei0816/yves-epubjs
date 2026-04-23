@@ -4,6 +4,7 @@ import { CanvasRenderer } from "../renderer/canvas-renderer";
 import { DisplayListBuilder } from "../renderer/display-list-builder";
 import {
   DomChapterRenderer,
+  serializeDomPageViewportAttributes,
   type DomChapterRenderInput
 } from "../renderer/dom-chapter-renderer";
 import {
@@ -1947,10 +1948,17 @@ export class EpubReader {
           page: slot.page,
           usesViewportSlice
         });
-        const sectionMarkup =
-          this.domChapterRenderer.createMarkup(domRenderInput);
+        const sectionMarkup = this.domChapterRenderer.createMarkup(
+          domRenderInput,
+          usesViewportSlice
+            ? { rootBackgroundTarget: "page-viewport" }
+            : undefined
+        );
         const slotMarkup = usesViewportSlice
-          ? `<div class="epub-dom-page-viewport" data-page-viewport="true" data-page-number-in-section="${slot.page.pageNumberInSection}" style="position: relative; overflow: hidden; height: ${pageHeight}px;">${sectionMarkup}</div>`
+          ? `<div${serializeDomPageViewportAttributes(domRenderInput, {
+              pageHeight,
+              pageNumberInSection: slot.page.pageNumberInSection
+            })}>${sectionMarkup}</div>`
           : sectionMarkup;
         return `<div class="epub-dom-spread-slot epub-dom-spread-slot-${slot.position}" data-spread-slot="${slot.position}" data-page-number="${slot.page.pageNumber}">${slotMarkup}</div>`;
       })

@@ -61,6 +61,10 @@ describe("chapter preprocess", () => {
       lang: "en",
       dir: "rtl",
       rootTagName: "body",
+      htmlAttributes: {
+        "xml:lang": "en",
+        dir: "rtl"
+      },
       nodes: [
         {
           kind: "element",
@@ -93,6 +97,28 @@ describe("chapter preprocess", () => {
       ]
     } satisfies PreprocessedChapter);
   });
+
+  it("preserves safe html and body root attributes for dom rendering", () => {
+    const chapter = preprocessChapterDocument({
+      href: "OPS/themed.xhtml",
+      content: `<?xml version="1.0" encoding="utf-8"?>
+        <html xmlns="http://www.w3.org/1999/xhtml" class="book-root" style="background: #fff;">
+          <body id="page-body" class="background-img-center custom-theme" style="background-image: url('../images/bg.png'); padding: 20px;" onclick="alert(1)">
+            <main>Content</main>
+          </body>
+        </html>`
+    })
+
+    expect(chapter.htmlAttributes).toEqual({
+      class: "book-root",
+      style: "background: #fff;"
+    })
+    expect(chapter.bodyAttributes).toEqual({
+      id: "page-body",
+      class: "background-img-center custom-theme",
+      style: "background-image: url('../images/bg.png'); padding: 20px;"
+    })
+  })
 
   it("drops script nodes and inline event handler attributes from DOM preprocessing", () => {
     const chapter = preprocessChapterDocument({

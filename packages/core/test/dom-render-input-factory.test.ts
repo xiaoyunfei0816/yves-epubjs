@@ -301,6 +301,51 @@ describe("dom render input factory", () => {
     ).toBe("")
   })
 
+  it("passes resolved html and body root attributes only when publisher styles are enabled", () => {
+    const content = `<?xml version="1.0"?>
+      <html class="book-root">
+        <body class="background-img-center custom-theme" style="background-image: url('images/page-bg.png'); padding: 20px;">
+          <p>Body themed chapter</p>
+        </body>
+      </html>`
+    const section = createSection(content, "section-themed", "OPS/chapter.xhtml")
+    const input = createSharedChapterRenderInput({
+      href: section.href,
+      content
+    })
+
+    const enabledInput = createDomChapterRenderInput({
+      book: null,
+      section,
+      input,
+      theme: THEME,
+      typography: TYPOGRAPHY,
+      fontFamily: "serif",
+      publisherStyles: "enabled",
+      resolveDomResourceUrl: (path) => `asset:${path}`
+    })
+    const disabledInput = createDomChapterRenderInput({
+      book: null,
+      section,
+      input,
+      theme: THEME,
+      typography: TYPOGRAPHY,
+      fontFamily: "serif",
+      publisherStyles: "disabled",
+      resolveDomResourceUrl: (path) => `asset:${path}`
+    })
+
+    expect(enabledInput.htmlAttributes).toEqual({
+      class: "book-root"
+    })
+    expect(enabledInput.bodyAttributes).toEqual({
+      class: "background-img-center custom-theme",
+      style: "background-image: url('asset:OPS/images/page-bg.png'); padding: 20px;"
+    })
+    expect(disabledInput.htmlAttributes).toBeUndefined()
+    expect(disabledInput.bodyAttributes).toBeUndefined()
+  })
+
   it("sanitizes remote dom resources while keeping internal resource resolution", () => {
     const section = createSection(
       `<?xml version="1.0"?>

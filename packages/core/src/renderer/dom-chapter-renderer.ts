@@ -6,7 +6,10 @@ import type {
 } from "../model/types"
 import type { PreprocessedChapterNode } from "../runtime/chapter-preprocess"
 import { buildDomChapterNormalizationCss } from "./dom-chapter-style"
-import { scopeDomStyleSheetCss } from "./dom-style-scope"
+import {
+  getDomPageViewportSelector,
+  scopeDomStyleSheetCss
+} from "./dom-style-scope"
 
 export type DomChapterRenderInput = {
   sectionId: string
@@ -24,6 +27,8 @@ export type DomChapterRenderInput = {
   contentViewportHeight?: number
   presentationViewportWidth?: number
   presentationViewportHeight?: number
+  htmlAttributes?: Record<string, string>
+  bodyAttributes?: Record<string, string>
   linkedStyleSheets?: Array<{
     href: string
     text: string
@@ -39,6 +44,14 @@ export type DomChapterRenderInput = {
   }) => string
 }
 
+export type DomChapterMarkupOptions = {
+  rootBackgroundTarget?: "section" | "page-viewport"
+}
+
+type DomStyleScopeOptions = {
+  rootBackgroundSelector?: string
+}
+
 export class DomChapterRenderer {
   render(container: HTMLElement, input: DomChapterRenderInput): void {
     container.innerHTML = this.createMarkup(input)
@@ -52,17 +65,22 @@ export class DomChapterRenderer {
       .forEach((element) => element.remove())
   }
 
-  createMarkup(input: DomChapterRenderInput): string {
+  createMarkup(
+    input: DomChapterRenderInput,
+    options: DomChapterMarkupOptions = {}
+  ): string {
     if (
       (input.presentationRole === "cover" ||
         input.presentationRole === "image-page") &&
       input.presentationImageSrc
     ) {
-      return this.createPresentationImageMarkup(input)
+      return this.createPresentationImageMarkup(input, options)
     }
 
+    const styleScopeOptions = createDomStyleScopeOptions(options)
+
     return [
-      ...serializeLinkedStyleSheets(input.linkedStyleSheets),
+      ...serializeLinkedStyleSheets(input.linkedStyleSheets, styleScopeOptions),
       `<style data-epub-dom-normalization="true">${buildDomChapterNormalizationCss(
         {
           theme: input.theme,
@@ -76,16 +94,23 @@ export class DomChapterRenderer {
             : {})
         }
       )}</style>`,
-      `<div class="epub-dom-section${input.presentationRole === "cover" ? " epub-dom-section-cover" : ""}${input.renditionLayout === "pre-paginated" ? " epub-dom-section-fxl" : ""}" data-section-id="${escapeHtmlAttribute(input.sectionId)}" data-section-href="${escapeHtmlAttribute(input.sectionHref)}"${serializeSectionLanguageAttributes(input)}${serializeSectionLayoutAttributes(input)}>`,
+      serializeDomSectionStart(input, [
+        ...(input.presentationRole === "cover" ? ["epub-dom-section-cover"] : []),
+        ...(input.renditionLayout === "pre-paginated" ? ["epub-dom-section-fxl"] : [])
+      ]),
       serializePreprocessedChapterNodes(
         input.nodes,
-        input.resolveAttributeValue
+        input.resolveAttributeValue,
+        styleScopeOptions
       ),
       "</div>"
     ].join("")
   }
 
-  createPresentationImageMarkup(input: DomChapterRenderInput): string {
+  createPresentationImageMarkup(
+    input: DomChapterRenderInput,
+    options: DomChapterMarkupOptions = {}
+  ): string {
     const imageAlt =
       input.presentationImageAlt ??
       (input.presentationRole === "cover" ? "Cover" : "")
@@ -94,8 +119,10 @@ export class DomChapterRenderer {
         ? "epub-dom-cover"
         : "epub-dom-image-page"
 
+    const styleScopeOptions = createDomStyleScopeOptions(options)
+
     return [
-      ...serializeLinkedStyleSheets(input.linkedStyleSheets),
+      ...serializeLinkedStyleSheets(input.linkedStyleSheets, styleScopeOptions),
       `<style data-epub-dom-normalization="true">${buildDomChapterNormalizationCss(
         {
           theme: input.theme,
@@ -109,11 +136,48 @@ export class DomChapterRenderer {
             : {})
         }
       )}</style>`,
-      `<div class="epub-dom-section epub-dom-section-${input.presentationRole} ${presentationClass}${input.renditionLayout === "pre-paginated" ? " epub-dom-section-fxl" : ""}" data-section-id="${escapeHtmlAttribute(input.sectionId)}" data-section-href="${escapeHtmlAttribute(input.sectionHref)}"${serializeSectionLanguageAttributes(input)}${serializeSectionLayoutAttributes(input)}>`,
+      serializeDomSectionStart(input, [
+        `epub-dom-section-${input.presentationRole}`,
+        presentationClass,
+        ...(input.renditionLayout === "pre-paginated" ? ["epub-dom-section-fxl"] : [])
+      ]),
       `<img class="epub-dom-presentation-image" src="${escapeHtmlAttribute(input.presentationImageSrc ?? "")}" alt="${escapeHtmlAttribute(imageAlt)}">`,
       "</div>"
     ].join("")
   }
+}
+
+export function serializeDomPageViewportAttributes(
+  input: DomChapterRenderInput,
+  options: {
+    pageHeight: number
+    pageNumberInSection: number
+  }
+): string {
+  const bodyAttributes = input.bodyAttributes ?? {}
+  const htmlAttributes = input.htmlAttributes ?? {}
+  const className = mergeClassNames(
+    getDomPageViewportSelector().slice(1),
+    htmlAttributes.class,
+    bodyAttributes.class
+  )
+  const backgroundStyle = extractRootBackgroundStyleAttributes(
+    htmlAttributes.style,
+    bodyAttributes.style
+  )
+  const styleAttributes = [
+    "position: relative",
+    "overflow: hidden",
+    `height: ${options.pageHeight}px`,
+    ...(backgroundStyle ? [backgroundStyle] : [])
+  ]
+
+  return [
+    ` class="${escapeHtmlAttribute(className)}"`,
+    ` data-page-viewport="true"`,
+    ` data-page-number-in-section="${escapeHtmlAttribute(String(options.pageNumberInSection))}"`,
+    ` style="${escapeHtmlAttribute(styleAttributes.join("; "))}"`
+  ].join("")
 }
 
 const VOID_HTML_TAGS = new Set([
@@ -134,18 +198,24 @@ const VOID_HTML_TAGS = new Set([
 
 function serializePreprocessedChapterNodes(
   nodes: PreprocessedChapterNode[],
-  resolveAttributeValue?: DomChapterRenderInput["resolveAttributeValue"]
+  resolveAttributeValue?: DomChapterRenderInput["resolveAttributeValue"],
+  styleScopeOptions?: DomStyleScopeOptions
 ): string {
   return nodes
     .map((node) =>
-      serializePreprocessedChapterNode(node, resolveAttributeValue)
+      serializePreprocessedChapterNode(
+        node,
+        resolveAttributeValue,
+        styleScopeOptions
+      )
     )
     .join("")
 }
 
 function serializePreprocessedChapterNode(
   node: PreprocessedChapterNode,
-  resolveAttributeValue?: DomChapterRenderInput["resolveAttributeValue"]
+  resolveAttributeValue?: DomChapterRenderInput["resolveAttributeValue"],
+  styleScopeOptions?: DomStyleScopeOptions
 ): string {
   if (node.kind === "text") {
     return escapeHtmlText(node.text)
@@ -172,12 +242,13 @@ function serializePreprocessedChapterNode(
   }
 
   if (node.tagName === "style") {
-    return serializeInlineStyleNode(node, attributes)
+    return serializeInlineStyleNode(node, attributes, styleScopeOptions)
   }
 
   return `<${node.tagName}${attributes}>${serializePreprocessedChapterNodes(
     node.children,
-    resolveAttributeValue
+    resolveAttributeValue,
+    styleScopeOptions
   )}</${node.tagName}>`
 }
 
@@ -193,12 +264,130 @@ function escapeHtmlAttribute(value: string): string {
 }
 
 function serializeLinkedStyleSheets(
-  stylesheets: DomChapterRenderInput["linkedStyleSheets"]
+  stylesheets: DomChapterRenderInput["linkedStyleSheets"],
+  styleScopeOptions?: DomStyleScopeOptions
 ): string[] {
   return (stylesheets ?? []).map(
     (stylesheet) =>
-      `<style data-epub-dom-source="${escapeHtmlAttribute(stylesheet.href)}">${escapeStyleTagText(scopeDomStyleSheetCss(stylesheet.text))}</style>`
+      `<style data-epub-dom-source="${escapeHtmlAttribute(stylesheet.href)}">${escapeStyleTagText(scopeDomStyleSheetCss(stylesheet.text, undefined, styleScopeOptions))}</style>`
   )
+}
+
+function serializeDomSectionStart(
+  input: DomChapterRenderInput,
+  extraClassNames: string[]
+): string {
+  const bodyAttributes = input.bodyAttributes ?? {}
+  const htmlAttributes = input.htmlAttributes ?? {}
+  const className = mergeClassNames(
+    "epub-dom-section",
+    htmlAttributes.class,
+    bodyAttributes.class,
+    ...extraClassNames
+  )
+  const idAttribute = bodyAttributes.id ?? htmlAttributes.id
+
+  return [
+    `<div class="${escapeHtmlAttribute(className)}"`,
+    idAttribute ? ` id="${escapeHtmlAttribute(idAttribute)}"` : "",
+    ` data-section-id="${escapeHtmlAttribute(input.sectionId)}"`,
+    ` data-section-href="${escapeHtmlAttribute(input.sectionHref)}"`,
+    serializeSectionLanguageAttributes(input),
+    serializeSectionLayoutAttributes(input),
+    ">"
+  ].join("")
+}
+
+function mergeClassNames(...values: Array<string | undefined>): string {
+  const tokens = new Set<string>()
+  for (const value of values) {
+    for (const token of value?.split(/\s+/) ?? []) {
+      if (token.trim()) {
+        tokens.add(token.trim())
+      }
+    }
+  }
+  return Array.from(tokens).join(" ")
+}
+
+function mergeRootStyleAttributes(...values: Array<string | undefined>): string {
+  return values
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value.replace(/;+$/g, ""))
+    .join("; ")
+}
+
+function extractRootBackgroundStyleAttributes(
+  ...values: Array<string | undefined>
+): string {
+  return values
+    .flatMap((value) => splitCssDeclarations(value ?? ""))
+    .filter(isBackgroundDeclaration)
+    .join("; ")
+}
+
+function splitCssDeclarations(value: string): string[] {
+  const declarations: string[] = []
+  let current = ""
+  let quote: '"' | "'" | null = null
+  let parenDepth = 0
+
+  for (const char of value) {
+    if (quote) {
+      current += char
+      if (char === quote) {
+        quote = null
+      }
+      continue
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char
+      current += char
+      continue
+    }
+
+    if (char === "(") {
+      parenDepth += 1
+      current += char
+      continue
+    }
+
+    if (char === ")") {
+      parenDepth = Math.max(0, parenDepth - 1)
+      current += char
+      continue
+    }
+
+    if (char === ";" && parenDepth === 0) {
+      const declaration = current.trim()
+      if (declaration) {
+        declarations.push(declaration)
+      }
+      current = ""
+      continue
+    }
+
+    current += char
+  }
+
+  const declaration = current.trim()
+  if (declaration) {
+    declarations.push(declaration)
+  }
+
+  return declarations
+}
+
+function isBackgroundDeclaration(declaration: string): boolean {
+  const separatorIndex = declaration.indexOf(":")
+  if (separatorIndex <= 0) {
+    return false
+  }
+
+  const propertyName = declaration.slice(0, separatorIndex).trim().toLowerCase()
+  return propertyName === "background" || propertyName.startsWith("background-")
 }
 
 function escapeStyleTagText(value: string): string {
@@ -207,13 +396,14 @@ function escapeStyleTagText(value: string): string {
 
 function serializeInlineStyleNode(
   node: Extract<PreprocessedChapterNode, { kind: "element" }>,
-  attributes: string
+  attributes: string,
+  styleScopeOptions?: DomStyleScopeOptions
 ): string {
   const styleText = node.children
     .map((child) => (child.kind === "text" ? child.text : ""))
     .join("")
 
-  return `<style${attributes}>${escapeStyleTagText(scopeDomStyleSheetCss(styleText))}</style>`
+  return `<style${attributes}>${escapeStyleTagText(scopeDomStyleSheetCss(styleText, undefined, styleScopeOptions))}</style>`
 }
 
 function serializeSectionLanguageAttributes(
@@ -234,6 +424,13 @@ function serializeSectionLayoutAttributes(
 ): string {
   const styleAttributes: string[] = []
   const dataAttributes: string[] = []
+  const rootStyle = mergeRootStyleAttributes(
+    input.htmlAttributes?.style,
+    input.bodyAttributes?.style
+  )
+  if (rootStyle) {
+    styleAttributes.push(rootStyle)
+  }
 
   if (input.renditionLayout === "pre-paginated" && input.fixedLayoutViewport) {
     dataAttributes.push(` data-rendition-layout="pre-paginated"`)
@@ -299,4 +496,16 @@ function serializeSectionLayoutAttributes(
       ? ` style="${escapeHtmlAttribute(styleAttributes.join("; "))}"`
       : ""
   ].join("")
+}
+
+function createDomStyleScopeOptions(
+  options: DomChapterMarkupOptions
+): DomStyleScopeOptions | undefined {
+  if (options.rootBackgroundTarget !== "page-viewport") {
+    return undefined
+  }
+
+  return {
+    rootBackgroundSelector: getDomPageViewportSelector()
+  }
 }
