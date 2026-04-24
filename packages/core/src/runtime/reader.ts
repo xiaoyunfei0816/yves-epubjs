@@ -1,7 +1,6 @@
 import EventEmitter from "eventemitter3";
 import {
   LayoutEngine,
-  type LayoutPretextBlock,
   type LayoutResult
 } from "../layout/layout-engine";
 import { CanvasRenderer } from "../renderer/canvas-renderer";
@@ -33,7 +32,6 @@ import type {
   InlineNode,
   Locator,
   LocatorRestoreDiagnostics,
-  PageSpreadPlacement,
   Point,
   PublisherStylesMode,
   PublicationAccessibilitySnapshot,
@@ -85,6 +83,14 @@ import { ReaderInteractionController } from "./reader-interaction-controller";
 import { ReaderNavigationController } from "./reader-navigation-controller";
 import { ReaderRenderOrchestrator } from "./reader-render-orchestrator";
 import {
+  mapCanvasTextLayerClientPointToLocator,
+  resolveCanvasTextPosition
+} from "./canvas-text-locator";
+import {
+  createReaderSessionState,
+  type ReaderSessionState
+} from "./reader-session-state";
+import {
   createSharedChapterRenderInput,
   type SharedChapterRenderInput
 } from "./chapter-render-input";
@@ -116,6 +122,19 @@ import {
   normalizeTextRangeSelector,
   toTransparentHighlightColor
 } from "./reader-domain";
+import { findBlockById, resolveRenderableBlockId } from "./reader-block-tree";
+import {
+  cloneReaderTextSelectionSnapshot,
+  cloneTextRangeSelector,
+  flattenTextRange,
+  hasActiveTextSelection,
+  inflateFlattenedTextRange,
+  normalizeTextRangeForContext,
+  readerTextSelectionSnapshotsEqual,
+  resolveLeadingSelectionTarget,
+  subtractFlattenedRange,
+  type SectionTextRangeContext
+} from "./reader-selection";
 import { stripPublisherStylesFromSection } from "./publisher-styles";
 import {
   resolveReadingLanguageContext,
@@ -148,6 +167,21 @@ import {
   type PageBlockSlice,
   type ReaderPage
 } from "./paginated-render-plan";
+import {
+  createLocatorForPage as createPaginatedPageLocator,
+  findCurrentPageForSection as findPaginatedCurrentPageForSection,
+  findPageByNumber as findPaginatedPageByNumber,
+  findPageForLocator as findPaginatedPageForLocator,
+  getVisiblePaginatedSpreads as getReaderVisiblePaginatedSpreads,
+  resolveCurrentPageNumberFromSection,
+  resolveCurrentPaginatedSpread as resolveReaderCurrentPaginatedSpread,
+  resolveDisplayPageNumberToLeafPage as resolveReaderDisplayPageNumberToLeafPage,
+  resolvePaginatedSpread as resolveReaderPaginatedSpread,
+  resolveProgressForCurrentLocator,
+  resolveRenderedPage as resolveReaderRenderedPage,
+  resolveSpreadNavigationTarget as resolveReaderSpreadNavigationTarget,
+  type PaginatedSpread
+} from "./reader-pagination";
 import { buildScrollRenderPlan } from "./scroll-render-plan";
 import {
   createDomChapterRenderInput,
@@ -172,20 +206,6 @@ export type PaginationInfo = {
   totalPages: number;
 };
 
-type PaginatedSpreadSlot = {
-  position: PageSpreadPlacement;
-  page: ReaderPage | null;
-  section: SectionDocument | null;
-  isBlank: boolean;
-};
-
-type PaginatedSpread = {
-  anchorPageNumber: number;
-  pageNumbers: number[];
-  currentPageNumber: number;
-  slots: PaginatedSpreadSlot[];
-};
-
 type ReaderTextSelection = Omit<
   ReaderTextSelectionSnapshot,
   "rects" | "visible"
@@ -206,63 +226,53 @@ export class EpubReader {
   private readonly interactionController: ReaderInteractionController;
   private readonly navigationController: ReaderNavigationController;
   private readonly renderOrchestrator: ReaderRenderOrchestrator;
+  private readonly sessionState: ReaderSessionState;
 
-  private book: Book | null = null;
-  private sourceName: string | null = null;
-  private annotations: Annotation[] = [];
+  private book: Book | null;
+  private sourceName: string | null;
+  private annotations: Annotation[];
   private resources: {
     readBinary(path: string): Promise<Uint8Array>;
     exists(path: string): boolean;
-  } | null = null;
-  private chapterRenderInputs: SharedChapterRenderInput[] = [];
-  private locator: Locator | null = null;
-  private sectionIndexById = new Map<string, number>();
+  } | null;
+  private chapterRenderInputs: SharedChapterRenderInput[];
+  private locator: Locator | null;
+  private sectionIndexById: Map<string, number>;
   private preferences: ReaderPreferences;
   private mode: "scroll" | "paginated";
   private publisherStyles: PublisherStylesMode;
   private experimentalRtl: boolean;
   private spreadMode: ReaderSpreadMode;
-  private debugMode = false;
+  private debugMode: boolean;
   private theme: Theme;
   private typography: TypographyOptions;
-  private currentSectionIndex = 0;
+  private currentSectionIndex: number;
   private resizeObserver: ResizeObserver | null = null;
-  private lastMeasuredWidth = 0;
-  private lastMeasuredHeight = 0;
-  private pages: ReaderPage[] = [];
-  private currentPageNumber = 1;
-  private sectionEstimatedHeights: number[] = [];
-  private scrollWindowStart = -1;
-  private scrollWindowEnd = -1;
-  private lastVisibleBounds: VisibleDrawBounds = [];
-  private lastInteractionRegions: InteractionRegion[] = [];
-  private lastRenderedSectionIds: string[] = [];
-  private lastScrollRenderWindows = new Map<
+  private lastMeasuredWidth: number;
+  private lastMeasuredHeight: number;
+  private pages: ReaderPage[];
+  private currentPageNumber: number;
+  private sectionEstimatedHeights: number[];
+  private scrollWindowStart: number;
+  private scrollWindowEnd: number;
+  private lastVisibleBounds: VisibleDrawBounds;
+  private lastInteractionRegions: InteractionRegion[];
+  private lastRenderedSectionIds: string[];
+  private lastScrollRenderWindows: Map<
     string,
     Array<{ top: number; height: number }>
-  >();
-  private lastRenderMetrics: RenderMetrics = {
-    backend: "canvas",
-    visibleSectionCount: 0,
-    visibleDrawOpCount: 0,
-    highlightedDrawOpCount: 0,
-    totalCanvasHeight: 0
-  };
-  private renderVersion = 0;
-  private lastChapterRenderDecision: ChapterRenderDecision | null = null;
-  private readonly imageIntrinsicSizeCache = new Map<
-    string,
-    IntrinsicImageSize | null
-  >();
-  private readonly pendingImageIntrinsicSizePaths = new Set<string>();
-  private lastLocatorRestoreDiagnostics: LocatorRestoreDiagnostics | null =
-    null;
-  private lastFixedLayoutRenderSignature: string | null = null;
-  private lastPresentationRenderSignature: string | null = null;
-  private pendingModeSwitchLocator: Locator | null = null;
-  private textSelectionSnapshot: ReaderTextSelectionSnapshot | null = null;
-  private pinnedTextSelectionSnapshot: ReaderTextSelectionSnapshot | null =
-    null;
+  >;
+  private lastRenderMetrics: RenderMetrics;
+  private renderVersion: number;
+  private lastChapterRenderDecision: ChapterRenderDecision | null;
+  private readonly imageIntrinsicSizeCache: Map<string, IntrinsicImageSize | null>;
+  private readonly pendingImageIntrinsicSizePaths: Set<string>;
+  private lastLocatorRestoreDiagnostics: LocatorRestoreDiagnostics | null;
+  private lastFixedLayoutRenderSignature: string | null;
+  private lastPresentationRenderSignature: string | null;
+  private pendingModeSwitchLocator: Locator | null;
+  private textSelectionSnapshot: ReaderTextSelectionSnapshot | null;
+  private pinnedTextSelectionSnapshot: ReaderTextSelectionSnapshot | null;
   private readonly handleDocumentSelectionChange = (): void => {
     this.syncTextSelectionState();
   };
@@ -272,7 +282,7 @@ export class EpubReader {
   private static readonly PAGINATED_CLICK_NAV_ZONE_RATIO = 0.28;
 
   constructor(private readonly options: ReaderOptions = {}) {
-    this.preferences = mergeReaderPreferences(
+    const preferences = mergeReaderPreferences(
       {
         ...(options.mode ? { mode: options.mode } : {}),
         ...(options.theme ? { theme: options.theme } : {}),
@@ -281,15 +291,69 @@ export class EpubReader {
       options.preferences
     );
     const settings = resolveReaderSettings(
-      this.preferences,
+      preferences,
       DEFAULT_READER_SETTINGS
     );
-    this.mode = settings.mode;
-    this.publisherStyles = settings.publisherStyles;
-    this.experimentalRtl = settings.experimentalRtl;
-    this.spreadMode = settings.spreadMode;
-    this.theme = { ...settings.theme };
-    this.typography = { ...settings.typography };
+    this.sessionState = createReaderSessionState({
+      preferences,
+      mode: settings.mode,
+      publisherStyles: settings.publisherStyles,
+      experimentalRtl: settings.experimentalRtl,
+      spreadMode: settings.spreadMode,
+      theme: { ...settings.theme },
+      typography: { ...settings.typography }
+    });
+    this.book = this.sessionState.document.book;
+    this.sourceName = this.sessionState.document.sourceName;
+    this.resources = this.sessionState.document.resources;
+    this.chapterRenderInputs = this.sessionState.document.chapterRenderInputs;
+    this.sectionIndexById = this.sessionState.document.sectionIndexById;
+    this.annotations = this.sessionState.annotations.annotations;
+    this.preferences = this.sessionState.view.preferences;
+    this.mode = this.sessionState.view.mode;
+    this.publisherStyles = this.sessionState.view.publisherStyles;
+    this.experimentalRtl = this.sessionState.view.experimentalRtl;
+    this.spreadMode = this.sessionState.view.spreadMode;
+    this.debugMode = this.sessionState.view.debugMode;
+    this.theme = this.sessionState.view.theme;
+    this.typography = this.sessionState.view.typography;
+    this.locator = this.sessionState.position.locator;
+    this.currentSectionIndex = this.sessionState.position.currentSectionIndex;
+    this.pages = this.sessionState.position.pages;
+    this.currentPageNumber = this.sessionState.position.currentPageNumber;
+    this.pendingModeSwitchLocator =
+      this.sessionState.position.pendingModeSwitchLocator;
+    this.lastMeasuredWidth = this.sessionState.render.lastMeasuredWidth;
+    this.lastMeasuredHeight = this.sessionState.render.lastMeasuredHeight;
+    this.sectionEstimatedHeights =
+      this.sessionState.render.sectionEstimatedHeights;
+    this.scrollWindowStart = this.sessionState.render.scrollWindowStart;
+    this.scrollWindowEnd = this.sessionState.render.scrollWindowEnd;
+    this.lastVisibleBounds = this.sessionState.render.lastVisibleBounds;
+    this.lastInteractionRegions =
+      this.sessionState.render.lastInteractionRegions;
+    this.lastRenderedSectionIds =
+      this.sessionState.render.lastRenderedSectionIds;
+    this.lastScrollRenderWindows =
+      this.sessionState.render.lastScrollRenderWindows;
+    this.lastRenderMetrics = this.sessionState.render.lastRenderMetrics;
+    this.renderVersion = this.sessionState.render.renderVersion;
+    this.lastChapterRenderDecision =
+      this.sessionState.render.lastChapterRenderDecision;
+    this.imageIntrinsicSizeCache =
+      this.sessionState.render.imageIntrinsicSizeCache;
+    this.pendingImageIntrinsicSizePaths =
+      this.sessionState.render.pendingImageIntrinsicSizePaths;
+    this.lastLocatorRestoreDiagnostics =
+      this.sessionState.render.lastLocatorRestoreDiagnostics;
+    this.lastFixedLayoutRenderSignature =
+      this.sessionState.render.lastFixedLayoutRenderSignature;
+    this.lastPresentationRenderSignature =
+      this.sessionState.render.lastPresentationRenderSignature;
+    this.textSelectionSnapshot =
+      this.sessionState.selection.textSelectionSnapshot;
+    this.pinnedTextSelectionSnapshot =
+      this.sessionState.selection.pinnedTextSelectionSnapshot;
     this.scrollCoordinator = new ScrollCoordinator({
       container: this.options.container,
       onScrollFrame: (emitEvent) => {
@@ -1433,120 +1497,11 @@ export class EpubReader {
       return null;
     }
 
-    const ownerDocument = this.options.container.ownerDocument ?? document;
-    if (typeof ownerDocument.elementFromPoint !== "function") {
-      return null;
-    }
-
-    const pointTarget = ownerDocument.elementFromPoint(
-      clientPoint.x,
-      clientPoint.y
-    );
-    const textRun =
-      this.resolveCanvasTextRunFromTarget(pointTarget) ??
-      this.findNearestCanvasTextRun(clientPoint);
-    if (!textRun) {
-      return null;
-    }
-
-    return this.createLocatorFromCanvasTextRun(textRun, clientPoint);
-  }
-
-  private resolveCanvasTextRunFromTarget(
-    target: Element | null
-  ): HTMLElement | null {
-    return target instanceof HTMLElement
-      ? target.closest<HTMLElement>(".epub-text-run")
-      : null;
-  }
-
-  private findNearestCanvasTextRun(clientPoint: Point): HTMLElement | null {
-    if (!this.options.container) {
-      return null;
-    }
-
-    const containerRect = this.options.container.getBoundingClientRect();
-    const maxDistance = Math.max(80, this.options.container.clientHeight * 0.2);
-    let nearest: { element: HTMLElement; distance: number } | null = null;
-    for (const element of Array.from(
-      this.options.container.querySelectorAll<HTMLElement>(".epub-text-run")
-    )) {
-      const rect = element.getBoundingClientRect();
-      if (
-        rect.width <= 0 ||
-        rect.height <= 0 ||
-        rect.bottom < containerRect.top ||
-        rect.top > containerRect.bottom ||
-        rect.right < containerRect.left ||
-        rect.left > containerRect.right
-      ) {
-        continue;
-      }
-
-      const dx =
-        clientPoint.x < rect.left
-          ? rect.left - clientPoint.x
-          : clientPoint.x > rect.right
-            ? clientPoint.x - rect.right
-            : 0;
-      const dy =
-        clientPoint.y < rect.top
-          ? rect.top - clientPoint.y
-          : clientPoint.y > rect.bottom
-            ? clientPoint.y - rect.bottom
-            : 0;
-      const distance = Math.hypot(dx, dy);
-      if (
-        distance <= maxDistance &&
-        (!nearest || distance < nearest.distance)
-      ) {
-        nearest = { element, distance };
-      }
-    }
-
-    return nearest?.element ?? null;
-  }
-
-  private createLocatorFromCanvasTextRun(
-    textRun: HTMLElement,
-    clientPoint: Point
-  ): Locator | null {
-    if (!this.book) {
-      return null;
-    }
-
-    const sectionId = textRun.dataset.readerSectionId?.trim();
-    const blockId = textRun.dataset.readerBlockId?.trim();
-    const sectionIndex = sectionId ? this.getSectionIndexById(sectionId) : -1;
-    const section = sectionIndex >= 0 ? this.book.sections[sectionIndex] : null;
-    if (!sectionId || !section || !blockId) {
-      return null;
-    }
-
-    const inlineStart =
-      Number.parseInt(textRun.dataset.readerInlineStart ?? "0", 10) || 0;
-    const fallbackTextLength = Array.from(textRun.textContent ?? "").length;
-    const inlineEnd =
-      Number.parseInt(
-        textRun.dataset.readerInlineEnd ??
-          `${inlineStart + fallbackTextLength}`,
-        10
-      ) || inlineStart + fallbackTextLength;
-    const absoluteInlineOffset = resolveInlineOffsetAtClientPoint({
-      textRun,
-      clientX: clientPoint.x,
-      clientY: clientPoint.y,
-      inlineStart,
-      inlineEnd
-    });
-
-    return normalizeLocator({
-      ...createBlockLocator({
-        section,
-        spineIndex: sectionIndex,
-        blockId
-      }),
-      inlineOffset: absoluteInlineOffset
+    return mapCanvasTextLayerClientPointToLocator({
+      container: this.options.container,
+      book: this.book,
+      clientPoint,
+      getSectionIndexById: (sectionId) => this.getSectionIndexById(sectionId)
     });
   }
 
@@ -3814,384 +3769,111 @@ export class EpubReader {
   }
 
   private findCurrentPageForSection(sectionId: string): ReaderPage | null {
-    const page =
-      this.pages.find(
-        (entry) =>
-          entry.pageNumber === this.currentPageNumber &&
-          entry.sectionId === sectionId
-      ) ??
-      this.pages.find((entry) => entry.sectionId === sectionId) ??
-      null;
-
-    return page;
+    return findPaginatedCurrentPageForSection({
+      pages: this.pages,
+      currentPageNumber: this.currentPageNumber,
+      sectionId
+    });
   }
 
   private findPageForLocator(locator: Locator): ReaderPage | null {
-    const sectionPages = this.pages.filter(
-      (page) => page.spineIndex === locator.spineIndex
-    );
-    if (sectionPages.length === 0) {
-      return null;
-    }
-
-    if (locator.blockId) {
-      if (locator.inlineOffset !== undefined) {
-        const inlinePage = sectionPages.find((page) =>
-          this.pageContainsInlineOffset(
-            page,
-            locator.blockId!,
-            locator.inlineOffset!
-          )
-        );
-        if (inlinePage) {
-          return inlinePage;
-        }
-      }
-
-      const blockPage = sectionPages.find((page) =>
-        this.pageContainsBlockId(page, locator.blockId!)
-      );
-      if (blockPage) {
-        return blockPage;
-      }
-    }
-
-    const sectionProgress = locator.progressInSection ?? 0;
-    const progress = Number.isFinite(sectionProgress)
-      ? Math.max(0, Math.min(sectionProgress, 1))
-      : 0;
-    const targetIndex = Math.min(
-      sectionPages.length - 1,
-      Math.round(progress * Math.max(sectionPages.length - 1, 0))
-    );
-
-    return sectionPages[targetIndex] ?? sectionPages[0] ?? null;
+    return findPaginatedPageForLocator(this.pages, locator);
   }
 
   private resolveRenderedPage(sectionId: string): ReaderPage | null {
-    if (this.pendingModeSwitchLocator) {
-      const pendingLocatorPage = this.findPageForLocator(
-        this.pendingModeSwitchLocator
-      );
-      if (pendingLocatorPage?.sectionId === sectionId) {
-        return pendingLocatorPage;
-      }
-    }
-
-    const currentPage = this.findCurrentPageForSection(sectionId);
-    if (currentPage) {
-      return currentPage;
-    }
-
-    if (this.locator) {
-      const locatorPage = this.findPageForLocator(this.locator);
-      if (locatorPage?.sectionId === sectionId) {
-        return locatorPage;
-      }
-    }
-
-    return this.pages.find((entry) => entry.sectionId === sectionId) ?? null;
+    return resolveReaderRenderedPage({
+      pages: this.pages,
+      sectionId,
+      currentPageNumber: this.currentPageNumber,
+      pendingModeSwitchLocator: this.pendingModeSwitchLocator,
+      locator: this.locator
+    });
   }
 
   private findPageByNumber(pageNumber: number): ReaderPage | null {
-    return this.pages[pageNumber - 1] ?? null;
+    return findPaginatedPageByNumber(this.pages, pageNumber);
   }
 
   private resolvePaginatedSpread(
     page: ReaderPage | null
   ): PaginatedSpread | null {
-    if (!page || !this.book) {
-      return null;
-    }
-
-    const spreadContext = this.resolveReadingSpreadContextForSectionIndex(
-      page.spineIndex
-    );
-    if (!spreadContext || !spreadContext.syntheticSpreadActive) {
-      const section = this.book.sections[page.spineIndex] ?? null;
-      return {
-        anchorPageNumber: page.pageNumber,
-        pageNumbers: [page.pageNumber],
-        currentPageNumber: page.pageNumber,
-        slots: [
-          {
-            position: "center",
-            page,
-            section,
-            isBlank: false
-          }
-        ]
-      };
-    }
-
-    if (spreadContext.pageSpreadPlacement === "center") {
-      const section = this.book.sections[page.spineIndex] ?? null;
-      return {
-        anchorPageNumber: page.pageNumber,
-        pageNumbers: [page.pageNumber],
-        currentPageNumber: page.pageNumber,
-        slots: [
-          {
-            position: "center",
-            page,
-            section,
-            isBlank: false
-          }
-        ]
-      };
-    }
-
-    if (spreadContext.pageSpreadPlacement === "left") {
-      const pairedPage = this.resolvePairedSpreadPage(page, "next");
-      const currentSection = this.book.sections[page.spineIndex] ?? null;
-      const pairedSection = pairedPage
-        ? (this.book.sections[pairedPage.spineIndex] ?? null)
-        : null;
-      return {
-        anchorPageNumber: page.pageNumber,
-        pageNumbers: pairedPage
-          ? [page.pageNumber, pairedPage.pageNumber]
-          : [page.pageNumber],
-        currentPageNumber: page.pageNumber,
-        slots: [
-          {
-            position: "left",
-            page,
-            section: currentSection,
-            isBlank: false
-          },
-          {
-            position: "right",
-            page: pairedPage,
-            section: pairedSection,
-            isBlank: !pairedPage
-          }
-        ]
-      };
-    }
-
-    const pairedPage = this.resolvePairedSpreadPage(page, "previous");
-    const currentSection = this.book.sections[page.spineIndex] ?? null;
-    const pairedSection = pairedPage
-      ? (this.book.sections[pairedPage.spineIndex] ?? null)
-      : null;
-    return {
-      anchorPageNumber: pairedPage?.pageNumber ?? page.pageNumber,
-      pageNumbers: pairedPage
-        ? [pairedPage.pageNumber, page.pageNumber]
-        : [page.pageNumber],
-      currentPageNumber: page.pageNumber,
-      slots: [
-        {
-          position: "left",
-          page: pairedPage,
-          section: pairedSection,
-          isBlank: !pairedPage
-        },
-        {
-          position: "right",
-          page,
-          section: currentSection,
-          isBlank: false
-        }
-      ]
-    };
-  }
-
-  private resolvePairedSpreadPage(
-    page: ReaderPage,
-    direction: "previous" | "next"
-  ): ReaderPage | null {
-    const candidate = this.findPageByNumber(
-      direction === "previous" ? page.pageNumber - 1 : page.pageNumber + 1
-    );
-    if (!candidate || !this.book) {
-      return null;
-    }
-
-    const currentSpreadContext =
-      this.resolveReadingSpreadContextForSectionIndex(page.spineIndex);
-    const candidateSpreadContext =
-      this.resolveReadingSpreadContextForSectionIndex(candidate.spineIndex);
-    if (
-      !currentSpreadContext?.syntheticSpreadActive ||
-      !candidateSpreadContext?.syntheticSpreadActive
-    ) {
-      return null;
-    }
-
-    if (direction === "previous") {
-      return candidateSpreadContext.pageSpreadPlacement === "left"
-        ? candidate
-        : null;
-    }
-
-    return candidateSpreadContext.pageSpreadPlacement === "right"
-      ? candidate
-      : null;
+    return resolveReaderPaginatedSpread({
+      page,
+      book: this.book,
+      pages: this.pages,
+      resolveReadingSpreadContextForSectionIndex: (spineIndex) =>
+        this.resolveReadingSpreadContextForSectionIndex(spineIndex)
+    });
   }
 
   private resolveCurrentPaginatedSpread(): PaginatedSpread | null {
-    if (this.mode !== "paginated") {
-      return null;
-    }
-
-    const currentPage = this.findPageByNumber(this.currentPageNumber);
-    return this.resolvePaginatedSpread(currentPage);
+    return resolveReaderCurrentPaginatedSpread({
+      mode: this.mode,
+      currentPageNumber: this.currentPageNumber,
+      book: this.book,
+      pages: this.pages,
+      resolveReadingSpreadContextForSectionIndex: (spineIndex) =>
+        this.resolveReadingSpreadContextForSectionIndex(spineIndex)
+    });
   }
 
   private getVisiblePaginatedSpreads(): PaginatedSpread[] {
-    if (this.mode !== "paginated" || this.pages.length === 0) {
-      return [];
-    }
-
-    const spreads: PaginatedSpread[] = [];
-    let nextLeafPageNumber = 1;
-
-    while (nextLeafPageNumber <= this.pages.length) {
-      const page = this.findPageByNumber(nextLeafPageNumber);
-      if (!page) {
-        nextLeafPageNumber += 1;
-        continue;
-      }
-
-      const spread = this.resolvePaginatedSpread(page);
-      if (!spread) {
-        nextLeafPageNumber += 1;
-        continue;
-      }
-
-      spreads.push(spread);
-      const lastPageNumber =
-        spread.pageNumbers[spread.pageNumbers.length - 1] ?? page.pageNumber;
-      nextLeafPageNumber = Math.max(lastPageNumber + 1, nextLeafPageNumber + 1);
-    }
-
-    return spreads;
+    return getReaderVisiblePaginatedSpreads({
+      mode: this.mode,
+      book: this.book,
+      pages: this.pages,
+      resolveReadingSpreadContextForSectionIndex: (spineIndex) =>
+        this.resolveReadingSpreadContextForSectionIndex(spineIndex)
+    });
   }
 
   private resolveDisplayPageNumberToLeafPage(
     pageNumber: number
   ): number | null {
-    const spreads = this.getVisiblePaginatedSpreads();
-    if (spreads.length === 0) {
-      return null;
-    }
-
-    const targetSpread =
-      spreads[Math.max(0, Math.min(pageNumber - 1, spreads.length - 1))];
-    return targetSpread?.anchorPageNumber ?? null;
+    return resolveReaderDisplayPageNumberToLeafPage({
+      pageNumber,
+      mode: this.mode,
+      book: this.book,
+      pages: this.pages,
+      resolveReadingSpreadContextForSectionIndex: (spineIndex) =>
+        this.resolveReadingSpreadContextForSectionIndex(spineIndex)
+    });
   }
 
   private resolveSpreadNavigationTarget(
     action: "previous" | "next"
   ): number | null {
-    const spread = this.resolveCurrentPaginatedSpread();
-    if (!spread) {
-      return null;
-    }
-
-    // Navigation advances by visible spread, not raw leaf page, so a synthetic
-    // spread turns with one action instead of stepping into its paired page.
-    const boundaryPageNumber =
-      action === "next"
-        ? (spread.pageNumbers[spread.pageNumbers.length - 1] ??
-            spread.currentPageNumber) + 1
-        : spread.anchorPageNumber - 1;
-    const targetPage = this.findPageByNumber(boundaryPageNumber);
-    if (!targetPage) {
-      return null;
-    }
-
-    const targetSpread = this.resolvePaginatedSpread(targetPage);
-    return targetSpread?.anchorPageNumber ?? targetPage.pageNumber;
+    return resolveReaderSpreadNavigationTarget({
+      action,
+      mode: this.mode,
+      currentPageNumber: this.currentPageNumber,
+      book: this.book,
+      pages: this.pages,
+      resolveReadingSpreadContextForSectionIndex: (spineIndex) =>
+        this.resolveReadingSpreadContextForSectionIndex(spineIndex)
+    });
   }
 
   private syncCurrentPageFromSection(): void {
-    if (this.mode === "scroll") {
-      this.currentPageNumber = this.currentSectionIndex + 1;
-      return;
-    }
-
-    const matchingPage = this.locator
-      ? this.findPageForLocator({
-          ...this.locator,
-          spineIndex: this.currentSectionIndex
-        })
-      : null;
-    this.currentPageNumber =
-      matchingPage?.pageNumber ?? this.currentSectionIndex + 1;
+    this.currentPageNumber = resolveCurrentPageNumberFromSection({
+      mode: this.mode,
+      currentSectionIndex: this.currentSectionIndex,
+      locator: this.locator,
+      pages: this.pages
+    });
   }
 
   private createLocatorForPage(page: ReaderPage): Locator {
-    return {
-      spineIndex: page.spineIndex,
-      progressInSection:
-        page.totalPagesInSection > 1
-          ? (page.pageNumberInSection - 1) / (page.totalPagesInSection - 1)
-          : 0
-    };
-  }
-
-  private pageContainsBlockId(page: ReaderPage, blockId: string): boolean {
-    return page.blocks.some((slice) =>
-      slice.type === "pretext"
-        ? slice.block.id === blockId
-        : findBlockById([slice.block], blockId) !== null
-    );
-  }
-
-  private pageContainsInlineOffset(
-    page: ReaderPage,
-    blockId: string,
-    inlineOffset: number
-  ): boolean {
-    const normalizedInlineOffset = Math.max(0, Math.trunc(inlineOffset));
-    return page.blocks.some((slice) => {
-      if (slice.type !== "pretext" || slice.block.id !== blockId) {
-        return false;
-      }
-
-      const sliceRange = this.getPretextSliceInlineRange(slice.block);
-      if (!sliceRange) {
-        return false;
-      }
-
-      return (
-        normalizedInlineOffset >= sliceRange.start &&
-        normalizedInlineOffset < sliceRange.end
-      );
-    });
-  }
-
-  private getPretextSliceInlineRange(
-    block: LayoutPretextBlock
-  ): { start: number; end: number } | null {
-    const start = block.textOffsetBase ?? 0;
-    const end = start + sumPretextLineTextLength(block.lines);
-    return end > start ? { start, end } : null;
+    return createPaginatedPageLocator(page);
   }
 
   private getProgressForCurrentLocator(): number {
-    if (!this.locator) {
-      return 0;
-    }
-
-    if (this.mode === "scroll") {
-      return clampProgress(this.locator.progressInSection ?? 0);
-    }
-
-    const page = this.findPageForLocator({
-      ...this.locator,
-      spineIndex: this.currentSectionIndex
+    return resolveProgressForCurrentLocator({
+      locator: this.locator,
+      mode: this.mode,
+      currentSectionIndex: this.currentSectionIndex,
+      pages: this.pages
     });
-    if (!page) {
-      return this.locator.progressInSection ?? 0;
-    }
-
-    return page.totalPagesInSection > 1
-      ? (page.pageNumberInSection - 1) / (page.totalPagesInSection - 1)
-      : 0;
   }
 
   private syncDerivedDecorationGroups(): void {
@@ -6063,19 +5745,6 @@ type ResolvedAnnotationRange = {
   range: TextRangeSelector;
 };
 
-type SectionTextRangeContext = {
-  blockIds: string[];
-  blockTexts: Map<string, string>;
-  blockTextLengths: Map<string, number>;
-  blockOffsets: Map<string, number>;
-  totalLength: number;
-};
-
-type FlattenedTextRange = {
-  start: number;
-  end: number;
-};
-
 function cloneReaderPreferences(
   preferences: ReaderPreferences
 ): ReaderPreferences {
@@ -6110,31 +5779,6 @@ function typographyEqual(
     left.fontFamily === right.fontFamily &&
     left.letterSpacing === right.letterSpacing &&
     left.wordSpacing === right.wordSpacing
-  );
-}
-
-function hasActiveTextSelection(scope?: Node | null): boolean {
-  if (
-    typeof window === "undefined" ||
-    typeof window.getSelection !== "function"
-  ) {
-    return false;
-  }
-
-  const selection = window.getSelection();
-  if (!selection || !selection.toString().trim()) {
-    return false;
-  }
-
-  if (!scope) {
-    return true;
-  }
-
-  const anchorNode = selection.anchorNode;
-  const focusNode = selection.focusNode;
-  return Boolean(
-    (anchorNode && scope.contains(anchorNode)) ||
-    (focusNode && scope.contains(focusNode))
   );
 }
 
@@ -6414,490 +6058,12 @@ function projectClientRectIntoContainer(
   };
 }
 
-function cloneReaderTextSelectionSnapshot(
-  selection: ReaderTextSelectionSnapshot | null
-): ReaderTextSelectionSnapshot | null {
-  if (!selection) {
-    return null;
-  }
-
-  return {
-    text: selection.text,
-    locator: { ...selection.locator },
-    sectionId: selection.sectionId,
-    ...(selection.blockId ? { blockId: selection.blockId } : {}),
-    ...(selection.textRange
-      ? { textRange: cloneTextRangeSelector(selection.textRange) }
-      : {}),
-    rects: selection.rects.map((rect) => ({ ...rect })),
-    visible: selection.visible
-  };
-}
-
-function readerTextSelectionSnapshotsEqual(
-  left: ReaderTextSelectionSnapshot | null,
-  right: ReaderTextSelectionSnapshot | null
-): boolean {
-  if (!left || !right) {
-    return left === right;
-  }
-
-  if (
-    left.text !== right.text ||
-    left.sectionId !== right.sectionId ||
-    left.blockId !== right.blockId ||
-    left.visible !== right.visible
-  ) {
-    return false;
-  }
-
-  if (
-    !locatorsEqual(left.locator, right.locator) ||
-    left.rects.length !== right.rects.length
-  ) {
-    return false;
-  }
-
-  if (!textRangesEqual(left.textRange, right.textRange)) {
-    return false;
-  }
-
-  return left.rects.every((rect, index) =>
-    rectsEqual(rect, right.rects[index] ?? null)
-  );
-}
-
-function locatorsEqual(left: Locator, right: Locator): boolean {
-  return (
-    left.spineIndex === right.spineIndex &&
-    left.blockId === right.blockId &&
-    left.anchorId === right.anchorId &&
-    left.inlineOffset === right.inlineOffset &&
-    left.cfi === right.cfi &&
-    left.progressInSection === right.progressInSection
-  );
-}
-
-function rectsEqual(left: Rect, right: Rect | null): boolean {
-  if (!right) {
-    return false;
-  }
-
-  return (
-    left.x === right.x &&
-    left.y === right.y &&
-    left.width === right.width &&
-    left.height === right.height
-  );
-}
-
-function textRangesEqual(
-  left: TextRangeSelector | undefined,
-  right: TextRangeSelector | undefined
-): boolean {
-  if (!left || !right) {
-    return left === right;
-  }
-
-  return (
-    left.start.blockId === right.start.blockId &&
-    left.start.inlineOffset === right.start.inlineOffset &&
-    left.end.blockId === right.end.blockId &&
-    left.end.inlineOffset === right.end.inlineOffset
-  );
-}
-
-function cloneTextRangeSelector(
-  textRange: TextRangeSelector
-): TextRangeSelector {
-  return {
-    start: {
-      blockId: textRange.start.blockId,
-      inlineOffset: textRange.start.inlineOffset
-    },
-    end: {
-      blockId: textRange.end.blockId,
-      inlineOffset: textRange.end.inlineOffset
-    }
-  };
-}
-
-function normalizeTextRangeForContext(input: {
-  textRange: TextRangeSelector;
-  context: SectionTextRangeContext;
-  resolveBlockId?: (blockId: string) => string;
-}): TextRangeSelector | null {
-  const normalizePoint = (
-    point: TextRangeSelector["start"]
-  ): TextRangeSelector["start"] | null => {
-    const blockId = input.resolveBlockId?.(point.blockId) ?? point.blockId;
-    if (!input.context.blockTextLengths.has(blockId)) {
-      return null;
-    }
-
-    const length = input.context.blockTextLengths.get(blockId) ?? 0;
-    return {
-      blockId,
-      inlineOffset: Math.max(
-        0,
-        Math.min(length, Math.trunc(point.inlineOffset))
-      )
-    };
-  };
-
-  const start = normalizePoint(input.textRange.start);
-  const end = normalizePoint(input.textRange.end);
-  if (!start || !end) {
-    return null;
-  }
-
-  const normalized = normalizeTextRangeSelector({
-    start,
-    end
-  });
-  const flattened = flattenTextRange(normalized, input.context);
-  if (!flattened) {
-    return null;
-  }
-
-  return inflateFlattenedTextRange(flattened, input.context);
-}
-
-function flattenTextRange(
-  textRange: TextRangeSelector,
-  context: SectionTextRangeContext
-): FlattenedTextRange | null {
-  const startBlockOffset = context.blockOffsets.get(textRange.start.blockId);
-  const endBlockOffset = context.blockOffsets.get(textRange.end.blockId);
-  if (startBlockOffset === undefined || endBlockOffset === undefined) {
-    return null;
-  }
-
-  const start = startBlockOffset + textRange.start.inlineOffset;
-  const end = endBlockOffset + textRange.end.inlineOffset;
-  const normalizedStart = Math.max(0, Math.min(start, end));
-  const normalizedEnd = Math.max(normalizedStart, Math.max(start, end));
-  return {
-    start: normalizedStart,
-    end: normalizedEnd
-  };
-}
-
-function inflateFlattenedTextRange(
-  flattened: FlattenedTextRange,
-  context: SectionTextRangeContext
-): TextRangeSelector | null {
-  const start = resolveTextRangePointFromAbsoluteOffset(
-    flattened.start,
-    context,
-    "start"
-  );
-  const end = resolveTextRangePointFromAbsoluteOffset(
-    flattened.end,
-    context,
-    "end"
-  );
-  if (!start || !end) {
-    return null;
-  }
-
-  return {
-    start,
-    end
-  };
-}
-
-function resolveTextRangePointFromAbsoluteOffset(
-  absoluteOffset: number,
-  context: SectionTextRangeContext,
-  bias: "start" | "end"
-): TextRangeSelector["start"] | null {
-  const clampedOffset = Math.max(
-    0,
-    Math.min(context.totalLength, Math.trunc(absoluteOffset))
-  );
-  for (let index = 0; index < context.blockIds.length; index += 1) {
-    const blockId = context.blockIds[index];
-    if (!blockId) {
-      continue;
-    }
-
-    const blockStart = context.blockOffsets.get(blockId) ?? 0;
-    const blockLength = context.blockTextLengths.get(blockId) ?? 0;
-    const blockEnd = blockStart + blockLength;
-    const isLastBlock = index === context.blockIds.length - 1;
-
-    if (
-      clampedOffset < blockEnd ||
-      (isLastBlock && clampedOffset <= blockEnd)
-    ) {
-      return {
-        blockId,
-        inlineOffset: clampedOffset - blockStart
-      };
-    }
-
-    if (clampedOffset === blockEnd && bias === "end") {
-      return {
-        blockId,
-        inlineOffset: blockLength
-      };
-    }
-  }
-
-  const lastBlockId = context.blockIds.at(-1);
-  if (!lastBlockId) {
-    return null;
-  }
-
-  return {
-    blockId: lastBlockId,
-    inlineOffset: context.blockTextLengths.get(lastBlockId) ?? 0
-  };
-}
-
-function subtractFlattenedRange(
-  source: FlattenedTextRange,
-  subtractor: FlattenedTextRange
-): FlattenedTextRange[] {
-  const overlapStart = Math.max(source.start, subtractor.start);
-  const overlapEnd = Math.min(source.end, subtractor.end);
-  if (overlapEnd <= overlapStart) {
-    return [source];
-  }
-
-  const remaining: FlattenedTextRange[] = [];
-  if (source.start < overlapStart) {
-    remaining.push({
-      start: source.start,
-      end: overlapStart
-    });
-  }
-  if (overlapEnd < source.end) {
-    remaining.push({
-      start: overlapEnd,
-      end: source.end
-    });
-  }
-  return remaining;
-}
-
-function resolveLeadingSelectionTarget<
-  TTarget extends { element: HTMLElement }
->(left: TTarget | null, right: TTarget | null): TTarget | null {
-  if (left && !right) {
-    return left;
-  }
-
-  if (right && !left) {
-    return right;
-  }
-
-  if (!left || !right) {
-    return null;
-  }
-
-  if (left.element === right.element) {
-    return left;
-  }
-
-  const position = left.element.compareDocumentPosition(right.element);
-  if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
-    return left;
-  }
-
-  if (position & Node.DOCUMENT_POSITION_PRECEDING) {
-    return right;
-  }
-
-  return left;
-}
-
 function clampProgress(value: number): number {
   if (!Number.isFinite(value)) {
     return 0;
   }
 
   return Math.max(0, Math.min(value, 1));
-}
-
-function sumPretextLineTextLength(
-  lines: Array<{ fragments: Array<{ text: string }> }>,
-  start = 0,
-  end = lines.length
-): number {
-  let total = 0;
-  for (let index = start; index < end; index += 1) {
-    const line = lines[index];
-    if (!line) {
-      continue;
-    }
-    total += line.fragments.reduce(
-      (lineTotal, fragment) => lineTotal + Array.from(fragment.text).length,
-      0
-    );
-  }
-  return total;
-}
-
-function resolveInlineOffsetAtClientPoint(input: {
-  textRun: HTMLElement;
-  clientX: number;
-  clientY: number;
-  inlineStart: number;
-  inlineEnd: number;
-}): number {
-  const textLength = Array.from(input.textRun.textContent ?? "").length;
-  const maxOffset = Math.max(input.inlineStart, input.inlineEnd);
-  const minOffset = Math.min(input.inlineStart, input.inlineEnd);
-  if (textLength <= 0 || maxOffset <= minOffset) {
-    return minOffset;
-  }
-
-  const localOffset = resolveLocalTextOffsetAtClientPoint({
-    textRun: input.textRun,
-    clientX: input.clientX,
-    clientY: input.clientY,
-    textLength
-  });
-  const maxReadableInlineOffset = Math.max(
-    input.inlineStart,
-    input.inlineEnd - 1
-  );
-  return Math.max(
-    input.inlineStart,
-    Math.min(maxReadableInlineOffset, input.inlineStart + localOffset)
-  );
-}
-
-function resolveLocalTextOffsetAtClientPoint(input: {
-  textRun: HTMLElement;
-  clientX: number;
-  clientY: number;
-  textLength: number;
-}): number {
-  const documentWithCaret = document as Document & {
-    caretPositionFromPoint?: (
-      x: number,
-      y: number
-    ) => { offsetNode: Node | null; offset: number } | null;
-    caretRangeFromPoint?: (x: number, y: number) => Range | null;
-  };
-  const firstTextNode = input.textRun.firstChild;
-
-  const caretPosition = documentWithCaret.caretPositionFromPoint?.(
-    input.clientX,
-    input.clientY
-  );
-  if (
-    caretPosition?.offsetNode &&
-    input.textRun.contains(caretPosition.offsetNode)
-  ) {
-    return Math.max(0, Math.min(input.textLength, caretPosition.offset));
-  }
-
-  const caretRange = documentWithCaret.caretRangeFromPoint?.(
-    input.clientX,
-    input.clientY
-  );
-  if (
-    caretRange?.startContainer &&
-    input.textRun.contains(caretRange.startContainer)
-  ) {
-    return Math.max(0, Math.min(input.textLength, caretRange.startOffset));
-  }
-
-  if (!(firstTextNode instanceof Text)) {
-    return 0;
-  }
-
-  const rect = input.textRun.getBoundingClientRect();
-  if (rect.width <= 0) {
-    return 0;
-  }
-
-  const ratio = Math.max(
-    0,
-    Math.min(1, (input.clientX - rect.left) / rect.width)
-  );
-  return Math.max(
-    0,
-    Math.min(input.textLength, Math.round(ratio * input.textLength))
-  );
-}
-
-function resolveCanvasTextPosition(input: {
-  container: HTMLElement;
-  sectionId: string;
-  blockId: string;
-  inlineOffset: number;
-  bias: "start" | "end";
-}): { node: Text; offset: number } | null {
-  const selectorValue = escapeAttributeSelectorValue(input.blockId);
-  const runs = Array.from(
-    input.container.querySelectorAll<HTMLElement>(
-      `.epub-text-run[data-reader-section-id="${escapeAttributeSelectorValue(
-        input.sectionId
-      )}"][data-reader-block-id="${selectorValue}"]`
-    )
-  );
-  if (runs.length === 0) {
-    return null;
-  }
-
-  const clampedOffset = Math.max(0, Math.trunc(input.inlineOffset));
-  for (let index = 0; index < runs.length; index += 1) {
-    const run = runs[index];
-    if (!run) {
-      continue;
-    }
-
-    const runStart =
-      Number.parseInt(run.dataset.readerInlineStart ?? "0", 10) || 0;
-    const fallbackTextLength = Array.from(run.textContent ?? "").length;
-    const runEnd =
-      Number.parseInt(
-        run.dataset.readerInlineEnd ?? `${runStart + fallbackTextLength}`,
-        10
-      ) || runStart + fallbackTextLength;
-    const isBoundary = clampedOffset === runEnd;
-    const matches =
-      clampedOffset < runEnd ||
-      (clampedOffset === runStart && input.bias === "start") ||
-      (isBoundary && (input.bias === "end" || index === runs.length - 1));
-    if (!matches) {
-      continue;
-    }
-
-    const textNode = run.firstChild;
-    if (!(textNode instanceof Text)) {
-      return null;
-    }
-
-    const localOffset =
-      input.bias === "end" && clampedOffset >= runEnd
-        ? (textNode.textContent?.length ?? 0)
-        : Math.max(
-            0,
-            Math.min(
-              textNode.textContent?.length ?? 0,
-              clampedOffset - runStart
-            )
-          );
-    return {
-      node: textNode,
-      offset: localOffset
-    };
-  }
-
-  const lastRun = runs.at(-1);
-  const textNode = lastRun?.firstChild;
-  return textNode instanceof Text
-    ? {
-        node: textNode,
-        offset: textNode.textContent?.length ?? 0
-      }
-    : null;
 }
 
 function getRenderedSectionHeight(element: HTMLElement): number {
@@ -7116,94 +6282,6 @@ function findMatchingSelectableBlockIndex(
   return -1;
 }
 
-function findBlockById(blocks: BlockNode[], blockId: string): BlockNode | null {
-  for (const block of blocks) {
-    if (block.id === blockId) {
-      return block;
-    }
-
-    const nested = findNestedBlockById(block, blockId);
-    if (nested) {
-      return nested;
-    }
-  }
-
-  return null;
-}
-
 function escapeAttributeSelectorValue(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
-}
-
-function resolveRenderableBlockId(
-  blocks: BlockNode[],
-  blockId: string
-): string | undefined {
-  for (const block of blocks) {
-    if (block.id === blockId) {
-      return block.id;
-    }
-
-    if (findNestedBlockById(block, blockId)) {
-      return block.id;
-    }
-  }
-
-  return undefined;
-}
-
-function findNestedBlockById(
-  block: BlockNode,
-  blockId: string
-): BlockNode | null {
-  switch (block.kind) {
-    case "quote":
-    case "aside":
-    case "nav":
-    case "figure":
-      return findBlockById(
-        block.kind === "figure"
-          ? [...block.blocks, ...(block.caption ?? [])]
-          : block.blocks,
-        blockId
-      );
-    case "list":
-      for (const item of block.items) {
-        const nested = findBlockById(item.blocks, blockId);
-        if (nested) {
-          return nested;
-        }
-      }
-      return null;
-    case "table":
-      for (const candidate of [
-        ...(block.caption ?? []),
-        ...block.rows.flatMap((row) => row.cells.flatMap((cell) => cell.blocks))
-      ]) {
-        if (candidate.id === blockId) {
-          return candidate;
-        }
-        const nested = findNestedBlockById(candidate, blockId);
-        if (nested) {
-          return nested;
-        }
-      }
-      return null;
-    case "definition-list":
-      for (const item of block.items) {
-        const nested = findBlockById(
-          [
-            ...item.term,
-            ...item.descriptions.flatMap((description) => description)
-          ],
-          blockId
-        );
-        if (nested) {
-          return nested;
-        }
-      }
-      return null;
-    default:
-      return null;
-  }
 }

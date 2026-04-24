@@ -125,7 +125,6 @@ describe("EpubReader spread context", () => {
       toc: [],
       sections: [section]
     }
-
     ;(
       reader as unknown as {
         chapterRenderInputs: Array<{
@@ -207,9 +206,18 @@ describe("EpubReader spread context", () => {
       }
     }
 
-    expect(state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutRenderWidth).toBe(588)
-    expect(state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutRenderHeight).toBe(784)
-    expect(state.createDomRenderInput(section, state.chapterRenderInputs[0]!).fixedLayoutScale).toBe(0.49)
+    expect(
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!)
+        .fixedLayoutRenderWidth
+    ).toBe(588)
+    expect(
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!)
+        .fixedLayoutRenderHeight
+    ).toBe(784)
+    expect(
+      state.createDomRenderInput(section, state.chapterRenderInputs[0]!)
+        .fixedLayoutScale
+    ).toBe(0.49)
     expect(reader.getRenderDiagnostics()).toMatchObject({
       spreadMode: "auto",
       pageSpreadPlacement: "right",
@@ -238,11 +246,17 @@ describe("EpubReader spread context", () => {
         renditionSpread: "both"
       },
       manifest: [],
-      spine: [{ idref: "item-1", href: section.href, linear: true, pageSpreadPlacement: "left" }],
+      spine: [
+        {
+          idref: "item-1",
+          href: section.href,
+          linear: true,
+          pageSpreadPlacement: "left"
+        }
+      ],
       toc: [],
       sections: [section]
     }
-
     ;(
       reader as unknown as {
         chapterRenderInputs: Array<{
@@ -306,9 +320,15 @@ describe("EpubReader spread context", () => {
       currentPage: 1,
       totalPages: 2
     })
-    expect(container.querySelector('[data-spread-slot="left"].epub-dom-spread-slot-blank')).not.toBeNull()
     expect(
-      container.querySelector('[data-spread-slot="right"] .epub-dom-section')?.getAttribute("data-section-id")
+      container.querySelector(
+        '[data-spread-slot="left"].epub-dom-spread-slot-blank'
+      )
+    ).not.toBeNull()
+    expect(
+      container
+        .querySelector('[data-spread-slot="right"] .epub-dom-section')
+        ?.getAttribute("data-section-id")
     ).toBe("section-1")
 
     await reader.goToPage(2)
@@ -318,15 +338,18 @@ describe("EpubReader spread context", () => {
     })
 
     expect(
-      container.querySelector('[data-spread-slot="left"] .epub-dom-section')?.getAttribute("data-section-id")
+      container
+        .querySelector('[data-spread-slot="left"] .epub-dom-section')
+        ?.getAttribute("data-section-id")
     ).toBe("section-2")
     expect(
-      container.querySelector('[data-spread-slot="right"] .epub-dom-section')?.getAttribute("data-section-id")
+      container
+        .querySelector('[data-spread-slot="right"] .epub-dom-section')
+        ?.getAttribute("data-section-id")
     ).toBe("section-3")
-    expect(reader.getVisibleSectionDiagnostics().map((entry) => entry.sectionId)).toEqual([
-      "section-2",
-      "section-3"
-    ])
+    expect(
+      reader.getVisibleSectionDiagnostics().map((entry) => entry.sectionId)
+    ).toEqual(["section-2", "section-3"])
   })
 
   it("navigates between paired spreads instead of single fixed-layout pages", async () => {
@@ -360,19 +383,27 @@ describe("EpubReader spread context", () => {
     await reader.next()
     expect(reader.getPaginationInfo().currentPage).toBe(2)
     expect(
-      container.querySelector('[data-spread-slot="left"] .epub-dom-section')?.getAttribute("data-section-id")
+      container
+        .querySelector('[data-spread-slot="left"] .epub-dom-section')
+        ?.getAttribute("data-section-id")
     ).toBe("section-2")
     expect(
-      container.querySelector('[data-spread-slot="right"] .epub-dom-section')?.getAttribute("data-section-id")
+      container
+        .querySelector('[data-spread-slot="right"] .epub-dom-section')
+        ?.getAttribute("data-section-id")
     ).toBe("section-3")
 
     await reader.next()
     expect(reader.getPaginationInfo().currentPage).toBe(3)
     expect(
-      container.querySelector('[data-spread-slot="left"] .epub-dom-section')?.getAttribute("data-section-id")
+      container
+        .querySelector('[data-spread-slot="left"] .epub-dom-section')
+        ?.getAttribute("data-section-id")
     ).toBe("section-4")
     expect(
-      container.querySelector('[data-spread-slot="right"] .epub-dom-section')?.getAttribute("data-section-id")
+      container
+        .querySelector('[data-spread-slot="right"] .epub-dom-section')
+        ?.getAttribute("data-section-id")
     ).toBe("section-5")
 
     await reader.prev()
@@ -409,10 +440,14 @@ describe("EpubReader spread context", () => {
       totalPages: 3
     })
     expect(
-      container.querySelector('[data-spread-slot="left"] .epub-dom-section')?.getAttribute("data-section-id")
+      container
+        .querySelector('[data-spread-slot="left"] .epub-dom-section')
+        ?.getAttribute("data-section-id")
     ).toBe("section-4")
     expect(
-      container.querySelector('[data-spread-slot="right"] .epub-dom-section')?.getAttribute("data-section-id")
+      container
+        .querySelector('[data-spread-slot="right"] .epub-dom-section')
+        ?.getAttribute("data-section-id")
     ).toBe("section-5")
 
     const bookmark = reader.createBookmark({ label: "spread-third" })
@@ -445,7 +480,6 @@ describe("EpubReader spread context", () => {
         children: []
       }
     ]
-
     ;(reader as unknown as { book: Book }).book = book
     ;(
       reader as unknown as {
@@ -493,8 +527,12 @@ describe("EpubReader spread context", () => {
     ).chapterRenderInputs = createFixedLayoutInputs(book)
 
     await reader.render()
-    const blankLeft = container.querySelector<HTMLElement>('[data-spread-slot="left"]')
-    blankLeft?.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 120, clientY: 400 }))
+    const blankLeft = container.querySelector<HTMLElement>(
+      '[data-spread-slot="left"]'
+    )
+    blankLeft?.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, clientX: 120, clientY: 400 })
+    )
     await Promise.resolve()
     await Promise.resolve()
     expect(reader.getPaginationInfo().currentPage).toBe(1)
@@ -533,7 +571,13 @@ describe("EpubReader spread context", () => {
         {
           id: "text-1",
           kind: "text",
-          inlines: [{ kind: "link", href: "OPS/fxl-2.xhtml", children: [{ kind: "text", text: "Next page" }] }]
+          inlines: [
+            {
+              kind: "link",
+              href: "OPS/fxl-2.xhtml",
+              children: [{ kind: "text", text: "Next page" }]
+            }
+          ]
         }
       ]
     })
@@ -559,7 +603,9 @@ describe("EpubReader spread context", () => {
     ;(reader as unknown as { book: Book }).book = book
     ;(
       reader as unknown as {
-        chapterRenderInputs: Array<ReturnType<typeof createSharedChapterRenderInput>>
+        chapterRenderInputs: Array<
+          ReturnType<typeof createSharedChapterRenderInput>
+        >
       }
     ).chapterRenderInputs = [
       createSharedChapterRenderInput({
@@ -573,7 +619,9 @@ describe("EpubReader spread context", () => {
     ]
 
     await reader.render()
-    const link = container.querySelector<HTMLAnchorElement>('a[href="OPS/fxl-2.xhtml"]')
+    const link = container.querySelector<HTMLAnchorElement>(
+      'a[href="OPS/fxl-2.xhtml"]'
+    )
     link?.dispatchEvent(
       new MouseEvent("click", {
         bubbles: true,
@@ -630,7 +678,9 @@ describe("EpubReader spread context", () => {
     ;(reader as unknown as { book: Book }).book = book
     ;(
       reader as unknown as {
-        chapterRenderInputs: Array<ReturnType<typeof createSharedChapterRenderInput>>
+        chapterRenderInputs: Array<
+          ReturnType<typeof createSharedChapterRenderInput>
+        >
       }
     ).chapterRenderInputs = [
       createSharedChapterRenderInput({
@@ -685,25 +735,38 @@ describe("EpubReader spread context", () => {
       blockId: "right-note",
       progressInSection: 0
     })
+    reader.setDebugMode(true)
 
     expect(reader.getPaginationInfo()).toEqual({
       currentPage: 2,
       totalPages: 2
     })
-    expect(container.querySelector("#left-search")?.classList.contains("epub-dom-decoration-search-hit")).toBe(
-      true
-    )
-    expect(container.querySelector("#right-note")?.classList.contains("epub-dom-decoration-highlight")).toBe(
-      true
-    )
-    expect(container.querySelector("#right-note")?.classList.contains("epub-dom-decoration-active")).toBe(
-      true
-    )
+    expect(
+      container
+        .querySelector("#left-search")
+        ?.classList.contains("epub-dom-decoration-search-hit")
+    ).toBe(true)
+    expect(
+      container
+        .querySelector("#right-note")
+        ?.classList.contains("epub-dom-decoration-highlight")
+    ).toBe(true)
+    expect(
+      container
+        .querySelector("#right-note")
+        ?.classList.contains("epub-dom-decoration-active")
+    ).toBe(true)
   })
 
   it("realigns spread search results precisely and exposes annotation viewport snapshots", async () => {
-    const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight")
-    const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight")
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight"
+    )
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight"
+    )
     const originalGetBoundingClientRect = Object.getOwnPropertyDescriptor(
       HTMLElement.prototype,
       "getBoundingClientRect"
@@ -839,19 +902,21 @@ describe("EpubReader spread context", () => {
             }
           }
 
-          return originalGetBoundingClientRect?.value?.call(this) ?? {
-            x: 0,
-            y: 0,
-            left: 0,
-            top: 0,
-            right: 0,
-            bottom: 0,
-            width: 0,
-            height: 0,
-            toJSON() {
-              return this
+          return (
+            originalGetBoundingClientRect?.value?.call(this) ?? {
+              x: 0,
+              y: 0,
+              left: 0,
+              top: 0,
+              right: 0,
+              bottom: 0,
+              width: 0,
+              height: 0,
+              toJSON() {
+                return this
+              }
             }
-          }
+          )
         }
       })
 
@@ -906,7 +971,9 @@ describe("EpubReader spread context", () => {
       ;(reader as unknown as { book: Book }).book = book
       ;(
         reader as unknown as {
-          chapterRenderInputs: Array<ReturnType<typeof createSharedChapterRenderInput>>
+          chapterRenderInputs: Array<
+            ReturnType<typeof createSharedChapterRenderInput>
+          >
         }
       ).chapterRenderInputs = [
         createSharedChapterRenderInput({
@@ -935,8 +1002,12 @@ describe("EpubReader spread context", () => {
       expect(container.scrollTop).toBe(0)
       expect(reader.getCurrentLocation()?.spineIndex).toBe(2)
       expect(reader.getCurrentLocation()?.blockId).toBe("right-match")
-      expect(reader.getCurrentLocation()?.progressInSection ?? 0).toBeGreaterThan(0.27)
-      expect(reader.getCurrentLocation()?.progressInSection ?? 0).toBeLessThan(0.31)
+      expect(
+        reader.getCurrentLocation()?.progressInSection ?? 0
+      ).toBeGreaterThan(0.27)
+      expect(reader.getCurrentLocation()?.progressInSection ?? 0).toBeLessThan(
+        0.31
+      )
 
       const leftResults = await reader.search("Left spread query")
       expect(leftResults).toHaveLength(1)
@@ -948,8 +1019,12 @@ describe("EpubReader spread context", () => {
       expect(container.scrollTop).toBe(0)
       expect(reader.getCurrentLocation()?.spineIndex).toBe(1)
       expect(reader.getCurrentLocation()?.blockId).toBe("left-match")
-      expect(reader.getCurrentLocation()?.progressInSection ?? 0).toBeGreaterThan(0.14)
-      expect(reader.getCurrentLocation()?.progressInSection ?? 0).toBeLessThan(0.18)
+      expect(
+        reader.getCurrentLocation()?.progressInSection ?? 0
+      ).toBeGreaterThan(0.14)
+      expect(reader.getCurrentLocation()?.progressInSection ?? 0).toBeLessThan(
+        0.18
+      )
 
       reader.setAnnotations([
         {
@@ -991,9 +1066,15 @@ describe("EpubReader spread context", () => {
       ])
 
       const snapshots = reader.getAnnotationViewportSnapshots()
-      const hiddenSnapshot = snapshots.find((snapshot) => snapshot.annotation.id === "annotation-hidden")
-      const leftSnapshot = snapshots.find((snapshot) => snapshot.annotation.id === "annotation-left")
-      const rightSnapshot = snapshots.find((snapshot) => snapshot.annotation.id === "annotation-right")
+      const hiddenSnapshot = snapshots.find(
+        (snapshot) => snapshot.annotation.id === "annotation-hidden"
+      )
+      const leftSnapshot = snapshots.find(
+        (snapshot) => snapshot.annotation.id === "annotation-left"
+      )
+      const rightSnapshot = snapshots.find(
+        (snapshot) => snapshot.annotation.id === "annotation-right"
+      )
 
       expect(hiddenSnapshot?.visible).toBe(false)
       expect(hiddenSnapshot?.rects).toEqual([])
@@ -1022,10 +1103,18 @@ describe("EpubReader spread context", () => {
       ])
     } finally {
       if (originalOffsetHeight) {
-        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight)
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "offsetHeight",
+          originalOffsetHeight
+        )
       }
       if (originalScrollHeight) {
-        Object.defineProperty(HTMLElement.prototype, "scrollHeight", originalScrollHeight)
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollHeight",
+          originalScrollHeight
+        )
       }
       if (originalGetBoundingClientRect) {
         Object.defineProperty(
@@ -1038,8 +1127,14 @@ describe("EpubReader spread context", () => {
   })
 
   it("maps locators, viewport points, and dom hit tests across paired spread slots", async () => {
-    const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight")
-    const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight")
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight"
+    )
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight"
+    )
     const originalGetBoundingClientRect = Object.getOwnPropertyDescriptor(
       HTMLElement.prototype,
       "getBoundingClientRect"
@@ -1194,19 +1289,21 @@ describe("EpubReader spread context", () => {
             }
           }
 
-          return originalGetBoundingClientRect?.value?.call(this) ?? {
-            x: 0,
-            y: 0,
-            left: 0,
-            top: 0,
-            right: 0,
-            bottom: 0,
-            width: 0,
-            height: 0,
-            toJSON() {
-              return this
+          return (
+            originalGetBoundingClientRect?.value?.call(this) ?? {
+              x: 0,
+              y: 0,
+              left: 0,
+              top: 0,
+              right: 0,
+              bottom: 0,
+              width: 0,
+              height: 0,
+              toJSON() {
+                return this
+              }
             }
-          }
+          )
         }
       })
 
@@ -1246,7 +1343,9 @@ describe("EpubReader spread context", () => {
       ;(reader as unknown as { book: Book }).book = book
       ;(
         reader as unknown as {
-          chapterRenderInputs: Array<ReturnType<typeof createSharedChapterRenderInput>>
+          chapterRenderInputs: Array<
+            ReturnType<typeof createSharedChapterRenderInput>
+          >
         }
       ).chapterRenderInputs = [
         createSharedChapterRenderInput({
@@ -1331,10 +1430,18 @@ describe("EpubReader spread context", () => {
       })
     } finally {
       if (originalOffsetHeight) {
-        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight)
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "offsetHeight",
+          originalOffsetHeight
+        )
       }
       if (originalScrollHeight) {
-        Object.defineProperty(HTMLElement.prototype, "scrollHeight", originalScrollHeight)
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollHeight",
+          originalScrollHeight
+        )
       }
       if (originalGetBoundingClientRect) {
         Object.defineProperty(

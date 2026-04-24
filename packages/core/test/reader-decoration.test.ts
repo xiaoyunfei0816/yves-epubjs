@@ -48,6 +48,7 @@ describe("EpubReader decorations", () => {
       blockId: "text-1",
       progressInSection: 0
     })
+    reader.setDebugMode(true)
 
     expect(reader.getDecorations("current-location")).toEqual([
       {
@@ -133,8 +134,10 @@ describe("EpubReader decorations", () => {
       ]
     })
 
-    expect(container.querySelector("#details")?.classList.contains("epub-dom-decoration-highlight")).toBe(
-      true
-    )
+    expect(
+      container
+        .querySelector("#details")
+        ?.classList.contains("epub-dom-decoration-highlight")
+    ).toBe(true)
   })
 })
