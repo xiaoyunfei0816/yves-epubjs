@@ -6,37 +6,16 @@ import type {
   SectionDocument,
   SerializedLocator
 } from "../model/types"
+import {
+  isFiniteLocatorNumber,
+  normalizeLocator,
+  normalizeLocatorInlineOffset,
+  normalizeLocatorProgress,
+  normalizeLocatorSpineIndex,
+  normalizeOptionalLocatorString
+} from "../model/locator-domain"
 import { collectBlockIdsInReadingOrder } from "./reader-domain"
-
-export function normalizeLocator(locator: Locator): Locator {
-  const normalized: Locator = {
-    spineIndex: normalizeSpineIndex(locator.spineIndex)
-  }
-
-  const blockId = normalizeOptionalString(locator.blockId)
-  const anchorId = normalizeOptionalString(locator.anchorId)
-  const cfi = normalizeOptionalString(locator.cfi)
-  const inlineOffset = normalizeInlineOffset(locator.inlineOffset)
-  const progressInSection = normalizeProgress(locator.progressInSection)
-
-  if (blockId) {
-    normalized.blockId = blockId
-  }
-  if (anchorId) {
-    normalized.anchorId = anchorId
-  }
-  if (inlineOffset !== undefined) {
-    normalized.inlineOffset = inlineOffset
-  }
-  if (cfi) {
-    normalized.cfi = cfi
-  }
-  if (progressInSection !== undefined) {
-    normalized.progressInSection = progressInSection
-  }
-
-  return normalized
-}
+export { normalizeLocator } from "../model/locator-domain"
 
 export function serializeLocator(input: {
   locator: Locator
@@ -66,16 +45,16 @@ export function deserializeLocator(raw: unknown): SerializedLocator | null {
 
   const next: SerializedLocator = {}
 
-  if (isFiniteNumber(value.spineIndex)) {
-    next.spineIndex = normalizeSpineIndex(value.spineIndex)
+  if (isFiniteLocatorNumber(value.spineIndex)) {
+    next.spineIndex = normalizeLocatorSpineIndex(value.spineIndex)
   }
 
-  const href = normalizeOptionalString(value.href)
-  const blockId = normalizeOptionalString(value.blockId)
-  const anchorId = normalizeOptionalString(value.anchorId)
-  const cfi = normalizeOptionalString(value.cfi)
-  const inlineOffset = normalizeInlineOffset(value.inlineOffset)
-  const progressInSection = normalizeProgress(value.progressInSection)
+  const href = normalizeOptionalLocatorString(value.href)
+  const blockId = normalizeOptionalLocatorString(value.blockId)
+  const anchorId = normalizeOptionalLocatorString(value.anchorId)
+  const cfi = normalizeOptionalLocatorString(value.cfi)
+  const inlineOffset = normalizeLocatorInlineOffset(value.inlineOffset)
+  const progressInSection = normalizeLocatorProgress(value.progressInSection)
 
   if (href) {
     next.href = href
@@ -114,7 +93,7 @@ export function restoreLocatorWithDiagnostics(input: {
     ? input.locator
     : serializeLocator({ locator: input.locator, book: input.book })
   const requestedPrecision = getLocatorPrecision(serialized)
-  const cfi = normalizeOptionalString(serialized.cfi)
+  const cfi = normalizeOptionalLocatorString(serialized.cfi)
   const parsedCfi = cfi ? parseLocatorCfi(cfi) : null
   const sectionMatch = resolveSectionMatch({
     book: input.book,
@@ -132,7 +111,7 @@ export function restoreLocatorWithDiagnostics(input: {
         reason:
           requestedPrecision === "cfi" &&
           !hasResolvableHref(serialized) &&
-          !isFiniteNumber(serialized.spineIndex)
+          !isFiniteLocatorNumber(serialized.spineIndex)
             ? "invalid-locator"
             : "section-not-found",
         ...(sectionMatch.matchedBy ? { matchedBy: sectionMatch.matchedBy } : {})
@@ -154,10 +133,10 @@ export function restoreLocatorWithDiagnostics(input: {
     }
   }
 
-  const anchorId = normalizeOptionalString(serialized.anchorId)
-  const blockId = normalizeOptionalString(serialized.blockId)
-  const inlineOffset = normalizeInlineOffset(serialized.inlineOffset)
-  const progressInSection = normalizeProgress(serialized.progressInSection)
+  const anchorId = normalizeOptionalLocatorString(serialized.anchorId)
+  const blockId = normalizeOptionalLocatorString(serialized.blockId)
+  const inlineOffset = normalizeLocatorInlineOffset(serialized.inlineOffset)
+  const progressInSection = normalizeLocatorProgress(serialized.progressInSection)
   const resolvedInlineOffset = inlineOffset ?? parsedCfi?.inlineOffset
 
   const cfiTarget = parsedCfi ? resolveCfiTarget(section, parsedCfi) : null
@@ -247,16 +226,16 @@ export function restoreLocatorWithDiagnostics(input: {
 }
 
 export function getLocatorPrecision(locator: Locator | SerializedLocator): LocatorPrecision {
-  if (normalizeOptionalString(locator.cfi)) {
+  if (normalizeOptionalLocatorString(locator.cfi)) {
     return "cfi"
   }
-  if (normalizeOptionalString(locator.anchorId)) {
+  if (normalizeOptionalLocatorString(locator.anchorId)) {
     return "anchor"
   }
-  if (normalizeOptionalString(locator.blockId)) {
+  if (normalizeOptionalLocatorString(locator.blockId)) {
     return "block"
   }
-  if (normalizeProgress(locator.progressInSection) !== undefined) {
+  if (normalizeLocatorProgress(locator.progressInSection) !== undefined) {
     return "progress"
   }
   return "section"
@@ -269,8 +248,8 @@ export function resolveSectionIndexForLocator(
   return resolveSectionMatch({
     book,
     locator,
-    parsedCfi: normalizeOptionalString(locator.cfi)
-      ? parseLocatorCfi(normalizeOptionalString(locator.cfi)!)
+    parsedCfi: normalizeOptionalLocatorString(locator.cfi)
+      ? parseLocatorCfi(normalizeOptionalLocatorString(locator.cfi)!)
       : null
   }).index
 }
@@ -288,7 +267,7 @@ function resolveSectionMatch(input: {
     }
   }
 
-  const href = "href" in input.locator ? normalizeOptionalString(input.locator.href) : undefined
+  const href = "href" in input.locator ? normalizeOptionalLocatorString(input.locator.href) : undefined
   if (href) {
     const normalizedTargetHref = normalizeBookHref(href)
     const hrefIndex = input.book.sections.findIndex((section) => {
@@ -307,8 +286,8 @@ function resolveSectionMatch(input: {
     }
   }
 
-  if (isFiniteNumber(input.locator.spineIndex)) {
-    const normalizedIndex = normalizeSpineIndex(input.locator.spineIndex)
+  if (isFiniteLocatorNumber(input.locator.spineIndex)) {
+    const normalizedIndex = normalizeLocatorSpineIndex(input.locator.spineIndex)
     return {
       index: normalizedIndex < input.book.sections.length ? normalizedIndex : -1,
       matchedBy: "spineIndex"
@@ -324,7 +303,7 @@ export function findBlockIdForAnchor(
   section: SectionDocument,
   anchorId: string
 ): string | undefined {
-  const normalizedAnchor = normalizeOptionalString(anchorId)
+  const normalizedAnchor = normalizeOptionalLocatorString(anchorId)
   if (!normalizedAnchor) {
     return undefined
   }
@@ -370,39 +349,7 @@ function isSerializedLocator(locator: Locator | SerializedLocator): locator is S
 }
 
 function hasResolvableHref(locator: Locator | SerializedLocator): boolean {
-  return "href" in locator && Boolean(normalizeOptionalString(locator.href))
-}
-
-function normalizeOptionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined
-}
-
-function normalizeInlineOffset(value: unknown): number | undefined {
-  if (!isFiniteNumber(value)) {
-    return undefined
-  }
-
-  return Math.max(0, Math.trunc(value))
-}
-
-function normalizeProgress(value: unknown): number | undefined {
-  if (!isFiniteNumber(value)) {
-    return undefined
-  }
-
-  return Math.max(0, Math.min(value, 1))
-}
-
-function normalizeSpineIndex(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 0
-  }
-
-  return Math.max(0, Math.trunc(value))
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value)
+  return "href" in locator && Boolean(normalizeOptionalLocatorString(locator.href))
 }
 
 function normalizeBookHref(href: string): string {
@@ -479,12 +426,12 @@ function resolvePreferredCfiQualifier(
   explicitAnchorId?: string,
   explicitBlockId?: string
 ): string | undefined {
-  const normalizedExplicitAnchorId = normalizeOptionalString(explicitAnchorId)
+  const normalizedExplicitAnchorId = normalizeOptionalLocatorString(explicitAnchorId)
   if (normalizedExplicitAnchorId && section.anchors[normalizedExplicitAnchorId] === blockId) {
     return normalizedExplicitAnchorId
   }
 
-  const normalizedExplicitBlockId = normalizeOptionalString(explicitBlockId)
+  const normalizedExplicitBlockId = normalizeOptionalLocatorString(explicitBlockId)
   if (normalizedExplicitBlockId === blockId) {
     return blockId
   }
@@ -497,7 +444,7 @@ function resolveBlockIdForProgress(
   section: SectionDocument,
   progressInSection: number | undefined
 ): string | undefined {
-  const normalizedProgress = normalizeProgress(progressInSection)
+  const normalizedProgress = normalizeLocatorProgress(progressInSection)
   const blockIds = collectBlockIdsInReadingOrder(section.blocks)
   if (normalizedProgress === undefined || blockIds.length === 0) {
     return undefined
@@ -515,7 +462,7 @@ type ParsedLocatorCfi = {
 }
 
 function parseLocatorCfi(cfi: string): ParsedLocatorCfi | null {
-  const normalized = normalizeOptionalString(cfi)
+  const normalized = normalizeOptionalLocatorString(cfi)
   if (!normalized) {
     return null
   }
@@ -550,11 +497,11 @@ function parseLocatorCfi(cfi: string): ParsedLocatorCfi | null {
 }
 
 function resolveSectionIndexFromCfi(book: Book, parsedCfi: ParsedLocatorCfi | null): number {
-  if (!parsedCfi || !isFiniteNumber(parsedCfi.spineIndex)) {
+  if (!parsedCfi || !isFiniteLocatorNumber(parsedCfi.spineIndex)) {
     return -1
   }
 
-  const spineIndex = normalizeSpineIndex(parsedCfi.spineIndex)
+  const spineIndex = normalizeLocatorSpineIndex(parsedCfi.spineIndex)
   return spineIndex < book.sections.length ? spineIndex : -1
 }
 
@@ -563,7 +510,7 @@ function resolveCfiTarget(
   parsedCfi: ParsedLocatorCfi
 ): { blockId?: string; anchorId?: string } | null {
   for (let index = parsedCfi.qualifierIds.length - 1; index >= 0; index -= 1) {
-    const qualifierId = normalizeOptionalString(parsedCfi.qualifierIds[index])
+    const qualifierId = normalizeOptionalLocatorString(parsedCfi.qualifierIds[index])
     if (!qualifierId) {
       continue
     }

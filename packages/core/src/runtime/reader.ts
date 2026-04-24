@@ -83,6 +83,16 @@ import { ReaderInteractionController } from "./reader-interaction-controller";
 import { ReaderNavigationController } from "./reader-navigation-controller";
 import { ReaderRenderOrchestrator } from "./reader-render-orchestrator";
 import {
+  ReaderAnnotationService,
+  type ResolvedAnnotationRange
+} from "./reader-annotation-service";
+import { ReaderDomPaginationService } from "./reader-dom-pagination-service";
+import {
+  ReaderScrollPositionService,
+  type ScrollAnchor
+} from "./reader-scroll-position-service";
+import type { RenderBehavior } from "./render-flow-types";
+import {
   mapCanvasTextLayerClientPointToLocator,
   resolveCanvasTextPosition
 } from "./canvas-text-locator";
@@ -122,14 +132,16 @@ import {
   normalizeTextRangeSelector,
   toTransparentHighlightColor
 } from "./reader-domain";
-import { findBlockById, resolveRenderableBlockId } from "./reader-block-tree";
+import {
+  collectSelectableBlocksInReadingOrder,
+  findBlockById,
+  resolveRenderableBlockId
+} from "./reader-block-tree";
 import {
   cloneReaderTextSelectionSnapshot,
-  cloneTextRangeSelector,
   flattenTextRange,
   hasActiveTextSelection,
   inflateFlattenedTextRange,
-  normalizeTextRangeForContext,
   readerTextSelectionSnapshotsEqual,
   resolveLeadingSelectionTarget,
   subtractFlattenedRange,
@@ -153,7 +165,6 @@ import { applyDomDecorations } from "./dom-decoration";
 import {
   findDomHitTargetAtPoint,
   mapDomLocatorToViewport,
-  mapDomTextRangeToViewport,
   mapDomPointToLocator
 } from "./dom-viewport-mapper";
 import { classifyNavigationHref } from "./external-boundary";
@@ -164,7 +175,6 @@ import { buildSearchResultsForSection } from "./search-results";
 import {
   buildPageDisplayList,
   buildPaginatedPages,
-  type PageBlockSlice,
   type ReaderPage
 } from "./paginated-render-plan";
 import {
@@ -193,14 +203,6 @@ import {
 } from "./renderable-resource-manager";
 import { ScrollCoordinator } from "./scroll-coordinator";
 
-type RenderBehavior = "relocate" | "preserve";
-
-type ScrollAnchor = {
-  sectionId: string;
-  offsetWithinSection: number;
-  fallbackScrollTop: number;
-};
-
 export type PaginationInfo = {
   currentPage: number;
   totalPages: number;
@@ -226,6 +228,9 @@ export class EpubReader {
   private readonly interactionController: ReaderInteractionController;
   private readonly navigationController: ReaderNavigationController;
   private readonly renderOrchestrator: ReaderRenderOrchestrator;
+  private readonly annotationService: ReaderAnnotationService;
+  private readonly domPaginationService = new ReaderDomPaginationService();
+  private readonly scrollPositionService = new ReaderScrollPositionService();
   private readonly sessionState: ReaderSessionState;
 
   private book: Book | null;
@@ -404,6 +409,17 @@ export class EpubReader {
         this.scheduleDeferredAnchorRealignment();
       }
     });
+    this.annotationService = new ReaderAnnotationService({
+      getBook: () => this.book,
+      getAnnotations: () => this.annotations,
+      getPublicationId: () => this.getPublicationId(),
+      getContainer: () => this.options.container,
+      getMode: () => this.mode,
+      getSectionElement: (sectionId) => this.getSectionElement(sectionId),
+      mapLocatorToViewport: (locator) => this.mapLocatorToViewport(locator),
+      resolveCanvasTextRangeViewportRects: (sectionId, textRange) =>
+        this.resolveCanvasTextRangeViewportRects(sectionId, textRange)
+    });
     this.interactionController = new ReaderInteractionController({
       getContainer: () => this.options.container,
       getMode: () => this.mode,
@@ -459,7 +475,7 @@ export class EpubReader {
         this.resolveDisplayPageNumberToLeafPage(pageNumber),
       findPageByNumber: (pageNumber) => this.findPageByNumber(pageNumber),
       createLocatorForPage: (page) =>
-        this.createLocatorForPage(page as unknown as ReaderPage),
+        this.createLocatorForPage(page),
       renderCurrentSection: () => this.renderCurrentSection(),
       emitRelocated: () => this.emitRelocated(),
       setCurrentPageNumber: (pageNumber) => {
@@ -526,10 +542,7 @@ export class EpubReader {
       ensurePages: (layout) => this.ensurePages(layout),
       resolveRenderedPage: (sectionId) => this.resolveRenderedPage(sectionId),
       renderPaginatedDomSpread: (page, renderVersion) =>
-        this.renderPaginatedDomSpread(
-          page as unknown as ReaderPage,
-          renderVersion
-        ),
+        this.renderPaginatedDomSpread(page, renderVersion),
       renderDomSection: (section, renderVersion) =>
         this.renderDomSection(section, renderVersion),
       syncMeasuredPaginatedDomPages: (section) =>
@@ -546,15 +559,11 @@ export class EpubReader {
       ) =>
         this.syncDomSectionStateAfterRender(
           renderBehavior,
-          preservedScrollAnchor as ScrollAnchor | null,
-          resolvedPage as ReaderPage | null
+          preservedScrollAnchor,
+          resolvedPage
         ),
       renderPaginatedCanvas: (section, currentPage, renderVersion) =>
-        this.renderPaginatedCanvas(
-          section,
-          currentPage as ReaderPage | null,
-          renderVersion
-        ),
+        this.renderPaginatedCanvas(section, currentPage, renderVersion),
       getContentWidth: () => this.getContentWidth(),
       getContainerClientHeight: () => this.options.container?.clientHeight ?? 0,
       updateScrollWindowBounds: () => this.updateScrollWindowBounds(),
@@ -562,7 +571,7 @@ export class EpubReader {
         this.renderScrollableCanvas(renderVersion),
       scrollToCurrentLocation: () => this.scrollToCurrentLocation(),
       restoreScrollAnchor: (anchor) =>
-        this.restoreScrollAnchor(anchor as ScrollAnchor | null),
+        this.restoreScrollAnchor(anchor),
       scrollToLocatorAnchor: () => this.scrollToLocatorAnchor(),
       syncCurrentPageFromSection: () => this.syncCurrentPageFromSection(),
       getProgressForCurrentLocator: () => this.getProgressForCurrentLocator(),
@@ -2287,36 +2296,12 @@ export class EpubReader {
     section: HTMLElement,
     page: ReaderPage
   ): void {
-    const viewport = section.closest<HTMLElement>(
-      "[data-page-viewport='true']"
-    );
-    if (!viewport) {
-      return;
-    }
-
-    const pageHeight = this.getPageHeight();
-    const targetOffset =
-      typeof page.offsetInSection === "number"
-        ? Math.max(0, page.offsetInSection)
-        : Math.max(0, page.pageNumberInSection - 1) * pageHeight;
-    const nextPage = this.findPageByNumber(page.pageNumber + 1);
-    const sectionHeight = Math.max(
-      pageHeight,
-      section.scrollHeight || section.offsetHeight || pageHeight
-    );
-    const visibleHeight =
-      nextPage?.sectionId === page.sectionId &&
-      typeof nextPage.offsetInSection === "number"
-        ? Math.max(
-            1,
-            Math.min(pageHeight, nextPage.offsetInSection - targetOffset)
-          )
-        : Math.max(1, Math.min(pageHeight, sectionHeight - targetOffset));
-    viewport.style.height = `${visibleHeight}px`;
-    section.style.position = "relative";
-    section.style.transform = `translateY(-${targetOffset}px)`;
-    section.style.transformOrigin = "top left";
-    section.style.willChange = "transform";
+    this.domPaginationService.positionPaginatedDomSection({
+      sectionElement: section,
+      page,
+      pageHeight: this.getPageHeight(),
+      pages: this.pages
+    });
   }
 
   private syncMeasuredPaginatedDomPages(
@@ -2326,134 +2311,23 @@ export class EpubReader {
       return null;
     }
 
-    if (
-      section.renditionLayout === "pre-paginated" ||
-      section.presentationRole === "cover" ||
-      section.presentationRole === "image-page"
-    ) {
+    const result = this.domPaginationService.syncMeasuredPaginatedDomPages({
+      container: this.options.container,
+      section,
+      currentSectionIndex: this.currentSectionIndex,
+      currentPageNumber: this.currentPageNumber,
+      pages: this.pages,
+      pageHeight: this.getPageHeight(),
+      locator: this.locator
+    });
+    if (!result) {
       return null;
     }
 
-    const selectorValue = escapeAttributeSelectorValue(section.id);
-    const sectionElement = this.options.container.querySelector<HTMLElement>(
-      `.epub-dom-section[data-section-id="${selectorValue}"]`
-    );
-    if (!sectionElement) {
-      return null;
-    }
-
-    const previousTransform = sectionElement.style.transform;
-    const previousTransformOrigin = sectionElement.style.transformOrigin;
-    const previousWillChange = sectionElement.style.willChange;
-
-    try {
-      sectionElement.style.transform = "translateY(0px)";
-      sectionElement.style.transformOrigin = "top left";
-      sectionElement.style.willChange = "auto";
-
-      const pageHeight = this.getPageHeight();
-      const sectionHeight = Math.max(
-        pageHeight,
-        sectionElement.scrollHeight || sectionElement.offsetHeight || pageHeight
-      );
-      const pageOffsets = measurePaginatedDomPageOffsets(
-        sectionElement,
-        pageHeight
-      );
-      const pageCount = Math.max(1, pageOffsets.length);
-      const seenBlockIdsByPage = Array.from(
-        { length: pageCount },
-        () => new Set<string>()
-      );
-      const pageBlocks = Array.from(
-        { length: pageCount },
-        () => [] as PageBlockSlice[]
-      );
-      const sectionRect = sectionElement.getBoundingClientRect();
-
-      const measuredElements = Array.from(
-        sectionElement.querySelectorAll<HTMLElement>("[data-reader-block-id]")
-      );
-      if (measuredElements.length === 0) {
-        return null;
-      }
-
-      for (const element of measuredElements) {
-        const blockId = element.dataset.readerBlockId?.trim();
-        if (!blockId) {
-          continue;
-        }
-
-        const block = findBlockById(section.blocks, blockId);
-        if (!block) {
-          continue;
-        }
-
-        const relativeTop = Math.max(
-          0,
-          element.getBoundingClientRect().top - sectionRect.top
-        );
-        const pageIndex = resolvePaginatedDomPageIndex(
-          relativeTop,
-          pageOffsets
-        );
-        const seenBlockIds = seenBlockIdsByPage[pageIndex];
-        const blocks = pageBlocks[pageIndex];
-        if (!seenBlockIds || !blocks || seenBlockIds.has(block.id)) {
-          continue;
-        }
-
-        seenBlockIds.add(block.id);
-        blocks.push({
-          type: "native",
-          block
-        });
-      }
-
-      const nextPages: ReaderPage[] = [];
-      const pagesBeforeSection = this.pages.filter(
-        (page) => page.spineIndex < this.currentSectionIndex
-      );
-      const pagesAfterSection = this.pages.filter(
-        (page) => page.spineIndex > this.currentSectionIndex
-      );
-      for (let index = 0; index < pageCount; index += 1) {
-        nextPages.push({
-          pageNumber: 0,
-          pageNumberInSection: index + 1,
-          totalPagesInSection: pageCount,
-          spineIndex: this.currentSectionIndex,
-          sectionId: section.id,
-          sectionHref: section.href,
-          offsetInSection: pageOffsets[index] ?? index * pageHeight,
-          blocks: pageBlocks[index] ?? []
-        });
-      }
-
-      this.pages = [
-        ...pagesBeforeSection,
-        ...nextPages,
-        ...pagesAfterSection
-      ].map((page, index) => ({
-        ...page,
-        pageNumber: index + 1
-      }));
-      this.sectionEstimatedHeights[this.currentSectionIndex] = Math.max(
-        sectionHeight,
-        pageCount * pageHeight
-      );
-
-      return this.locator
-        ? this.findPageForLocator({
-            ...this.locator,
-            spineIndex: this.currentSectionIndex
-          })
-        : this.findCurrentPageForSection(section.id);
-    } finally {
-      sectionElement.style.transform = previousTransform;
-      sectionElement.style.transformOrigin = previousTransformOrigin;
-      sectionElement.style.willChange = previousWillChange;
-    }
+    this.pages = result.pages;
+    this.sectionEstimatedHeights[this.currentSectionIndex] =
+      result.sectionEstimatedHeight;
+    return result.resolvedPage;
   }
 
   private resolveChapterRenderDecision(
@@ -4430,74 +4304,15 @@ export class EpubReader {
   }
 
   private findRenderedSectionIndexForOffset(offset: number): number {
-    const book = this.book;
-    const container = this.options.container;
-    if (!container || !book) {
+    if (!this.book) {
       return -1;
     }
 
-    const renderedSections = Array.from(
-      container.querySelectorAll<HTMLElement>("article[data-section-id]")
-    )
-      .map((element) => {
-        const sectionId = element.dataset.sectionId;
-        if (!sectionId) {
-          return null;
-        }
-
-        const sectionIndex = book.sections.findIndex(
-          (section) => section.id === sectionId
-        );
-        if (sectionIndex < 0) {
-          return null;
-        }
-
-        const height = getRenderedSectionHeight(element);
-        if (height <= 0) {
-          return null;
-        }
-
-        return {
-          sectionIndex,
-          top: element.offsetTop,
-          height
-        };
-      })
-      .filter(
-        (
-          entry
-        ): entry is {
-          sectionIndex: number;
-          top: number;
-          height: number;
-        } => entry !== null
-      )
-      .sort((left, right) => left.top - right.top);
-
-    if (renderedSections.length === 0) {
-      return -1;
-    }
-
-    const firstSection = renderedSections[0];
-    if (firstSection && offset < firstSection.top) {
-      return firstSection.sectionIndex;
-    }
-
-    for (let index = 0; index < renderedSections.length; index += 1) {
-      const entry = renderedSections[index];
-      if (!entry) {
-        continue;
-      }
-      const next = renderedSections[index + 1] ?? null;
-      if (offset < entry.top + entry.height) {
-        return entry.sectionIndex;
-      }
-      if (next && offset < next.top) {
-        return entry.sectionIndex;
-      }
-    }
-
-    return renderedSections[renderedSections.length - 1]?.sectionIndex ?? -1;
+    return this.scrollPositionService.findRenderedSectionIndexForOffset({
+      container: this.options.container,
+      sections: this.book.sections,
+      offset
+    });
   }
 
   private updateScrollWindowBounds(): void {
@@ -4507,14 +4322,13 @@ export class EpubReader {
       return;
     }
 
-    this.scrollWindowStart = Math.max(
-      0,
-      this.currentSectionIndex - EpubReader.SCROLL_WINDOW_RADIUS
-    );
-    this.scrollWindowEnd = Math.min(
-      this.book.sections.length - 1,
-      this.currentSectionIndex + EpubReader.SCROLL_WINDOW_RADIUS
-    );
+    const bounds = this.scrollPositionService.resolveScrollWindowBounds({
+      currentSectionIndex: this.currentSectionIndex,
+      sectionCount: this.book.sections.length,
+      radius: EpubReader.SCROLL_WINDOW_RADIUS
+    });
+    this.scrollWindowStart = bounds.start;
+    this.scrollWindowEnd = bounds.end;
   }
 
   private refreshScrollWindowIfNeeded(): boolean {
@@ -4522,34 +4336,20 @@ export class EpubReader {
       return false;
     }
 
-    if (
-      this.scrollWindowStart >= 0 &&
-      this.scrollWindowEnd >= 0 &&
-      this.currentSectionIndex >= this.scrollWindowStart &&
-      this.currentSectionIndex <= this.scrollWindowEnd
-    ) {
-      return false;
-    }
-
-    const nextStart = Math.max(
-      0,
-      this.currentSectionIndex - EpubReader.SCROLL_WINDOW_RADIUS
-    );
-    const nextEnd = Math.min(
-      this.book.sections.length - 1,
-      this.currentSectionIndex + EpubReader.SCROLL_WINDOW_RADIUS
-    );
-
-    if (
-      nextStart === this.scrollWindowStart &&
-      nextEnd === this.scrollWindowEnd
-    ) {
+    const nextBounds = this.scrollPositionService.shouldRefreshScrollWindow({
+      currentSectionIndex: this.currentSectionIndex,
+      sectionCount: this.book.sections.length,
+      radius: EpubReader.SCROLL_WINDOW_RADIUS,
+      scrollWindowStart: this.scrollWindowStart,
+      scrollWindowEnd: this.scrollWindowEnd
+    });
+    if (!nextBounds) {
       return false;
     }
 
     const scrollAnchor = this.captureScrollAnchor();
-    this.scrollWindowStart = nextStart;
-    this.scrollWindowEnd = nextEnd;
+    this.scrollWindowStart = nextBounds.start;
+    this.scrollWindowEnd = nextBounds.end;
     this.renderScrollableCanvas(this.renderVersion);
     this.restoreScrollAnchor(scrollAnchor);
     this.syncPositionFromScroll(false);
@@ -4666,63 +4466,9 @@ export class EpubReader {
   }
 
   private captureScrollAnchor(): ScrollAnchor | null {
-    if (!this.options.container || !this.book) {
-      return null;
-    }
-
-    const scrollTop = this.options.container.scrollTop;
-    const renderedSections = Array.from(
-      this.options.container.querySelectorAll<HTMLElement>(
-        "article[data-section-id]:not(.epub-section-virtual)"
-      )
-    )
-      .map((element) => {
-        const sectionId = element.dataset.sectionId;
-        if (!sectionId) {
-          return null;
-        }
-
-        const height = getRenderedSectionHeight(element);
-        if (height <= 0) {
-          return null;
-        }
-
-        return {
-          sectionId,
-          top: element.offsetTop,
-          height
-        };
-      })
-      .filter(
-        (
-          entry
-        ): entry is {
-          sectionId: string;
-          top: number;
-          height: number;
-        } => entry !== null
-      )
-      .sort((left, right) => left.top - right.top);
-
-    const renderedMatch =
-      renderedSections.find(
-        (entry) =>
-          scrollTop >= entry.top && scrollTop < entry.top + entry.height
-      ) ?? null;
-
-    if (renderedMatch) {
-      return {
-        sectionId: renderedMatch.sectionId,
-        offsetWithinSection: Math.max(0, scrollTop - renderedMatch.top),
-        fallbackScrollTop: scrollTop
-      };
-    }
-
-    return {
-      sectionId: "",
-      offsetWithinSection: 0,
-      fallbackScrollTop: scrollTop
-    };
+    return this.scrollPositionService.captureScrollAnchor({
+      container: this.options.container
+    });
   }
 
   private restoreScrollAnchor(anchor: ScrollAnchor | null): void {
@@ -4730,16 +4476,12 @@ export class EpubReader {
       return;
     }
 
-    if (!anchor || !anchor.sectionId) {
-      this.setProgrammaticScrollTop(
-        anchor?.fallbackScrollTop ?? this.options.container.scrollTop
-      );
-      return;
-    }
-
-    const sectionTop = this.getSectionTop(anchor.sectionId);
     this.setProgrammaticScrollTop(
-      Math.max(0, sectionTop + anchor.offsetWithinSection)
+      this.scrollPositionService.resolveScrollTopForAnchor({
+        anchor,
+        currentScrollTop: this.options.container.scrollTop,
+        getSectionTop: (sectionId) => this.getSectionTop(sectionId)
+      })
     );
   }
 
@@ -4783,20 +4525,10 @@ export class EpubReader {
       interactions: InteractionRegion[];
     }>
   ): InteractionRegion[] {
-    const regions: InteractionRegion[] = [];
-    for (const section of sections) {
-      const sectionTop = this.getSectionTop(section.sectionId);
-      for (const interaction of section.interactions) {
-        regions.push({
-          ...interaction,
-          rect: {
-            ...interaction.rect,
-            y: interaction.rect.y + sectionTop
-          }
-        });
-      }
-    }
-    return regions;
+    return this.scrollPositionService.offsetInteractionRegionsForScroll({
+      sections,
+      getSectionTop: (sectionId) => this.getSectionTop(sectionId)
+    });
   }
 
   private collectVisibleBoundsForScroll(
@@ -4811,32 +4543,10 @@ export class EpubReader {
       }>;
     }>
   ): VisibleDrawBounds {
-    const bounds: VisibleDrawBounds = [];
-    for (const section of sectionsToRender) {
-      if (!section.displayList) {
-        continue;
-      }
-      const sectionTop = this.getSectionTop(section.sectionId);
-      const renderWindows = section.renderWindows?.length
-        ? section.renderWindows
-        : [{ top: 0, height: section.displayList.height }];
-      for (const op of section.displayList.ops) {
-        const opBottom = op.rect.y + op.rect.height;
-        const intersectsWindow = renderWindows.some((window) => {
-          const renderTop = window.top;
-          const renderBottom = window.top + window.height;
-          return opBottom > renderTop && op.rect.y < renderBottom;
-        });
-        if (!intersectsWindow) {
-          continue;
-        }
-        bounds.push({
-          ...op.rect,
-          y: op.rect.y + sectionTop
-        });
-      }
-    }
-    return bounds;
+    return this.scrollPositionService.collectVisibleBoundsForScroll({
+      sectionsToRender,
+      getSectionTop: (sectionId) => this.getSectionTop(sectionId)
+    });
   }
 
   private getSectionElement(sectionId: string): HTMLElement | null {
@@ -5051,29 +4761,16 @@ export class EpubReader {
   }
 
   private findSectionIndexForOffset(offset: number): number {
-    const renderedSectionIndex = this.findRenderedSectionIndexForOffset(offset);
-    if (renderedSectionIndex >= 0) {
-      return renderedSectionIndex;
-    }
-
     if (!this.book) {
       return -1;
     }
 
-    let start = 0;
-    for (let index = 0; index < this.book.sections.length; index += 1) {
-      const section = this.book.sections[index];
-      if (!section) {
-        continue;
-      }
-      const end = start + this.getSectionHeight(section.id);
-      if (offset >= start && offset < end) {
-        return index;
-      }
-      start = end;
-    }
-
-    return this.book.sections.length - 1;
+    return this.scrollPositionService.findSectionIndexForOffset({
+      container: this.options.container,
+      sections: this.book.sections,
+      offset,
+      getSectionHeight: (sectionId) => this.getSectionHeight(sectionId)
+    });
   }
 
   private resolveSelectionTarget(node: Node | null): {
@@ -5292,195 +4989,42 @@ export class EpubReader {
   private resolveSelectionHighlightState(
     selection: ReaderTextSelectionSnapshot
   ): ReaderSelectionHighlightState {
-    if (!this.book || !selection.textRange) {
-      return {
-        mode: "highlight",
-        disabled: false
-      };
-    }
-
-    const section = this.book.sections[selection.locator.spineIndex];
-    if (!section) {
-      return {
-        mode: "highlight",
-        disabled: false
-      };
-    }
-
-    const context = this.createSectionTextRangeContext(section);
-    const selectionRange = this.normalizeTextRangeForSection(
-      selection.locator.spineIndex,
-      selection.textRange
-    );
-    if (!selectionRange) {
-      return {
-        mode: "highlight",
-        disabled: false
-      };
-    }
-
-    const flattenedSelection = flattenTextRange(selectionRange, context);
-    if (!flattenedSelection) {
-      return {
-        mode: "highlight",
-        disabled: false
-      };
-    }
-
-    let remainingRanges = [flattenedSelection];
-    for (const resolved of this.resolveAnnotationRangesForSection(
-      selection.locator.spineIndex
-    )) {
-      const flattened = flattenTextRange(resolved.range, context);
-      if (!flattened) {
-        continue;
-      }
-
-      remainingRanges = remainingRanges.flatMap((range) =>
-        subtractFlattenedRange(range, flattened)
-      );
-      if (remainingRanges.length === 0) {
-        return {
-          mode: "remove-highlight",
-          disabled: false
-        };
-      }
-    }
-
-    return {
-      mode: "highlight",
-      disabled: false
-    };
+    return this.annotationService.resolveSelectionHighlightState(selection);
   }
 
   private resolveAnnotationRangesForSection(
     spineIndex: number
   ): ResolvedAnnotationRange[] {
-    return this.annotations
-      .map((annotation) => this.resolveAnnotationRange(annotation))
-      .filter((entry): entry is ResolvedAnnotationRange =>
-        Boolean(entry && entry.spineIndex === spineIndex)
-      );
+    return this.annotationService.resolveAnnotationRangesForSection(spineIndex);
   }
 
   private resolveAnnotationRange(
     annotation: Annotation
   ): ResolvedAnnotationRange | null {
-    const book = this.book;
-    if (!book) {
-      return null;
-    }
-
-    const locator = restoreLocatorWithDiagnostics({
-      book,
-      locator: annotation.locator
-    }).locator;
-    if (!locator) {
-      return null;
-    }
-
-    const section = book.sections[locator.spineIndex];
-    if (!section) {
-      return null;
-    }
-
-    const range = annotation.textRange
-      ? this.normalizeTextRangeForSection(
-          locator.spineIndex,
-          annotation.textRange
-        )
-      : this.resolveFullBlockTextRange(section, locator.blockId);
-    if (!range) {
-      return null;
-    }
-
-    return {
-      annotation,
-      locator,
-      spineIndex: locator.spineIndex,
-      sectionId: section.id,
-      range
-    };
+    return this.annotationService.resolveAnnotationRange(annotation);
   }
 
   private createSectionTextRangeContext(
     section: SectionDocument
   ): SectionTextRangeContext {
-    const blocks = collectSelectableBlocksInReadingOrder(section.blocks);
-    const blockIds: string[] = [];
-    const blockTexts = new Map<string, string>();
-    const blockTextLengths = new Map<string, number>();
-    const blockOffsets = new Map<string, number>();
-    let cursor = 0;
-
-    for (const block of blocks) {
-      if (blockTexts.has(block.id)) {
-        continue;
-      }
-
-      const text = this.extractBlockText(block);
-      blockIds.push(block.id);
-      blockTexts.set(block.id, text);
-      blockTextLengths.set(block.id, Array.from(text).length);
-      blockOffsets.set(block.id, cursor);
-      cursor += Array.from(text).length;
-    }
-
-    return {
-      blockIds,
-      blockTexts,
-      blockTextLengths,
-      blockOffsets,
-      totalLength: cursor
-    };
+    return this.annotationService.createSectionTextRangeContext(section);
   }
 
   private normalizeTextRangeForSection(
     spineIndex: number,
     textRange: TextRangeSelector
   ): TextRangeSelector | null {
-    const section = this.book?.sections[spineIndex];
-    if (!section) {
-      return null;
-    }
-
-    const context = this.createSectionTextRangeContext(section);
-    return normalizeTextRangeForContext({
-      textRange,
-      context,
-      resolveBlockId: (blockId) =>
-        resolveRenderableBlockId(section.blocks, blockId) ?? blockId
-    });
+    return this.annotationService.normalizeTextRangeForSection(
+      spineIndex,
+      textRange
+    );
   }
 
   private resolveFullBlockTextRange(
     section: SectionDocument,
     blockId: string | undefined
   ): TextRangeSelector | null {
-    const normalizedBlockId = blockId?.trim();
-    if (!normalizedBlockId) {
-      return null;
-    }
-
-    const renderableBlockId =
-      resolveRenderableBlockId(section.blocks, normalizedBlockId) ??
-      normalizedBlockId;
-    const block = findBlockById(section.blocks, renderableBlockId);
-    if (!block) {
-      return null;
-    }
-
-    const blockTextLength = Array.from(this.extractBlockText(block)).length;
-    return {
-      start: {
-        blockId: renderableBlockId,
-        inlineOffset: 0
-      },
-      end: {
-        blockId: renderableBlockId,
-        inlineOffset: blockTextLength
-      }
-    };
+    return this.annotationService.resolveFullBlockTextRange(section, blockId);
   }
 
   private createAnnotationForResolvedRange(input: {
@@ -5491,122 +5035,24 @@ export class EpubReader {
     color?: string;
     note?: string;
   }): Annotation | null {
-    const publicationId =
-      input.annotation?.publicationId ?? this.getPublicationId();
-    if (!publicationId) {
-      return null;
-    }
-
-    const rangeLocator = normalizeLocator({
-      spineIndex: input.locator.spineIndex,
-      blockId: input.range.start.blockId,
-      inlineOffset: input.range.start.inlineOffset,
-      progressInSection: input.locator.progressInSection ?? 0
-    });
-    const quote = this.resolveTextRangeQuote(input.section, input.range);
-
-    return createReaderAnnotation({
-      publicationId,
-      locator: rangeLocator,
-      ...(this.book ? { book: this.book } : {}),
-      textRange: input.range,
-      ...(quote ? { quote } : {}),
-      ...(input.note ? { note: input.note } : {}),
-      ...(input.color ? { color: input.color } : {}),
-      ...(input.annotation ? { createdAt: input.annotation.createdAt } : {}),
-      ...(input.annotation ? { updatedAt: new Date().toISOString() } : {})
-    });
+    return this.annotationService.createAnnotationForResolvedRange(input);
   }
 
   private resolveTextRangeQuote(
     section: SectionDocument,
     textRange: TextRangeSelector
   ): string | undefined {
-    const context = this.createSectionTextRangeContext(section);
-    const normalizedRange = normalizeTextRangeForContext({
-      textRange,
-      context
-    });
-    if (!normalizedRange) {
-      return undefined;
-    }
-
-    const startIndex = context.blockIds.indexOf(normalizedRange.start.blockId);
-    const endIndex = context.blockIds.indexOf(normalizedRange.end.blockId);
-    if (startIndex < 0 || endIndex < 0 || endIndex < startIndex) {
-      return undefined;
-    }
-
-    const segments: string[] = [];
-    for (let index = startIndex; index <= endIndex; index += 1) {
-      const blockId = context.blockIds[index];
-      if (!blockId) {
-        continue;
-      }
-
-      const characters = Array.from(context.blockTexts.get(blockId) ?? "");
-      const start =
-        blockId === normalizedRange.start.blockId
-          ? normalizedRange.start.inlineOffset
-          : 0;
-      const end =
-        blockId === normalizedRange.end.blockId
-          ? normalizedRange.end.inlineOffset
-          : characters.length;
-      if (end <= start) {
-        continue;
-      }
-
-      segments.push(characters.slice(start, end).join(""));
-    }
-
-    const text = segments.join("");
-    return text.trim() ? text : undefined;
+    return this.annotationService.resolveTextRangeQuote(section, textRange);
   }
 
   private resolveAnnotationViewportRects(
     annotation: Annotation,
     locator: Locator
   ): VisibleDrawBounds {
-    if (!this.book || !this.options.container) {
-      return [];
-    }
-
-    const section = this.book.sections[locator.spineIndex];
-    if (!section) {
-      return [];
-    }
-
-    const textRange = annotation.textRange
-      ? this.normalizeTextRangeForSection(
-          locator.spineIndex,
-          annotation.textRange
-        )
-      : this.resolveFullBlockTextRange(section, locator.blockId);
-    if (!textRange) {
-      return this.mapLocatorToViewport(locator);
-    }
-
-    const sectionElement = this.getSectionElement(section.id);
-    if (sectionElement && isRenderedDomSectionElement(sectionElement)) {
-      const rects = mapDomTextRangeToViewport({
-        container: this.options.container,
-        mode: this.mode,
-        sectionElement,
-        textRange
-      });
-      if (rects.length > 0) {
-        return rects;
-      }
-    }
-
-    const canvasRects = this.resolveCanvasTextRangeViewportRects(
-      section.id,
-      textRange
+    return this.annotationService.resolveAnnotationViewportRects(
+      annotation,
+      locator
     );
-    return canvasRects.length > 0
-      ? canvasRects
-      : this.mapLocatorToViewport(locator);
   }
 
   private resolveCanvasTextRangeViewportRects(
@@ -5659,58 +5105,7 @@ export class EpubReader {
   private resolveAnnotationSelectionAtPoint(
     point: Point
   ): ReaderTextSelectionSnapshot | null {
-    if (!this.book) {
-      return null;
-    }
-
-    for (let index = this.annotations.length - 1; index >= 0; index -= 1) {
-      const annotation = this.annotations[index];
-      if (!annotation) {
-        continue;
-      }
-
-      const resolved = this.resolveAnnotationRange(annotation);
-      if (!resolved) {
-        continue;
-      }
-
-      const rects = this.resolveAnnotationViewportRects(
-        annotation,
-        resolved.locator
-      );
-      const hit = rects.some(
-        (rect) =>
-          point.x >= rect.x &&
-          point.x <= rect.x + rect.width &&
-          point.y >= rect.y &&
-          point.y <= rect.y + rect.height
-      );
-      if (!hit) {
-        continue;
-      }
-
-      const text =
-        annotation.quote ??
-        this.resolveTextRangeQuote(
-          this.book.sections[resolved.spineIndex]!,
-          resolved.range
-        );
-      return {
-        text: text ?? "",
-        locator: normalizeLocator({
-          ...resolved.locator,
-          blockId: resolved.range.start.blockId,
-          inlineOffset: resolved.range.start.inlineOffset
-        }),
-        sectionId: resolved.sectionId,
-        blockId: resolved.range.start.blockId,
-        textRange: cloneTextRangeSelector(resolved.range),
-        rects,
-        visible: rects.length > 0
-      };
-    }
-
-    return null;
+    return this.annotationService.resolveAnnotationSelectionAtPoint(point);
   }
 
   private syncTextSelectionState(): void {
@@ -5736,14 +5131,6 @@ export class EpubReader {
     void this.options.onTextSelectionChanged?.(payload);
   }
 }
-
-type ResolvedAnnotationRange = {
-  annotation: Annotation;
-  locator: Locator;
-  spineIndex: number;
-  sectionId: string;
-  range: TextRangeSelector;
-};
 
 function cloneReaderPreferences(
   preferences: ReaderPreferences
@@ -5836,130 +5223,6 @@ function collectTextNodes(root: Node): Text[] {
     current = walker.nextNode();
   }
   return textNodes;
-}
-
-function measurePaginatedDomPageOffsets(
-  sectionElement: HTMLElement,
-  pageHeight: number
-): number[] {
-  const sectionHeight = Math.max(
-    pageHeight,
-    sectionElement.scrollHeight || sectionElement.offsetHeight || pageHeight
-  );
-  const maxOffset = Math.max(0, sectionHeight - pageHeight);
-  const lineBands = collectPaginatedDomReadableLineBands(sectionElement);
-  if (lineBands.length === 0) {
-    const offsets = [0];
-    for (
-      let offset = pageHeight;
-      offset < sectionHeight;
-      offset += pageHeight
-    ) {
-      offsets.push(offset);
-    }
-    return offsets;
-  }
-
-  const offsets = [0];
-  let currentOffset = 0;
-  while (currentOffset < maxOffset - 0.5) {
-    const pageBottom = currentOffset + pageHeight;
-    const lastFullyVisibleLine = [...lineBands]
-      .reverse()
-      .find(
-        (band) =>
-          band.top >= currentOffset - 0.5 && band.bottom <= pageBottom + 0.5
-      );
-    const nextLine = lastFullyVisibleLine
-      ? lineBands.find((band) => band.top >= lastFullyVisibleLine.bottom - 0.5)
-      : lineBands.find((band) => band.top > currentOffset + 0.5);
-    const fallbackOffset = Math.min(sectionHeight, currentOffset + pageHeight);
-    const nextOffset = Math.min(
-      sectionHeight,
-      Math.max(currentOffset + 1, nextLine?.top ?? fallbackOffset)
-    );
-    if (nextOffset <= currentOffset + 0.5) {
-      break;
-    }
-    offsets.push(nextOffset);
-    currentOffset = nextOffset;
-  }
-
-  return offsets;
-}
-
-function collectPaginatedDomReadableLineBands(
-  sectionElement: HTMLElement
-): Array<{ top: number; bottom: number }> {
-  if (typeof document === "undefined") {
-    return [];
-  }
-
-  const sectionRect = sectionElement.getBoundingClientRect();
-  const bands = new Map<string, { top: number; bottom: number }>();
-  for (const element of collectDomReadableBlockElements(sectionElement)) {
-    const hasText = collectTextNodes(element).some((textNode) =>
-      (textNode.textContent ?? "").trim()
-    );
-    const rects = hasText
-      ? measureDomRangeLineBands(element)
-      : [element.getBoundingClientRect()];
-
-    for (const rect of rects) {
-      if (rect.height <= 0 || rect.width <= 0) {
-        continue;
-      }
-      const top = Math.max(0, rect.top - sectionRect.top);
-      const bottom = Math.max(top, rect.bottom - sectionRect.top);
-      const key = `${top.toFixed(2)}:${bottom.toFixed(2)}`;
-      if (!bands.has(key)) {
-        bands.set(key, { top, bottom });
-      }
-    }
-  }
-
-  for (const element of collectDomMediaElements(sectionElement)) {
-    const rect = element.getBoundingClientRect();
-    if (rect.height <= 0 || rect.width <= 0) {
-      continue;
-    }
-    const top = Math.max(0, rect.top - sectionRect.top);
-    const bottom = Math.max(top, rect.bottom - sectionRect.top);
-    const key = `${top.toFixed(2)}:${bottom.toFixed(2)}`;
-    if (!bands.has(key)) {
-      bands.set(key, { top, bottom });
-    }
-  }
-
-  return [...bands.values()].sort((left, right) =>
-    left.top === right.top ? left.bottom - right.bottom : left.top - right.top
-  );
-}
-
-function measureDomRangeLineBands(root: HTMLElement): DOMRect[] {
-  if (typeof document === "undefined") {
-    return [];
-  }
-
-  const range = document.createRange();
-  range.selectNodeContents(root);
-  return typeof range.getClientRects === "function"
-    ? Array.from(range.getClientRects())
-    : [];
-}
-
-function resolvePaginatedDomPageIndex(
-  offsetTop: number,
-  pageOffsets: number[]
-): number {
-  for (let index = pageOffsets.length - 1; index >= 0; index -= 1) {
-    const candidate = pageOffsets[index];
-    if (typeof candidate === "number" && offsetTop >= candidate - 0.5) {
-      return index;
-    }
-  }
-
-  return 0;
 }
 
 function getScopedTextSelectionRecord(scope: Node): {
@@ -6066,19 +5329,6 @@ function clampProgress(value: number): number {
   return Math.max(0, Math.min(value, 1));
 }
 
-function getRenderedSectionHeight(element: HTMLElement): number {
-  const domSection = element.querySelector<HTMLElement>(".epub-dom-section");
-  if (domSection) {
-    return Math.max(
-      domSection.scrollHeight || 0,
-      domSection.offsetHeight || 0,
-      element.offsetHeight || 0
-    );
-  }
-
-  return element.offsetHeight || 0;
-}
-
 function isRenderedDomSectionElement(element: HTMLElement): boolean {
   return (
     element.matches(".epub-dom-section") ||
@@ -6154,76 +5404,6 @@ function collectDomReadableBlockElements(
   );
 }
 
-function collectDomMediaElements(sectionElement: HTMLElement): HTMLElement[] {
-  return Array.from(
-    sectionElement.querySelectorAll<HTMLElement>(
-      "img, svg, image, object, video, canvas, figure"
-    )
-  );
-}
-
-function collectSelectableBlocksInReadingOrder(
-  blocks: BlockNode[]
-): BlockNode[] {
-  const collected: BlockNode[] = [];
-
-  for (const block of blocks) {
-    switch (block.kind) {
-      case "heading":
-      case "text":
-      case "code":
-        collected.push(block);
-        break;
-      case "quote":
-      case "aside":
-      case "nav":
-        collected.push(...collectSelectableBlocksInReadingOrder(block.blocks));
-        break;
-      case "figure":
-        collected.push(...collectSelectableBlocksInReadingOrder(block.blocks));
-        if (block.caption) {
-          collected.push(
-            ...collectSelectableBlocksInReadingOrder(block.caption)
-          );
-        }
-        break;
-      case "list":
-        for (const item of block.items) {
-          collected.push(...collectSelectableBlocksInReadingOrder(item.blocks));
-        }
-        break;
-      case "table":
-        if (block.caption) {
-          collected.push(
-            ...collectSelectableBlocksInReadingOrder(block.caption)
-          );
-        }
-        for (const row of block.rows) {
-          for (const cell of row.cells) {
-            collected.push(
-              ...collectSelectableBlocksInReadingOrder(cell.blocks)
-            );
-          }
-        }
-        break;
-      case "definition-list":
-        for (const item of block.items) {
-          collected.push(...collectSelectableBlocksInReadingOrder(item.term));
-          for (const description of item.descriptions) {
-            collected.push(
-              ...collectSelectableBlocksInReadingOrder(description)
-            );
-          }
-        }
-        break;
-      default:
-        break;
-    }
-  }
-
-  return collected;
-}
-
 function resolveSectionAnchorIdForElement(
   section: SectionDocument,
   element: HTMLElement
@@ -6280,8 +5460,4 @@ function findMatchingSelectableBlockIndex(
   }
 
   return -1;
-}
-
-function escapeAttributeSelectorValue(value: string): string {
-  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }

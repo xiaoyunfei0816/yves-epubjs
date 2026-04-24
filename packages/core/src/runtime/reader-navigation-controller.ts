@@ -9,17 +9,11 @@ import type {
 } from "../model/types"
 import { restoreLocatorWithDiagnostics } from "./locator"
 import { resolveBookHrefLocator } from "./navigation-target"
+import type { ReaderPage } from "./paginated-render-plan"
 
 type PaginationInfo = {
   currentPage: number
   totalPages: number
-}
-
-type MinimalReaderPage = {
-  pageNumber: number
-  spineIndex: number
-  pageNumberInSection: number
-  totalPagesInSection: number
 }
 
 type ReaderNavigationControllerDependencies = {
@@ -30,10 +24,10 @@ type ReaderNavigationControllerDependencies = {
   getLocator: () => Locator | null
   updateLocator: (locator: Locator) => void
   ensurePages: () => void
-  findPageForLocator: (locator: Locator) => MinimalReaderPage | null
+  findPageForLocator: (locator: Locator) => ReaderPage | null
   resolveDisplayPageNumberToLeafPage: (pageNumber: number) => number | null
-  findPageByNumber: (pageNumber: number) => MinimalReaderPage | null
-  createLocatorForPage: (page: MinimalReaderPage) => Locator
+  findPageByNumber: (pageNumber: number) => ReaderPage | null
+  createLocatorForPage: (page: ReaderPage) => Locator
   renderCurrentSection: () => void
   emitRelocated: () => void
   setCurrentPageNumber: (pageNumber: number) => void

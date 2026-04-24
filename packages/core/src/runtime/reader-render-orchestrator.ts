@@ -1,20 +1,9 @@
 import type { LayoutResult } from "../layout/layout-engine"
 import type { ChapterRenderDecision, Locator, SectionDocument } from "../model/types"
-
-type RenderBehavior = "relocate" | "preserve"
-
-type ScrollAnchor = {
-  sectionId: string
-  offsetWithinSection: number
-  fallbackScrollTop: number
-}
-
-type RenderedPage = {
-  pageNumber: number
-  spineIndex: number
-  pageNumberInSection: number
-  totalPagesInSection: number
-}
+import type { ReaderPage } from "./paginated-render-plan"
+import { resolvePaginatedPageRenderOutcome } from "./paginated-render-flow"
+import type { RenderBehavior } from "./render-flow-types"
+import type { ScrollAnchor } from "./reader-scroll-position-service"
 
 type ReaderRenderOrchestratorDependencies = {
   getBook: () => { sections: SectionDocument[] } | null
@@ -42,24 +31,24 @@ type ReaderRenderOrchestratorDependencies = {
   ) => LayoutResult | undefined
   setMeasuredSize: (size: { width: number; height: number }) => void
   ensurePages: (layout?: LayoutResult) => void
-  resolveRenderedPage: (sectionId: string) => RenderedPage | null
+  resolveRenderedPage: (sectionId: string) => ReaderPage | null
   renderPaginatedDomSpread: (
-    page: RenderedPage,
+    page: ReaderPage,
     renderVersion: number
   ) => void
   renderDomSection: (section: SectionDocument, renderVersion: number) => void
-  syncMeasuredPaginatedDomPages: (section: SectionDocument) => RenderedPage | null
+  syncMeasuredPaginatedDomPages: (section: SectionDocument) => ReaderPage | null
   setCurrentPageNumber: (pageNumber: number) => void
   getLocator: () => Locator | null
   updateLocator: (locator: Locator) => void
   syncDomSectionStateAfterRender: (
     renderBehavior: RenderBehavior,
     preservedScrollAnchor: ScrollAnchor | null,
-    resolvedPage: RenderedPage | null
+    resolvedPage: ReaderPage | null
   ) => void
   renderPaginatedCanvas: (
     section: SectionDocument,
-    currentPage: RenderedPage | null,
+    currentPage: ReaderPage | null,
     renderVersion: number
   ) => void
   getContentWidth: () => number
@@ -158,18 +147,15 @@ export class ReaderRenderOrchestrator {
             this.dependencies.syncMeasuredPaginatedDomPages(section)
           const resolvedPage = measuredPage ?? currentPage
           if (resolvedPage) {
-            this.dependencies.setCurrentPageNumber(resolvedPage.pageNumber)
-            const locator = this.dependencies.getLocator()
-            if (locator) {
-              this.dependencies.updateLocator({
-                ...locator,
-                spineIndex: resolvedPage.spineIndex,
-                progressInSection:
-                  resolvedPage.totalPagesInSection > 1
-                    ? (resolvedPage.pageNumberInSection - 1) /
-                      (resolvedPage.totalPagesInSection - 1)
-                    : 0
-              })
+            const outcome = resolvePaginatedPageRenderOutcome({
+              page: resolvedPage,
+              locator: this.dependencies.getLocator()
+            })
+            if (outcome.currentPageNumber !== undefined) {
+              this.dependencies.setCurrentPageNumber(outcome.currentPageNumber)
+            }
+            if (outcome.locator) {
+              this.dependencies.updateLocator(outcome.locator)
             }
           }
           this.dependencies.syncDomSectionStateAfterRender(
@@ -182,18 +168,15 @@ export class ReaderRenderOrchestrator {
         this.dependencies.renderPaginatedCanvas(section, currentPage, renderVersion)
         didRender = true
         if (currentPage) {
-          this.dependencies.setCurrentPageNumber(currentPage.pageNumber)
-          const locator = this.dependencies.getLocator()
-          if (locator) {
-            this.dependencies.updateLocator({
-              ...locator,
-              spineIndex: currentPage.spineIndex,
-              progressInSection:
-                currentPage.totalPagesInSection > 1
-                  ? (currentPage.pageNumberInSection - 1) /
-                    (currentPage.totalPagesInSection - 1)
-                  : 0
-            })
+          const outcome = resolvePaginatedPageRenderOutcome({
+            page: currentPage,
+            locator: this.dependencies.getLocator()
+          })
+          if (outcome.currentPageNumber !== undefined) {
+            this.dependencies.setCurrentPageNumber(outcome.currentPageNumber)
+          }
+          if (outcome.locator) {
+            this.dependencies.updateLocator(outcome.locator)
           }
         }
       } else {

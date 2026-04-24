@@ -3,14 +3,13 @@ import type {
   FigureBlock,
   ListBlock,
   Locator,
-  Rect,
   SectionDocument,
   TableBlock,
   TextAlign,
   Theme,
   TypographyOptions
 } from "../model/types";
-import type { LayoutBlock, LayoutPretextBlock } from "../layout/layout-engine";
+import type { LayoutBlock } from "../layout/layout-engine";
 import type {
   DrawOp,
   ImageDrawOp,
@@ -34,12 +33,15 @@ import {
   wrapText,
   wrapTextWithOffsets
 } from "../utils/text-wrap";
-
-type BlockHighlightRange = {
-  start: number;
-  end: number;
-  color: string;
-};
+import {
+  buildPretextBlockDisplay,
+  type BlockHighlightRange
+} from "./display-list-text";
+import {
+  insetNativeBlockRect,
+  isCoverImageBlock,
+  resolveNativeBlockRenderStyle
+} from "./display-list-native-blocks";
 
 type BuilderOptions = {
   section: SectionDocument;
@@ -60,16 +62,6 @@ type BuilderOptions = {
   activeBlockId: string | undefined;
 };
 
-type NativeBlockRenderStyle = {
-  color: string;
-  backgroundColor?: string;
-  textAlign: TextAlign;
-  paddingTop: number;
-  paddingBottom: number;
-  paddingLeft: number;
-  paddingRight: number;
-};
-
 export class DisplayListBuilder {
   buildSection(options: BuilderOptions): SectionDisplayList {
     const styleProfile = buildReadingStyleProfile({
@@ -83,7 +75,7 @@ export class DisplayListBuilder {
 
     for (const block of options.blocks) {
       const built = block.type === "pretext"
-        ? this.buildPretextBlock({
+        ? buildPretextBlockDisplay({
             block,
             section: options.section,
             top: currentTop,
@@ -93,7 +85,6 @@ export class DisplayListBuilder {
             locator: options.locatorMap?.get(block.id),
             resolveImageLoaded: options.resolveImageLoaded,
             resolveImageUrl: options.resolveImageUrl,
-            resolveImageIntrinsicSize: options.resolveImageIntrinsicSize,
             highlighted: options.highlightedBlockIds?.has(block.id) ?? false,
             highlightRanges: options.highlightRangesByBlock?.get(block.id) ?? [],
             underlined: options.underlinedBlockIds?.has(block.id) ?? false,
@@ -137,205 +128,6 @@ export class DisplayListBuilder {
     };
   }
 
-  private buildPretextBlock(input: {
-    block: LayoutPretextBlock;
-    section: SectionDocument;
-    top: number;
-    width: number;
-    theme: Theme;
-    styleProfile: ReadingStyleProfile;
-    locator: Locator | undefined;
-    resolveImageLoaded: ((src: string) => boolean) | undefined;
-    resolveImageUrl: ((src: string) => string) | undefined;
-    resolveImageIntrinsicSize:
-      | ((src: string) => IntrinsicImageSize | null | undefined)
-      | undefined;
-    highlighted: boolean;
-    highlightRanges: BlockHighlightRange[];
-    underlined: boolean;
-    active: boolean;
-  }): {
-    ops: DrawOp[];
-    interactions: InteractionRegion[];
-    height: number;
-  } {
-    const ops: DrawOp[] = [];
-    const interactions: InteractionRegion[] = [];
-    const sidePadding = input.styleProfile.section.sidePadding;
-    const blockRect = {
-      x: sidePadding,
-      y: input.top,
-      width: input.width - sidePadding * 2,
-      height: input.block.estimatedHeight
-    };
-    const contentRect = {
-      x: blockRect.x + input.block.paddingLeft,
-      y: blockRect.y + input.block.paddingTop,
-      width: Math.max(40, blockRect.width - input.block.paddingLeft - input.block.paddingRight),
-      height: Math.max(0, blockRect.height - input.block.paddingTop - input.block.paddingBottom)
-    }
-    if (input.block.backgroundColor) {
-      ops.push({
-        kind: "rect",
-        sectionId: input.section.id,
-        sectionHref: input.section.href,
-        blockId: input.block.id,
-        locator: input.locator,
-        rect: blockRect,
-        color: input.block.backgroundColor,
-        radius: 10
-      } satisfies RectDrawOp)
-    }
-    if (input.highlighted || input.active) {
-      ops.push({
-        kind: "rect",
-        sectionId: input.section.id,
-        sectionHref: input.section.href,
-        blockId: input.block.id,
-        locator: input.locator,
-        rect: {
-          x: blockRect.x - 4,
-          y: blockRect.y,
-          width: blockRect.width + 8,
-          height: blockRect.height
-        },
-        color: input.active
-          ? "rgba(245, 158, 11, 0.16)"
-          : "rgba(245, 158, 11, 0.08)",
-        radius: 10
-      } satisfies RectDrawOp);
-    }
-    interactions.push({
-      kind: "block",
-      rect: blockRect,
-      sectionId: input.section.id,
-      blockId: input.block.id,
-      locator: input.locator,
-      text: this.collectPretextText(input.block)
-    });
-
-    let lineTop = contentRect.y
-    let blockTextOffset = input.block.textOffsetBase ?? 0
-    input.block.lines.forEach((line) => {
-      const lineWidth = Math.max(0, line.width);
-      const startX = this.resolveLineStartX(
-        input.block.textAlign,
-        contentRect.x,
-        contentRect.width,
-        lineWidth
-      );
-      let cursorX = startX;
-      const lineHeight = line.height
-
-      for (const fragment of line.fragments) {
-        cursorX += fragment.gapBefore;
-        const fragmentWidth = fragment.image
-          ? fragment.image.marginLeft + fragment.image.width + fragment.image.marginRight
-          : (fragment.width ?? approximateTextWidth(fragment.text, fragment.font));
-        const baselineShift = fragment.baselineShift ?? 0
-        if (fragment.image) {
-          const imageRect = {
-            x: cursorX + fragment.image.marginLeft,
-            y:
-              lineTop +
-              Math.max(0, (lineHeight - fragment.image.height) * 0.5) +
-              baselineShift,
-            width: fragment.image.width,
-            height: fragment.image.height
-          }
-          const renderSrc = input.resolveImageUrl?.(fragment.image.src) ?? fragment.image.src
-          ops.push({
-            kind: "image",
-            sectionId: input.section.id,
-            sectionHref: input.section.href,
-            blockId: input.block.id,
-            locator: input.locator,
-            rect: imageRect,
-            src: renderSrc,
-            alt: fragment.image.alt,
-            loaded: Boolean(input.resolveImageLoaded?.(fragment.image.src)),
-            background: "transparent"
-          } satisfies ImageDrawOp)
-          interactions.push({
-            kind: "image",
-            rect: imageRect,
-            sectionId: input.section.id,
-            blockId: input.block.id,
-            src: renderSrc,
-            alt: fragment.image.alt,
-            locator: input.locator
-          })
-          cursorX += fragmentWidth;
-          continue
-        }
-        const rect = {
-          x: cursorX,
-          y: lineTop + baselineShift,
-          width: fragmentWidth,
-          height: lineHeight
-        };
-        const fragmentTextLength = Array.from(fragment.text).length
-        const highlightSegments = resolveLineHighlightSegments(
-          input.highlightRanges,
-          blockTextOffset,
-          blockTextOffset + fragmentTextLength
-        )
-        ops.push({
-          kind: "text",
-          sectionId: input.section.id,
-          sectionHref: input.section.href,
-          blockId: input.block.id,
-          locator: input.locator,
-          rect,
-          text: fragment.text,
-          textStart: blockTextOffset,
-          textEnd: blockTextOffset + fragmentTextLength,
-          x: cursorX,
-          y: lineTop + baselineShift,
-          width: fragmentWidth,
-          font: fragment.font,
-          color: fragment.href
-            ? input.styleProfile.link.color
-            : (fragment.color ?? input.block.color ?? input.theme.color),
-          backgroundColor: fragment.backgroundColor,
-          highlightColor: input.highlighted
-            ? input.styleProfile.highlight.search
-            : input.active
-              ? input.styleProfile.highlight.active
-              : fragment.mark
-                ? input.styleProfile.highlight.mark
-                : undefined,
-          ...(highlightSegments.length ? { highlightSegments } : {}),
-          underline: Boolean(fragment.href) || input.underlined,
-          href: fragment.href
-        } satisfies TextRunDrawOp);
-
-        if (fragment.href) {
-          interactions.push({
-            kind: "link",
-            rect,
-            sectionId: input.section.id,
-            blockId: input.block.id,
-            href: fragment.href,
-            locator: input.locator,
-            text: fragment.text
-          });
-        }
-
-        cursorX += fragmentWidth;
-        blockTextOffset += fragmentTextLength
-      }
-
-      lineTop += lineHeight
-    });
-
-    return {
-      ops,
-      interactions,
-      height: input.block.estimatedHeight
-    };
-  }
-
   private buildNativeBlock(input: {
     block: BlockNode;
     estimatedHeight: number;
@@ -369,12 +161,12 @@ export class DisplayListBuilder {
       width,
       height: input.estimatedHeight
     };
-    const blockStyle = this.resolveNativeBlockRenderStyle(
-      input.block,
-      input.theme,
-      input.styleProfile
-    );
-    const contentRect = this.insetRect(rect, blockStyle);
+    const blockStyle = resolveNativeBlockRenderStyle({
+      block: input.block,
+      theme: input.theme,
+      styleProfile: input.styleProfile
+    });
+    const contentRect = insetNativeBlockRect(rect, blockStyle);
     const ops: DrawOp[] = [];
     const interactions: InteractionRegion[] = [
       {
@@ -427,7 +219,7 @@ export class DisplayListBuilder {
           availableWidth: width,
           viewportHeight: input.viewportHeight,
           ...resolveImageIntrinsicSize(input.block, input.resolveImageIntrinsicSize),
-          fillWidth: this.isCoverImageBlock(input.section, input.block)
+          fillWidth: isCoverImageBlock(input.section, input.block)
         });
         const imageRect = {
           x: x + imageLayout.xOffset,
@@ -926,13 +718,6 @@ export class DisplayListBuilder {
     return ops
   }
 
-  private isCoverImageBlock(
-    section: SectionDocument,
-    block: BlockNode
-  ): block is Extract<BlockNode, { kind: "image" }> {
-    return section.presentationRole === "cover" && section.blocks.length === 1 && block.kind === "image"
-  }
-
   private buildFigureBlockOps(input: {
     block: FigureBlock;
     section: SectionDocument;
@@ -1211,15 +996,6 @@ export class DisplayListBuilder {
     return ops
   }
 
-  private resolveLineStartX(
-    textAlign: LayoutPretextBlock["textAlign"],
-    left: number,
-    width: number,
-    lineWidth: number
-  ): number {
-    return this.resolveTextLineStartX(textAlign, left, width, lineWidth);
-  }
-
   private resolveTextLineStartX(
     textAlign: TextAlign,
     left: number,
@@ -1235,42 +1011,6 @@ export class DisplayListBuilder {
     return left;
   }
 
-  private insetRect(rect: Rect, style: NativeBlockRenderStyle): Rect {
-    return {
-      x: rect.x + style.paddingLeft,
-      y: rect.y + style.paddingTop,
-      width: Math.max(40, rect.width - style.paddingLeft - style.paddingRight),
-      height: Math.max(0, rect.height - style.paddingTop - style.paddingBottom)
-    }
-  }
-
-  private resolveNativeBlockRenderStyle(
-    block: BlockNode,
-    theme: Theme,
-    styleProfile: ReadingStyleProfile
-  ): NativeBlockRenderStyle {
-    return {
-      color: block.style?.color ?? theme.color,
-      ...(block.style?.backgroundColor
-        ? { backgroundColor: block.style.backgroundColor }
-        : block.kind === "aside" || block.kind === "nav"
-          ? { backgroundColor: styleProfile.aside.background }
-        : {}),
-      textAlign: block.style?.textAlign ?? "start",
-      paddingTop: block.style?.paddingTop ?? 0,
-      paddingBottom: block.style?.paddingBottom ?? 0,
-      paddingLeft: block.style?.paddingLeft ?? 0,
-      paddingRight: block.style?.paddingRight ?? 0
-    }
-  }
-
-  private collectPretextText(block: LayoutPretextBlock): string {
-    return block.lines
-      .map((line) =>
-        line.fragments.map((fragment) => fragment.image?.alt ?? fragment.text).join("")
-      )
-      .join("\n");
-  }
 }
 
 function resolveImageIntrinsicSize(

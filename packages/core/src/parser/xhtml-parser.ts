@@ -25,7 +25,7 @@ import { normalizePreformattedText } from "../utils/preformatted-text"
 import type { CssAstStyleSheet } from "./css-ast-adapter"
 import { resolveElementStyle, resolveElementTextStyle } from "./style-resolver"
 import { parseXhtmlDomDocument } from "./xhtml-dom-parser"
-import { classifyNavigationHref } from "../runtime/external-boundary"
+import { classifyNavigationHref } from "../utils/url-boundary"
 
 function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ")

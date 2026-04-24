@@ -35,6 +35,62 @@ export function resolveRenderableBlockId(
   return undefined
 }
 
+export function collectSelectableBlocksInReadingOrder(
+  blocks: BlockNode[]
+): BlockNode[] {
+  const collected: BlockNode[] = []
+
+  for (const block of blocks) {
+    switch (block.kind) {
+      case "heading":
+      case "text":
+      case "code":
+        collected.push(block)
+        break
+      case "quote":
+      case "aside":
+      case "nav":
+        collected.push(...collectSelectableBlocksInReadingOrder(block.blocks))
+        break
+      case "figure":
+        collected.push(...collectSelectableBlocksInReadingOrder(block.blocks))
+        if (block.caption) {
+          collected.push(...collectSelectableBlocksInReadingOrder(block.caption))
+        }
+        break
+      case "list":
+        for (const item of block.items) {
+          collected.push(...collectSelectableBlocksInReadingOrder(item.blocks))
+        }
+        break
+      case "table":
+        if (block.caption) {
+          collected.push(...collectSelectableBlocksInReadingOrder(block.caption))
+        }
+        for (const row of block.rows) {
+          for (const cell of row.cells) {
+            collected.push(...collectSelectableBlocksInReadingOrder(cell.blocks))
+          }
+        }
+        break
+      case "definition-list":
+        for (const item of block.items) {
+          collected.push(...collectSelectableBlocksInReadingOrder(item.term))
+          for (const description of item.descriptions) {
+            collected.push(
+              ...collectSelectableBlocksInReadingOrder(description)
+            )
+          }
+        }
+        break
+      default:
+        break
+    }
+  }
+
+  return collected
+}
+
 function findNestedBlockById(
   block: BlockNode,
   blockId: string
