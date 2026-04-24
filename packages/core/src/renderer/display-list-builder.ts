@@ -215,7 +215,7 @@ export class DisplayListBuilder {
     });
 
     let lineTop = contentRect.y
-    let blockTextOffset = 0
+    let blockTextOffset = input.block.textOffsetBase ?? 0
     input.block.lines.forEach((line) => {
       const lineWidth = Math.max(0, line.width);
       const startX = this.resolveLineStartX(

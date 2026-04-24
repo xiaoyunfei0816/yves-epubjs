@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import type { Book, SectionDocument } from "../src/model/types"
 import { EpubReader } from "../src/runtime/reader"
 
 function createContainer(): HTMLDivElement {
@@ -157,5 +158,124 @@ describe("EpubReader preferences", () => {
         wordSpacing: 0
       }
     })
+  })
+
+  it("captures the mode-switch locator before applying the next mode and clears it after render", async () => {
+    const container = createContainer()
+    const reader = new EpubReader({ container, mode: "scroll" })
+    const section: SectionDocument = {
+      id: "section-1",
+      href: "OPS/chapter-1.xhtml",
+      title: "Chapter 1",
+      anchors: {},
+      blocks: []
+    }
+    const book: Book = {
+      metadata: { title: "Preferences Hook" },
+      manifest: [],
+      spine: [{ idref: "item-1", href: section.href, linear: true }],
+      toc: [],
+      sections: [section]
+    }
+
+    const state = reader as unknown as {
+      book: Book | null
+      locator: { spineIndex: number; progressInSection: number; blockId?: string } | null
+      mode: "scroll" | "paginated"
+      currentSectionIndex: number
+      pendingModeSwitchLocator: {
+        spineIndex: number
+        progressInSection: number
+        blockId?: string
+      } | null
+      captureModeSwitchLocator(): {
+        spineIndex: number
+        progressInSection: number
+        blockId?: string
+      } | null
+      renderCurrentSection(renderBehavior?: "relocate" | "preserve"): void
+    }
+    state.book = book
+    state.locator = {
+      spineIndex: 0,
+      progressInSection: 0,
+      blockId: "old-block"
+    }
+
+    const seen: Array<string> = []
+    state.captureModeSwitchLocator = () => {
+      seen.push(`capture:${state.mode}`)
+      return {
+        spineIndex: 0,
+        progressInSection: 0.6,
+        blockId: "captured-block"
+      }
+    }
+    state.renderCurrentSection = (renderBehavior = "relocate") => {
+      seen.push(
+        `render:${renderBehavior}:${state.mode}:${state.currentSectionIndex}:${state.locator?.blockId}:${state.pendingModeSwitchLocator?.blockId}`
+      )
+    }
+
+    await reader.submitPreferences({
+      mode: "paginated"
+    })
+
+    expect(seen).toEqual([
+      "capture:scroll",
+      "render:relocate:paginated:0:captured-block:captured-block"
+    ])
+    expect(state.pendingModeSwitchLocator).toBeNull()
+    expect(reader.getCurrentLocation()).toEqual({
+      spineIndex: 0,
+      progressInSection: 0.6,
+      blockId: "captured-block"
+    })
+  })
+
+  it("does not capture a mode-switch locator for non-mode preference updates", async () => {
+    const container = createContainer()
+    const reader = new EpubReader({ container, mode: "scroll" })
+    const section: SectionDocument = {
+      id: "section-1",
+      href: "OPS/chapter-1.xhtml",
+      title: "Chapter 1",
+      anchors: {},
+      blocks: []
+    }
+    const book: Book = {
+      metadata: { title: "Preferences No Capture" },
+      manifest: [],
+      spine: [{ idref: "item-1", href: section.href, linear: true }],
+      toc: [],
+      sections: [section]
+    }
+
+    const state = reader as unknown as {
+      book: Book | null
+      pendingModeSwitchLocator: unknown
+      captureModeSwitchLocator(): { spineIndex: number; progressInSection: number } | null
+      renderCurrentSection(renderBehavior?: "relocate" | "preserve"): void
+    }
+    state.book = book
+
+    let captureCount = 0
+    state.captureModeSwitchLocator = () => {
+      captureCount += 1
+      return {
+        spineIndex: 0,
+        progressInSection: 0.5
+      }
+    }
+    state.renderCurrentSection = () => {}
+
+    await reader.submitPreferences({
+      typography: {
+        fontSize: 20
+      }
+    })
+
+    expect(captureCount).toBe(0)
+    expect(state.pendingModeSwitchLocator).toBeNull()
   })
 })

@@ -76,8 +76,12 @@ export function mapDomTextRangeToViewport(input: DomTextRangeViewportInput): Rec
   range.setStart(startPosition.node, startPosition.offset)
   range.setEnd(endPosition.node, endPosition.offset)
   const containerRect = input.container.getBoundingClientRect()
+  const clientRects =
+    typeof range.getClientRects === "function"
+      ? Array.from(range.getClientRects())
+      : []
 
-  return Array.from(range.getClientRects())
+  return clientRects
     .filter((rect) => rect.width > 0 && rect.height > 0)
     .map((rect) => ({
       x: rect.left - containerRect.left + input.container.scrollLeft,

@@ -28,6 +28,45 @@ function createCanvasChapter(title: string, paragraphCount = 40): string {
     </html>`
 }
 
+function createSingleBlockCanvasChapter(title: string, repetition = 1600): string {
+  const text = Array.from(
+    { length: repetition },
+    (_, index) => `Segment ${index + 1} in ${title}. `
+  ).join("")
+
+  return `<?xml version="1.0" encoding="utf-8"?>
+    <html xmlns="http://www.w3.org/1999/xhtml">
+      <head><title>${title}</title></head>
+      <body>
+        <section>
+          <h1>${title}</h1>
+          <p>${text}</p>
+        </section>
+      </body>
+    </html>`
+}
+
+function pickDeepestTextRun(container: HTMLElement): HTMLElement | null {
+  const runs = Array.from(
+    container.querySelectorAll<HTMLElement>(".epub-text-run")
+  );
+  if (runs.length === 0) {
+    return null;
+  }
+
+  return runs.reduce((deepest, candidate) => {
+    const deepestStart = Number.parseInt(
+      deepest?.dataset.readerInlineStart ?? "0",
+      10
+    );
+    const candidateStart = Number.parseInt(
+      candidate.dataset.readerInlineStart ?? "0",
+      10
+    );
+    return candidateStart > deepestStart ? candidate : deepest;
+  }, runs[0] ?? null);
+}
+
 const DOM_CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
   <html xmlns="http://www.w3.org/1999/xhtml">
     <head><title>Complex Chapter</title></head>
@@ -367,5 +406,235 @@ describe("EpubReader runtime navigation", () => {
       configurable: true,
       value: originalGetSelection
     })
+  })
+
+  it("keeps the centered canvas block anchored when switching from scroll to paginated", async () => {
+    const container = document.createElement("div")
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 320
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 240
+    })
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 0
+    })
+    document.body.appendChild(container)
+
+    const input = createSharedChapterRenderInput({
+      href: "OPS/chapter-1.xhtml",
+      content: createCanvasChapter("Anchored Chapter", 80)
+    })
+    const section: SectionDocument = {
+      ...toCanvasChapterRenderInput(input).section,
+      id: "section-1"
+    }
+    const book: Book = {
+      metadata: { title: "Anchored Canvas Switch" },
+      manifest: [],
+      spine: [{ idref: "item-1", href: section.href, linear: true }],
+      toc: [],
+      sections: [section]
+    }
+    const reader = new EpubReader({ container, mode: "scroll" })
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+      }
+    ).book = book
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+      }
+    ).chapterRenderInputs = [input]
+
+    await reader.render()
+    container.scrollTop = 640
+
+    const expected = reader.mapViewportToLocator({
+      x: container.clientWidth / 2,
+      y: container.clientHeight / 2
+    })
+    expect(expected?.blockId).toBeTruthy()
+
+    await reader.submitPreferences({
+      mode: "paginated"
+    })
+
+    expect(reader.getSettings().mode).toBe("paginated")
+    expect(reader.getCurrentLocation()?.blockId).toBe(expected?.blockId)
+  })
+
+  it("keeps a deep inline position inside a single canvas block when switching from scroll to paginated", async () => {
+    const container = document.createElement("div")
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 320
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 240
+    })
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 0
+    })
+    document.body.appendChild(container)
+
+    const input = createSharedChapterRenderInput({
+      href: "OPS/chapter-1.xhtml",
+      content: createSingleBlockCanvasChapter("Single Block Scroll Switch", 5200)
+    })
+    const section: SectionDocument = {
+      ...toCanvasChapterRenderInput(input).section,
+      id: "section-1"
+    }
+    const book: Book = {
+      metadata: { title: "Single Block Scroll Switch" },
+      manifest: [],
+      spine: [{ idref: "item-1", href: section.href, linear: true }],
+      toc: [],
+      sections: [section]
+    }
+    const reader = new EpubReader({ container, mode: "scroll" })
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+      }
+    ).book = book
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+      }
+    ).chapterRenderInputs = [input]
+
+    const originalElementFromPoint = Object.getOwnPropertyDescriptor(
+      document,
+      "elementFromPoint"
+    )
+
+    try {
+      await reader.render()
+      container.scrollTop = 3600
+      container.dispatchEvent(new Event("scroll"))
+      await new Promise((resolve) =>
+        window.requestAnimationFrame(() => resolve(undefined))
+      )
+
+      Object.defineProperty(document, "elementFromPoint", {
+        configurable: true,
+        value: () => pickDeepestTextRun(container)
+      })
+
+      await reader.submitPreferences({
+        mode: "paginated"
+      })
+
+      expect(reader.getSettings().mode).toBe("paginated")
+      expect(reader.getPaginationInfo().totalPages).toBeGreaterThan(1)
+      expect(reader.getCurrentLocation()?.inlineOffset ?? 0).toBeGreaterThan(0)
+    } finally {
+      if (originalElementFromPoint) {
+        Object.defineProperty(
+          document,
+          "elementFromPoint",
+          originalElementFromPoint
+        )
+      } else {
+        delete (document as Document & { elementFromPoint?: unknown })
+          .elementFromPoint
+      }
+    }
+  })
+
+  it("keeps a deep inline position inside a single canvas block when switching from paginated to scroll", async () => {
+    const container = document.createElement("div")
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 320
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 240
+    })
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 0
+    })
+    document.body.appendChild(container)
+
+    const input = createSharedChapterRenderInput({
+      href: "OPS/chapter-1.xhtml",
+      content: createSingleBlockCanvasChapter("Single Block Paginated Switch")
+    })
+    const section: SectionDocument = {
+      ...toCanvasChapterRenderInput(input).section,
+      id: "section-1"
+    }
+    const book: Book = {
+      metadata: { title: "Single Block Paginated Switch" },
+      manifest: [],
+      spine: [{ idref: "item-1", href: section.href, linear: true }],
+      toc: [],
+      sections: [section]
+    }
+    const reader = new EpubReader({ container, mode: "paginated" })
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+      }
+    ).book = book
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+      }
+    ).chapterRenderInputs = [input]
+
+    const originalElementFromPoint = Object.getOwnPropertyDescriptor(
+      document,
+      "elementFromPoint"
+    )
+
+    try {
+      await reader.render()
+      expect(reader.getPaginationInfo().totalPages).toBeGreaterThan(4)
+      await reader.goToPage(4)
+
+      Object.defineProperty(document, "elementFromPoint", {
+        configurable: true,
+        value: () => pickDeepestTextRun(container)
+      })
+
+      await reader.submitPreferences({
+        mode: "scroll"
+      })
+
+      expect(reader.getSettings().mode).toBe("scroll")
+      expect(container.scrollTop).toBeGreaterThan(100)
+      expect(reader.getCurrentLocation()?.inlineOffset ?? 0).toBeGreaterThan(0)
+    } finally {
+      if (originalElementFromPoint) {
+        Object.defineProperty(
+          document,
+          "elementFromPoint",
+          originalElementFromPoint
+        )
+      } else {
+        delete (document as Document & { elementFromPoint?: unknown })
+          .elementFromPoint
+      }
+    }
   })
 })

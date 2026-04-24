@@ -1035,4 +1035,140 @@ describe("EpubReader hybrid navigation", () => {
       }
     }
   });
+
+  it("keeps the centered dom block anchored when switching from paginated to scroll", async () => {
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight"
+    );
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight"
+    );
+    const originalGetBoundingClientRect = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "getBoundingClientRect"
+    );
+
+    try {
+      let currentContainer: HTMLElement | null = null;
+
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+        configurable: true,
+        get() {
+          if (this.classList?.contains("epub-dom-section")) {
+            return 1400;
+          }
+          return originalOffsetHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+        configurable: true,
+        get() {
+          if (this.classList?.contains("epub-dom-section")) {
+            return 1400;
+          }
+          return originalScrollHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+        configurable: true,
+        value() {
+          if (this === currentContainer) {
+            return {
+              x: 0,
+              y: 100,
+              top: 100,
+              left: 0,
+              bottom: 580,
+              right: 320,
+              width: 320,
+              height: 480,
+              toJSON() {
+                return this;
+              }
+            };
+          }
+          if (this.classList?.contains("epub-dom-section")) {
+            return {
+              x: 0,
+              y: 116,
+              top: 116,
+              left: 0,
+              bottom: 516,
+              right: 320,
+              width: 320,
+              height: 400,
+              toJSON() {
+                return this;
+              }
+            };
+          }
+          if (this.id === "long-paragraph-9") {
+            return {
+              x: 12,
+              y: 316,
+              top: 316,
+              left: 12,
+              bottom: 344,
+              right: 308,
+              width: 296,
+              height: 28,
+              toJSON() {
+                return this;
+              }
+            };
+          }
+          return originalGetBoundingClientRect?.value?.call(this) ?? {
+            x: 0,
+            y: 0,
+            top: 0,
+            left: 0,
+            bottom: 0,
+            right: 0,
+            width: 0,
+            height: 0,
+            toJSON() {
+              return this;
+            }
+          };
+        }
+      });
+
+      const { reader, container } = createLongDomReaderFixture("paginated");
+      currentContainer = container;
+
+      await reader.render();
+      await reader.goToPage(2);
+
+      const expected = reader.mapViewportToLocator({
+        x: container.clientWidth / 2,
+        y: container.clientHeight / 2
+      });
+      expect(expected?.blockId).toBe("long-paragraph-9");
+
+      await reader.submitPreferences({
+        mode: "scroll"
+      });
+
+      expect(reader.getSettings().mode).toBe("scroll");
+      expect(reader.getCurrentLocation()?.blockId).toBe("long-paragraph-9");
+    } finally {
+      if (originalOffsetHeight) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
+      }
+      if (originalScrollHeight) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", originalScrollHeight);
+      }
+      if (originalGetBoundingClientRect) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "getBoundingClientRect",
+          originalGetBoundingClientRect
+        );
+      }
+    }
+  });
 });

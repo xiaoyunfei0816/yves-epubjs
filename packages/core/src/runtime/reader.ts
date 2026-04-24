@@ -1,5 +1,9 @@
 import EventEmitter from "eventemitter3";
-import { LayoutEngine, type LayoutResult } from "../layout/layout-engine";
+import {
+  LayoutEngine,
+  type LayoutPretextBlock,
+  type LayoutResult
+} from "../layout/layout-engine";
 import { CanvasRenderer } from "../renderer/canvas-renderer";
 import { DisplayListBuilder } from "../renderer/display-list-builder";
 import {
@@ -255,6 +259,7 @@ export class EpubReader {
     null;
   private lastFixedLayoutRenderSignature: string | null = null;
   private lastPresentationRenderSignature: string | null = null;
+  private pendingModeSwitchLocator: Locator | null = null;
   private textSelectionSnapshot: ReaderTextSelectionSnapshot | null = null;
   private pinnedTextSelectionSnapshot: ReaderTextSelectionSnapshot | null =
     null;
@@ -1389,6 +1394,99 @@ export class EpubReader {
       : this.mapDomViewportPointToLocator(point);
   }
 
+  private captureModeSwitchLocator(): Locator | null {
+    const fallbackLocator = this.locator ? { ...this.locator } : null;
+    const probePoints = this.getViewportCenterProbePoints();
+    let nearestLocator: Locator | null = null;
+
+    for (const point of probePoints) {
+      const locator =
+        this.mapCanvasTextLayerPointToLocator(point) ??
+        this.mapViewportToLocator(point);
+      if (!locator) {
+        continue;
+      }
+
+      if (locator.anchorId || locator.blockId) {
+        return locator;
+      }
+
+      if (!nearestLocator) {
+        nearestLocator = locator;
+      }
+    }
+
+    return nearestLocator ?? fallbackLocator;
+  }
+
+  private mapCanvasTextLayerPointToLocator(point: Point): Locator | null {
+    if (!this.book || !this.options.container) {
+      return null;
+    }
+
+    const clientPoint = this.getClientPointForContainerPoint(point);
+    if (!clientPoint) {
+      return null;
+    }
+
+    const ownerDocument = this.options.container.ownerDocument ?? document;
+    if (typeof ownerDocument.elementFromPoint !== "function") {
+      return null;
+    }
+
+    const target = ownerDocument.elementFromPoint(clientPoint.x, clientPoint.y);
+    const textRun =
+      target instanceof HTMLElement
+        ? target.closest<HTMLElement>(".epub-text-run")
+        : null;
+    if (!textRun) {
+      return null;
+    }
+
+    const sectionId = textRun.dataset.readerSectionId?.trim();
+    const blockId = textRun.dataset.readerBlockId?.trim();
+    const sectionIndex = sectionId ? this.getSectionIndexById(sectionId) : -1;
+    const section =
+      sectionIndex >= 0 ? this.book.sections[sectionIndex] : null;
+    if (!sectionId || !section || !blockId) {
+      return null;
+    }
+
+    const inlineStart =
+      Number.parseInt(textRun.dataset.readerInlineStart ?? "0", 10) || 0;
+    const fallbackTextLength = Array.from(textRun.textContent ?? "").length;
+    const inlineEnd =
+      Number.parseInt(
+        textRun.dataset.readerInlineEnd ?? `${inlineStart + fallbackTextLength}`,
+        10
+      ) || inlineStart + fallbackTextLength;
+    const absoluteInlineOffset = resolveInlineOffsetAtClientPoint({
+      textRun,
+      clientX: clientPoint.x,
+      clientY: clientPoint.y,
+      inlineStart,
+      inlineEnd
+    });
+
+    return normalizeLocator({
+      ...createBlockLocator({
+        section,
+        spineIndex: sectionIndex,
+        blockId
+      }),
+      inlineOffset: absoluteInlineOffset
+    });
+  }
+
+  private applyPendingModeSwitchLocator(): void {
+    if (!this.pendingModeSwitchLocator) {
+      return;
+    }
+
+    this.currentSectionIndex = this.pendingModeSwitchLocator.spineIndex;
+    this.updateLocator(this.pendingModeSwitchLocator);
+  }
+
   on<TEvent extends ReaderEvent>(
     event: TEvent,
     handler: (payload: ReaderEventMap[TEvent]) => void
@@ -1699,6 +1797,8 @@ export class EpubReader {
       spreadModeChanged ||
       themeChanged ||
       typographyChanged;
+    const capturedModeSwitchLocator =
+      modeChanged && this.book ? this.captureModeSwitchLocator() : null;
 
     this.preferences = nextPreferences;
     this.mode = nextSettings.mode;
@@ -1713,11 +1813,17 @@ export class EpubReader {
       await this.waitForFonts();
       this.pages = [];
       if (this.book) {
-        this.renderCurrentSection(
-          modeChanged || publisherStylesChanged || experimentalRtlChanged
-            ? "relocate"
-            : "preserve"
-        );
+        this.pendingModeSwitchLocator = capturedModeSwitchLocator;
+        this.applyPendingModeSwitchLocator();
+        try {
+          this.renderCurrentSection(
+            modeChanged || publisherStylesChanged || experimentalRtlChanged
+              ? "relocate"
+              : "preserve"
+          );
+        } finally {
+          this.pendingModeSwitchLocator = null;
+        }
       }
     }
 
@@ -3409,6 +3515,51 @@ export class EpubReader {
     });
   }
 
+  private getViewportCenterProbePoints(): Point[] {
+    const container = this.options.container;
+    if (!container) {
+      return [];
+    }
+
+    const width = Math.max(
+      1,
+      container.clientWidth || Math.round(container.getBoundingClientRect().width)
+    );
+    const height = Math.max(
+      1,
+      container.clientHeight || Math.round(container.getBoundingClientRect().height)
+    );
+    const centerX = container.scrollLeft + width / 2;
+    const centerY = height / 2;
+    const xOffsets = [0, -width * 0.16, width * 0.16, -width * 0.28, width * 0.28];
+    const yOffsets = [0, -height * 0.16, height * 0.16, -height * 0.28, height * 0.28];
+    const seen = new Set<string>();
+    const points: Point[] = [];
+
+    for (const [xOffset, yOffset] of [
+      [0, 0],
+      [xOffsets[1], 0],
+      [xOffsets[2], 0],
+      [0, yOffsets[1]],
+      [0, yOffsets[2]],
+      [xOffsets[3], 0],
+      [xOffsets[4], 0],
+      [0, yOffsets[3]],
+      [0, yOffsets[4]]
+    ] as Array<[number, number]>) {
+      const x = Math.max(container.scrollLeft, Math.min(centerX + xOffset, container.scrollLeft + width - 1));
+      const y = Math.max(0, Math.min(centerY + yOffset, height - 1));
+      const key = `${Math.round(x)}:${Math.round(y)}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      points.push({ x, y });
+    }
+
+    return points;
+  }
+
   private getContainerRelativePoint(event: MouseEvent): Point | null {
     if (!this.options.container) {
       return null;
@@ -3418,6 +3569,20 @@ export class EpubReader {
     return {
       x: event.clientX - bounds.left + this.options.container.scrollLeft,
       y: event.clientY - bounds.top
+    };
+  }
+
+  private getClientPointForContainerPoint(
+    point: Point
+  ): { x: number; y: number } | null {
+    if (!this.options.container) {
+      return null;
+    }
+
+    const bounds = this.options.container.getBoundingClientRect();
+    return {
+      x: bounds.left + point.x - this.options.container.scrollLeft,
+      y: bounds.top + point.y
     };
   }
 
@@ -3581,6 +3746,19 @@ export class EpubReader {
     }
 
     if (locator.blockId) {
+      if (locator.inlineOffset !== undefined) {
+        const inlinePage = sectionPages.find((page) =>
+          this.pageContainsInlineOffset(
+            page,
+            locator.blockId!,
+            locator.inlineOffset!
+          )
+        );
+        if (inlinePage) {
+          return inlinePage;
+        }
+      }
+
       const blockPage = sectionPages.find((page) =>
         this.pageContainsBlockId(page, locator.blockId!)
       );
@@ -3865,6 +4043,37 @@ export class EpubReader {
     );
   }
 
+  private pageContainsInlineOffset(
+    page: ReaderPage,
+    blockId: string,
+    inlineOffset: number
+  ): boolean {
+    const normalizedInlineOffset = Math.max(0, Math.trunc(inlineOffset));
+    return page.blocks.some((slice) => {
+      if (slice.type !== "pretext" || slice.block.id !== blockId) {
+        return false;
+      }
+
+      const sliceRange = this.getPretextSliceInlineRange(slice.block);
+      if (!sliceRange) {
+        return false;
+      }
+
+      return (
+        normalizedInlineOffset >= sliceRange.start &&
+        normalizedInlineOffset < sliceRange.end
+      );
+    });
+  }
+
+  private getPretextSliceInlineRange(
+    block: LayoutPretextBlock
+  ): { start: number; end: number } | null {
+    const start = block.textOffsetBase ?? 0;
+    const end = start + sumPretextLineTextLength(block.lines);
+    return end > start ? { start, end } : null;
+  }
+
   private getProgressForCurrentLocator(): number {
     if (!this.locator) {
       return 0;
@@ -4140,6 +4349,65 @@ export class EpubReader {
     return true;
   }
 
+  private scrollToLocatorInlineOffset(): boolean {
+    if (
+      !this.options.container ||
+      !this.locator?.blockId ||
+      this.locator.inlineOffset === undefined
+    ) {
+      return false;
+    }
+
+    const section = this.book?.sections[this.currentSectionIndex];
+    if (!section) {
+      return false;
+    }
+
+    const textPosition = resolveCanvasTextPosition({
+      container: this.options.container,
+      sectionId: section.id,
+      blockId: this.locator.blockId,
+      inlineOffset: this.locator.inlineOffset,
+      bias: "start"
+    });
+    if (!textPosition) {
+      return false;
+    }
+
+    if (typeof document.createRange !== "function") {
+      return false;
+    }
+
+    const range = document.createRange();
+    if (typeof range.getBoundingClientRect !== "function") {
+      return false;
+    }
+
+    const textLength = textPosition.node.textContent?.length ?? 0;
+    const startOffset = Math.max(0, Math.min(textLength, textPosition.offset));
+    const endOffset =
+      startOffset < textLength
+        ? startOffset + 1
+        : Math.max(0, Math.min(textLength, startOffset - 1));
+
+    range.setStart(textPosition.node, Math.min(startOffset, endOffset));
+    range.setEnd(textPosition.node, Math.max(startOffset, endOffset));
+    const rangeRect = range.getBoundingClientRect();
+    const rect =
+      rangeRect.height > 0
+        ? rangeRect
+        : textPosition.node.parentElement?.getBoundingClientRect() ?? null;
+    if (!rect) {
+      return false;
+    }
+
+    const containerRect = this.options.container.getBoundingClientRect();
+    const nextScrollTop =
+      this.options.container.scrollTop + rect.top - containerRect.top - 16;
+    this.setProgrammaticScrollTop(Math.max(0, nextScrollTop));
+    return true;
+  }
+
   private scrollToLocatorAnchor(): boolean {
     if (!this.options.container || !this.locator?.anchorId) {
       return false;
@@ -4176,6 +4444,10 @@ export class EpubReader {
     }
 
     if (this.scrollToLocatorAnchor()) {
+      return;
+    }
+
+    if (this.scrollToLocatorInlineOffset()) {
       return;
     }
 
@@ -5463,7 +5735,11 @@ export class EpubReader {
     range.setStart(startPosition.node, startPosition.offset);
     range.setEnd(endPosition.node, endPosition.offset);
     const containerRect = this.options.container.getBoundingClientRect();
-    return Array.from(range.getClientRects())
+    const rangeClientRects =
+      typeof range.getClientRects === "function"
+        ? Array.from(range.getClientRects())
+        : [];
+    return rangeClientRects
       .filter((rect) => rect.width > 0 && rect.height > 0)
       .map((rect) => ({
         x: rect.left - containerRect.left + this.options.container!.scrollLeft,
@@ -5867,9 +6143,11 @@ function measureSelectionRectsWithinContainer(input: {
   fallbackElement?: HTMLElement | null;
   mode: ReadingMode;
 }): VisibleDrawBounds {
+  const selectionRange =
+    input.selection.rangeCount > 0 ? input.selection.getRangeAt(0) : null;
   const rangeRects =
-    input.selection.rangeCount > 0
-      ? Array.from(input.selection.getRangeAt(0).getClientRects())
+    selectionRange && typeof selectionRange.getClientRects === "function"
+      ? Array.from(selectionRange.getClientRects())
       : [];
   const rects = rangeRects
     .map((rect) =>
@@ -6219,6 +6497,105 @@ function clampProgress(value: number): number {
   }
 
   return Math.max(0, Math.min(value, 1));
+}
+
+function sumPretextLineTextLength(
+  lines: Array<{ fragments: Array<{ text: string }> }>,
+  start = 0,
+  end = lines.length
+): number {
+  let total = 0;
+  for (let index = start; index < end; index += 1) {
+    const line = lines[index];
+    if (!line) {
+      continue;
+    }
+    total += line.fragments.reduce(
+      (lineTotal, fragment) => lineTotal + Array.from(fragment.text).length,
+      0
+    );
+  }
+  return total;
+}
+
+function resolveInlineOffsetAtClientPoint(input: {
+  textRun: HTMLElement;
+  clientX: number;
+  clientY: number;
+  inlineStart: number;
+  inlineEnd: number;
+}): number {
+  const textLength = Array.from(input.textRun.textContent ?? "").length;
+  const maxOffset = Math.max(input.inlineStart, input.inlineEnd);
+  const minOffset = Math.min(input.inlineStart, input.inlineEnd);
+  if (textLength <= 0 || maxOffset <= minOffset) {
+    return minOffset;
+  }
+
+  const localOffset = resolveLocalTextOffsetAtClientPoint({
+    textRun: input.textRun,
+    clientX: input.clientX,
+    clientY: input.clientY,
+    textLength
+  });
+  const maxReadableInlineOffset = Math.max(
+    input.inlineStart,
+    input.inlineEnd - 1
+  );
+  return Math.max(
+    input.inlineStart,
+    Math.min(maxReadableInlineOffset, input.inlineStart + localOffset)
+  );
+}
+
+function resolveLocalTextOffsetAtClientPoint(input: {
+  textRun: HTMLElement;
+  clientX: number;
+  clientY: number;
+  textLength: number;
+}): number {
+  const documentWithCaret = document as Document & {
+    caretPositionFromPoint?: (
+      x: number,
+      y: number
+    ) => { offsetNode: Node | null; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  const firstTextNode = input.textRun.firstChild;
+
+  const caretPosition = documentWithCaret.caretPositionFromPoint?.(
+    input.clientX,
+    input.clientY
+  );
+  if (
+    caretPosition?.offsetNode &&
+    input.textRun.contains(caretPosition.offsetNode)
+  ) {
+    return Math.max(0, Math.min(input.textLength, caretPosition.offset));
+  }
+
+  const caretRange = documentWithCaret.caretRangeFromPoint?.(
+    input.clientX,
+    input.clientY
+  );
+  if (
+    caretRange?.startContainer &&
+    input.textRun.contains(caretRange.startContainer)
+  ) {
+    return Math.max(0, Math.min(input.textLength, caretRange.startOffset));
+  }
+
+  if (!(firstTextNode instanceof Text)) {
+    return 0;
+  }
+
+  const rect = input.textRun.getBoundingClientRect();
+  if (rect.width <= 0) {
+    return 0;
+  }
+
+  const ratio = Math.max(0, Math.min(1, (input.clientX - rect.left) / rect.width));
+  return Math.max(0, Math.min(input.textLength, Math.round(ratio * input.textLength)));
 }
 
 function resolveCanvasTextPosition(input: {

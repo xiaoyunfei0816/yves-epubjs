@@ -866,6 +866,120 @@ describe("pretext layout integration", () => {
     expect(locator?.blockId).toBe("text-1");
   });
 
+  it("captures a precise block locator from the viewport center for mode switches", async () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 280
+    });
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 220
+    });
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 0
+    });
+    document.body.appendChild(container);
+
+    const reader = new EpubReader({
+      container,
+      mode: "scroll"
+    });
+    const repeatedText = Array.from({ length: 120 }, (_, index) => ({
+      kind: "text" as const,
+      text: `Paragraph ${index + 1} keeps the chapter tall for viewport anchor tests. `
+    }));
+    const section: SectionDocument = {
+      ...createSection(),
+      blocks: [
+        {
+          id: "text-1",
+          kind: "text",
+          inlines: repeatedText
+        }
+      ]
+    };
+    const book: Book = {
+      metadata: { title: "Viewport Anchor Demo" },
+      manifest: [],
+      spine: [
+        {
+          idref: "item-1",
+          href: section.href,
+          linear: true
+        }
+      ],
+      toc: [],
+      sections: [section]
+    };
+
+    const state = reader as unknown as {
+      book: Book;
+      captureModeSwitchLocator(): { blockId?: string; spineIndex: number } | null;
+    };
+    state.book = book;
+    await reader.render();
+
+    container.scrollTop = 420;
+
+    const locator = state.captureModeSwitchLocator();
+
+    expect(locator?.spineIndex).toBe(0);
+    expect(locator?.blockId).toBe("text-1");
+  });
+
+  it("falls back to the current locator when the viewport center cannot be resolved", () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 280
+    });
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 220
+    });
+    document.body.appendChild(container);
+
+    const reader = new EpubReader({
+      container,
+      mode: "scroll"
+    });
+    const section = createSection();
+    const book: Book = {
+      metadata: { title: "Fallback Demo" },
+      manifest: [],
+      spine: [
+        {
+          idref: "item-1",
+          href: section.href,
+          linear: true
+        }
+      ],
+      toc: [],
+      sections: [section]
+    };
+
+    const state = reader as unknown as {
+      book: Book;
+      locator: { spineIndex: number; progressInSection: number; blockId?: string } | null;
+      captureModeSwitchLocator(): { blockId?: string; spineIndex: number; progressInSection: number } | null;
+    };
+    state.book = book;
+    state.locator = {
+      spineIndex: 0,
+      progressInSection: 0.4,
+      blockId: "fallback-block"
+    };
+
+    expect(state.captureModeSwitchLocator()).toEqual({
+      spineIndex: 0,
+      progressInSection: 0.4,
+      blockId: "fallback-block"
+    });
+  });
+
   it("supports paginated navigation and page lookup", async () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", {

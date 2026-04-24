@@ -63,6 +63,7 @@ export type LayoutPretextBlock = {
   id: string;
   kind: "text" | "heading";
   level?: 1 | 2 | 3 | 4 | 5 | 6;
+  textOffsetBase?: number;
   lineHeight: number;
   textAlign: TextAlign;
   color?: string;

@@ -347,6 +347,7 @@ function createPretextSliceBlock(
 
   return {
     ...block,
+    textOffsetBase: sumPretextTextLength(block.lines, 0, lineStart),
     paddingTop,
     paddingBottom: isLastSlice ? block.paddingBottom : 0,
     lines: block.lines.slice(lineStart, lineEnd),
@@ -367,6 +368,31 @@ function estimatePretextSliceHeight(
 
 function getPretextBlockTrailingAfterContent(block: LayoutPretextBlock): number {
   return Math.max(0, getPretextBlockTrailingSpace(block) - block.paddingTop)
+}
+
+function sumPretextTextLength(
+  lines: LayoutPretextBlock["lines"],
+  start = 0,
+  end = lines.length
+): number {
+  let total = 0
+  for (let index = start; index < end; index += 1) {
+    total += sumLineTextLength(lines[index])
+  }
+  return total
+}
+
+function sumLineTextLength(
+  line: LayoutPretextBlock["lines"][number] | undefined
+): number {
+  if (!line) {
+    return 0
+  }
+
+  return line.fragments.reduce(
+    (total, fragment) => total + Array.from(fragment.text).length,
+    0
+  )
 }
 
 function lineContainsImage(
