@@ -264,13 +264,7 @@ describe("CanvasRenderer image painting", () => {
     renderer.renderPaginated(container, displayList, 200);
 
     expect(drawImage).toHaveBeenCalledTimes(1);
-    expect(drawImage).toHaveBeenCalledWith(
-      expect.anything(),
-      62,
-      12,
-      60,
-      120
-    );
+    expect(drawImage).toHaveBeenCalledWith(expect.anything(), 62, 12, 60, 120);
   });
 
   it("offsets text drawing away from the top edge to avoid clipping tall glyphs", () => {
@@ -386,21 +380,71 @@ describe("CanvasRenderer image painting", () => {
       '<article class="placeholder-page">Waiting</article><div class="stale-node"></div>';
 
     const renderer = new CanvasRenderer();
-    const result = renderer.renderScrollable(
-      container,
-      [
-        {
-          sectionId: "section-1",
-          sectionHref: "OPS/chapter-1.xhtml",
-          height: 420
-        }
-      ]
-    );
+    const result = renderer.renderScrollable(container, [
+      {
+        sectionId: "section-1",
+        sectionHref: "OPS/chapter-1.xhtml",
+        height: 420
+      }
+    ]);
 
     expect(container.querySelector(".placeholder-page")).toBeNull();
     expect(container.querySelector(".stale-node")).toBeNull();
-    expect(container.querySelector('article[data-section-id="section-1"]')).toBeTruthy();
+    expect(
+      container.querySelector('article[data-section-id="section-1"]')
+    ).toBeTruthy();
     expect(result.totalCanvasHeight).toBe(0);
+  });
+
+  it("clears stale DOM children when reusing a section wrapper for canvas rendering", () => {
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      configurable: true,
+      value() {
+        return {
+          setTransform() {
+            return undefined;
+          },
+          clearRect() {
+            return undefined;
+          },
+          measureText() {
+            return {
+              actualBoundingBoxAscent: 12
+            };
+          }
+        };
+      }
+    });
+
+    const container = document.createElement("div");
+    container.innerHTML =
+      '<article data-section-id="section-1" class="epub-section epub-section-dom"><p class="stale-dom">目录</p></article>';
+
+    const renderer = new CanvasRenderer();
+    const displayList: SectionDisplayList = {
+      sectionId: "section-1",
+      sectionHref: "OPS/chapter-1.xhtml",
+      width: 280,
+      height: 120,
+      ops: [],
+      interactions: []
+    };
+
+    renderer.renderScrollable(container, [
+      {
+        sectionId: "section-1",
+        sectionHref: "OPS/chapter-1.xhtml",
+        height: 120,
+        displayList
+      }
+    ]);
+
+    const wrapper = container.querySelector<HTMLElement>(
+      'article[data-section-id="section-1"]'
+    );
+    expect(wrapper?.classList.contains("epub-section-canvas")).toBe(true);
+    expect(wrapper?.querySelector(".stale-dom")).toBeNull();
+    expect(wrapper?.querySelector("canvas.epub-canvas-section")).toBeTruthy();
   });
 
   it("aligns text layer glyph tops with the measured canvas ascent", () => {

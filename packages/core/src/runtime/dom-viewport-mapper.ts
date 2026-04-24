@@ -106,6 +106,10 @@ export function mapDomPointToLocator(input: DomPointLocatorInput): Locator {
     container: input.container,
     sectionElement: input.sectionElement,
     point: input.point
+  }) ?? findDomBlockTargetContainingPoint({
+    container: input.container,
+    sectionElement: input.sectionElement,
+    point: input.point
   })
 
   if (!target) {
@@ -292,7 +296,32 @@ function findDomTargetContainingPoint(input: {
   point: Point
 }): HTMLElement | null {
   const sectionRoot = getDomSectionRoot(input.sectionElement)
-  const candidates = collectDomGeometryTargets(sectionRoot)
+  return findSmallestElementContainingPoint({
+    container: input.container,
+    candidates: collectDomGeometryTargets(sectionRoot),
+    point: input.point
+  })
+}
+
+function findDomBlockTargetContainingPoint(input: {
+  container: HTMLElement
+  sectionElement: HTMLElement
+  point: Point
+}): HTMLElement | null {
+  const sectionRoot = getDomSectionRoot(input.sectionElement)
+  return findSmallestElementContainingPoint({
+    container: input.container,
+    candidates: collectDomBlockTargets(sectionRoot),
+    point: input.point
+  })
+}
+
+function findSmallestElementContainingPoint(input: {
+  container: HTMLElement
+  candidates: HTMLElement[]
+  point: Point
+}): HTMLElement | null {
+  const candidates = input.candidates
   if (candidates.length === 0) {
     return null
   }
@@ -357,6 +386,40 @@ function collectDomHitTargets(sectionRoot: HTMLElement): HTMLElement[] {
   return elements
 }
 
+function collectDomBlockTargets(sectionRoot: HTMLElement): HTMLElement[] {
+  const targets = sectionRoot.querySelectorAll<HTMLElement>(
+    [
+      "p",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "blockquote",
+      "pre",
+      "figure",
+      "aside",
+      "nav",
+      "hr",
+      "ul",
+      "ol",
+      "li",
+      "dl",
+      "dt",
+      "dd",
+      "table",
+      "tr",
+      "th",
+      "td",
+      "img",
+      "image"
+    ].join(", ")
+  )
+
+  return Array.from(targets)
+}
+
 function resolveAnchorIdForElement(
   section: SectionDocument,
   element: HTMLElement
@@ -380,6 +443,11 @@ function resolveAnchorIdForElement(
     }
   }
 
+  const nearbyAnchor = resolveNearbyAnchorIdForElement(section, element)
+  if (nearbyAnchor) {
+    return nearbyAnchor
+  }
+
   return undefined
 }
 
@@ -400,8 +468,80 @@ function resolveBlockIdForElement(
     return section.anchors[namedAnchor]
   }
 
+  const nearbyAnchor = resolveNearbyAnchorIdForElement(section, element)
+  if (nearbyAnchor) {
+    return section.anchors[nearbyAnchor]
+  }
+
   if (sectionRoot.id.trim()) {
     return sectionRoot.id.trim()
+  }
+
+  return undefined
+}
+
+function resolveNearbyAnchorIdForElement(
+  section: SectionDocument,
+  element: HTMLElement
+): string | undefined {
+  const directDescendantAnchor = element.querySelector<HTMLElement>("[id], [name]")
+  const directDescendantAnchorId = resolveKnownAnchorId(section, directDescendantAnchor)
+  if (directDescendantAnchorId) {
+    return directDescendantAnchorId
+  }
+
+  let sibling: ChildNode | null = element.previousSibling
+  while (sibling) {
+    if (sibling.nodeType === Node.TEXT_NODE && !sibling.textContent?.trim()) {
+      sibling = sibling.previousSibling
+      continue
+    }
+
+    if (sibling instanceof HTMLElement) {
+      const siblingAnchor = resolveKnownAnchorId(section, sibling)
+      if (siblingAnchor) {
+        return siblingAnchor
+      }
+
+      const descendantAnchor = Array.from(
+        sibling.querySelectorAll<HTMLElement>("[id], [name]")
+      )
+        .reverse()
+        .map((candidate) => resolveKnownAnchorId(section, candidate))
+        .find((anchorId): anchorId is string => Boolean(anchorId))
+      if (descendantAnchor) {
+        return descendantAnchor
+      }
+
+      if (sibling.textContent?.trim()) {
+        return undefined
+      }
+    } else if (sibling.textContent?.trim()) {
+      return undefined
+    }
+
+    sibling = sibling.previousSibling
+  }
+
+  return undefined
+}
+
+function resolveKnownAnchorId(
+  section: SectionDocument,
+  element: HTMLElement | null
+): string | undefined {
+  if (!element) {
+    return undefined
+  }
+
+  const elementId = element.id.trim()
+  if (elementId && section.anchors[elementId]) {
+    return elementId
+  }
+
+  const namedAnchor = element.getAttribute("name")?.trim()
+  if (namedAnchor && section.anchors[namedAnchor]) {
+    return namedAnchor
   }
 
   return undefined

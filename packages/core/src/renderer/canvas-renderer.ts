@@ -71,7 +71,11 @@ export class CanvasRenderer {
     canvas.dataset.sectionId = displayList.sectionId;
     canvas.style.display = "block";
     canvas.style.margin = "0 auto";
-    this.prepareCanvas(canvas, displayList.width, Math.max(height, displayList.height));
+    this.prepareCanvas(
+      canvas,
+      displayList.width,
+      Math.max(height, displayList.height)
+    );
     const renderToken = this.assignRenderToken(canvas);
     wrapper.appendChild(canvas);
     const textLayer = createCanvasTextLayer(displayList, {
@@ -135,7 +139,8 @@ export class CanvasRenderer {
 
     for (const sectionEntry of sectionsToRender) {
       const wrapper =
-        existingWrappers.get(sectionEntry.sectionId) ?? document.createElement("article");
+        existingWrappers.get(sectionEntry.sectionId) ??
+        document.createElement("article");
       existingWrappers.delete(sectionEntry.sectionId);
 
       if (sectionEntry.domHtml) {
@@ -162,14 +167,22 @@ export class CanvasRenderer {
       }
 
       const displayList = sectionEntry.displayList;
+      const wasCanvasWrapper = wrapper.classList.contains(
+        "epub-section-canvas"
+      );
       wrapper.className = "epub-section epub-section-canvas";
       wrapper.dataset.sectionId = displayList.sectionId;
       wrapper.dataset.href = displayList.sectionHref;
       wrapper.style.height = `${displayList.height}px`;
       wrapper.style.position = "relative";
-      const renderWindows = (sectionEntry.renderWindows?.length
-        ? sectionEntry.renderWindows
-        : [{ top: 0, height: displayList.height }])
+      if (!wasCanvasWrapper) {
+        wrapper.replaceChildren();
+      }
+      const renderWindows = (
+        sectionEntry.renderWindows?.length
+          ? sectionEntry.renderWindows
+          : [{ top: 0, height: displayList.height }]
+      )
         .map((window) => normalizeRenderWindow(window, displayList.height))
         .filter((window) => window.height > 0);
       if (renderWindows.length === 0) {
@@ -203,9 +216,12 @@ export class CanvasRenderer {
         const slicedDisplayList = sliced.displayList;
         const sliceIndex = `${windowIndex}`;
         const canvas =
-          externalCanvas && sectionsToRender.length === 1 && renderWindows.length === 1
+          externalCanvas &&
+          sectionsToRender.length === 1 &&
+          renderWindows.length === 1
             ? externalCanvas
-            : existingCanvases.get(sliceIndex) ?? document.createElement("canvas");
+            : (existingCanvases.get(sliceIndex) ??
+              document.createElement("canvas"));
         existingCanvases.delete(sliceIndex);
         canvas.className = "epub-canvas epub-canvas-section";
         canvas.dataset.sliceIndex = sliceIndex;
@@ -214,13 +230,21 @@ export class CanvasRenderer {
         canvas.style.top = `${renderWindow.top}px`;
         canvas.style.left = "50%";
         canvas.style.transform = "translateX(-50%)";
-        this.prepareCanvas(canvas, slicedDisplayList.width, slicedDisplayList.height);
+        this.prepareCanvas(
+          canvas,
+          slicedDisplayList.width,
+          slicedDisplayList.height
+        );
         const renderToken = this.assignRenderToken(canvas);
         this.paint(canvas, slicedDisplayList, renderToken);
         if (!primaryCanvas) {
           primaryCanvas = canvas;
         }
-        if (!externalCanvas || sectionsToRender.length > 1 || renderWindows.length > 1) {
+        if (
+          !externalCanvas ||
+          sectionsToRender.length > 1 ||
+          renderWindows.length > 1
+        ) {
           wrapper.appendChild(canvas);
         }
         const textLayer = createCanvasTextLayer(slicedDisplayList, {
@@ -292,7 +316,9 @@ export class CanvasRenderer {
         const hit =
           [...section.interactions]
             .reverse()
-            .find((interaction) => containsPoint(interaction.rect, point.x, localY)) ?? null;
+            .find((interaction) =>
+              containsPoint(interaction.rect, point.x, localY)
+            ) ?? null;
         if (hit) {
           return {
             ...hit,
@@ -314,7 +340,8 @@ export class CanvasRenderer {
     width: number,
     height: number
   ): void {
-    const ratio = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
+    const ratio =
+      typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
     canvas.width = Math.max(1, Math.floor(width * ratio));
     canvas.height = Math.max(1, Math.floor(height * ratio));
     canvas.style.width = `${Math.max(1, width)}px`;
@@ -361,7 +388,14 @@ export class CanvasRenderer {
     context.save();
     context.fillStyle = op.color;
     if (op.radius && op.radius > 0) {
-      roundRect(context, op.rect.x, op.rect.y, op.rect.width, op.rect.height, op.radius);
+      roundRect(
+        context,
+        op.rect.x,
+        op.rect.y,
+        op.rect.width,
+        op.rect.height,
+        op.radius
+      );
       context.fill();
     } else {
       context.fillRect(op.rect.x, op.rect.y, op.rect.width, op.rect.height);
@@ -374,7 +408,10 @@ export class CanvasRenderer {
     context.restore();
   }
 
-  private paintLine(context: CanvasRenderingContext2D, op: DrawOp & { kind: "line" }): void {
+  private paintLine(
+    context: CanvasRenderingContext2D,
+    op: DrawOp & { kind: "line" }
+  ): void {
     context.save();
     context.strokeStyle = op.color;
     context.lineWidth = op.lineWidth;
@@ -385,7 +422,10 @@ export class CanvasRenderer {
     context.restore();
   }
 
-  private paintText(context: CanvasRenderingContext2D, op: TextRunDrawOp): void {
+  private paintText(
+    context: CanvasRenderingContext2D,
+    op: TextRunDrawOp
+  ): void {
     context.save();
     if (op.backgroundColor) {
       context.fillStyle = op.backgroundColor;
@@ -393,15 +433,24 @@ export class CanvasRenderer {
     }
     if (op.highlightSegments?.length) {
       for (const segment of op.highlightSegments) {
-        const segmentText = sliceByCharacterRange(op.text, segment.start, segment.end)
+        const segmentText = sliceByCharacterRange(
+          op.text,
+          segment.start,
+          segment.end
+        );
         if (!segmentText) {
-          continue
+          continue;
         }
-        const prefixText = sliceByCharacterRange(op.text, 0, segment.start)
-        const segmentX = op.rect.x + approximateTextWidth(prefixText, op.font)
-        const segmentWidth = approximateTextWidth(segmentText, op.font)
-        context.fillStyle = segment.color
-        context.fillRect(segmentX, op.rect.y, Math.max(1, segmentWidth), op.rect.height)
+        const prefixText = sliceByCharacterRange(op.text, 0, segment.start);
+        const segmentX = op.rect.x + approximateTextWidth(prefixText, op.font);
+        const segmentWidth = approximateTextWidth(segmentText, op.font);
+        context.fillStyle = segment.color;
+        context.fillRect(
+          segmentX,
+          op.rect.y,
+          Math.max(1, segmentWidth),
+          op.rect.height
+        );
       }
     }
     if (op.highlightColor) {
@@ -409,7 +458,12 @@ export class CanvasRenderer {
       context.fillRect(op.rect.x, op.rect.y, op.rect.width, op.rect.height);
     }
     context.font = op.font;
-    const metrics = resolveCanvasTextMetrics(op.font, op.text, op.rect.height, context);
+    const metrics = resolveCanvasTextMetrics(
+      op.font,
+      op.text,
+      op.rect.height,
+      context
+    );
     const fontSize = metrics.fontSize;
     const baselineY = op.y + metrics.topInset + metrics.actualAscent;
     context.textBaseline = "alphabetic";
@@ -440,7 +494,14 @@ export class CanvasRenderer {
     context.save();
     if (op.background && op.background !== "transparent") {
       context.fillStyle = op.background;
-      roundRect(context, op.rect.x, op.rect.y, op.rect.width, op.rect.height, 14);
+      roundRect(
+        context,
+        op.rect.x,
+        op.rect.y,
+        op.rect.width,
+        op.rect.height,
+        14
+      );
       context.fill();
     }
     const image = this.loadImage(op.src, () => {
@@ -449,7 +510,12 @@ export class CanvasRenderer {
       }
       this.paint(canvas, displayList, renderToken);
     });
-    if (image && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+    if (
+      image &&
+      image.complete &&
+      image.naturalWidth > 0 &&
+      image.naturalHeight > 0
+    ) {
       const fittedRect = fitRectContain(
         {
           width: image.naturalWidth,
@@ -468,7 +534,11 @@ export class CanvasRenderer {
       context.fillStyle = "rgba(71, 85, 105, 0.72)";
       context.font = '600 14px "Iowan Old Style", "Palatino Linotype", serif';
       context.textBaseline = "middle";
-      context.fillText("Image", op.rect.x + 16, op.rect.y + op.rect.height * 0.5);
+      context.fillText(
+        "Image",
+        op.rect.x + 16,
+        op.rect.y + op.rect.height * 0.5
+      );
     }
     context.restore();
   }
@@ -479,10 +549,7 @@ export class CanvasRenderer {
     }
     const cached = this.imageCache.get(src);
     if (cached) {
-      if (
-        onLoad &&
-        (!cached.complete || cached.naturalWidth <= 0)
-      ) {
+      if (onLoad && (!cached.complete || cached.naturalWidth <= 0)) {
         cached.addEventListener("load", onLoad, { once: true });
       }
       return cached;
@@ -561,7 +628,10 @@ function normalizeRenderWindow(
   maxHeight: number
 ): ScrollRenderWindow {
   const top = Math.max(0, Math.min(renderWindow.top, maxHeight));
-  const bottom = Math.max(top, Math.min(renderWindow.top + renderWindow.height, maxHeight));
+  const bottom = Math.max(
+    top,
+    Math.min(renderWindow.top + renderWindow.height, maxHeight)
+  );
   return {
     top,
     height: Math.max(0, bottom - top)
@@ -572,7 +642,9 @@ function sliceDisplayList(
   displayList: SectionDisplayList,
   renderWindow: ScrollRenderWindow
 ): SlicedDisplayList {
-  const sourceOps = displayList.ops.filter((op) => rectIntersectsWindow(op.rect, renderWindow));
+  const sourceOps = displayList.ops.filter((op) =>
+    rectIntersectsWindow(op.rect, renderWindow)
+  );
   const sourceInteractions = displayList.interactions.filter((interaction) =>
     rectIntersectsWindow(interaction.rect, renderWindow)
   );
@@ -591,7 +663,10 @@ function sliceDisplayList(
   };
 }
 
-function rectIntersectsWindow(rect: Rect, renderWindow: ScrollRenderWindow): boolean {
+function rectIntersectsWindow(
+  rect: Rect,
+  renderWindow: ScrollRenderWindow
+): boolean {
   const windowBottom = renderWindow.top + renderWindow.height;
   const rectBottom = rect.y + rect.height;
   return rectBottom > renderWindow.top && rect.y < windowBottom;
@@ -661,65 +736,70 @@ function createCanvasTextLayer(
 ): HTMLDivElement | null {
   const textOps = displayList.ops.filter(
     (op): op is TextRunDrawOp => op.kind === "text" && Boolean(op.text)
-  )
+  );
   if (textOps.length === 0) {
-    return null
+    return null;
   }
 
-  const layer = document.createElement("div")
-  layer.className = options.className
+  const layer = document.createElement("div");
+  layer.className = options.className;
   if (options.sliceIndex) {
-    layer.dataset.sliceIndex = options.sliceIndex
+    layer.dataset.sliceIndex = options.sliceIndex;
   }
-  layer.style.position = "absolute"
-  layer.style.left = "50%"
-  layer.style.top = `${options.top ?? 0}px`
-  layer.style.transform = "translateX(-50%)"
-  layer.style.width = `${Math.max(1, displayList.width)}px`
-  layer.style.height = `${Math.max(1, displayList.height)}px`
-  layer.style.zIndex = "1"
-  layer.style.userSelect = "text"
-  layer.style.webkitUserSelect = "text"
-  layer.style.pointerEvents = "auto"
-  layer.style.overflow = "hidden"
-  layer.style.color = "transparent"
-  layer.style.webkitTextFillColor = "transparent"
-  layer.style.caretColor = "transparent"
+  layer.style.position = "absolute";
+  layer.style.left = "50%";
+  layer.style.top = `${options.top ?? 0}px`;
+  layer.style.transform = "translateX(-50%)";
+  layer.style.width = `${Math.max(1, displayList.width)}px`;
+  layer.style.height = `${Math.max(1, displayList.height)}px`;
+  layer.style.zIndex = "1";
+  layer.style.userSelect = "text";
+  layer.style.webkitUserSelect = "text";
+  layer.style.pointerEvents = "auto";
+  layer.style.overflow = "hidden";
+  layer.style.color = "transparent";
+  layer.style.webkitTextFillColor = "transparent";
+  layer.style.caretColor = "transparent";
 
-  const measureContext = createTextMeasureContext()
-  const fragment = document.createDocumentFragment()
+  const measureContext = createTextMeasureContext();
+  const fragment = document.createDocumentFragment();
   for (const op of textOps) {
-    const span = document.createElement("span")
-    const metrics = resolveCanvasTextMetrics(op.font, op.text, op.rect.height, measureContext ?? undefined)
-    span.className = "epub-text-run"
-    span.dataset.readerSectionId = op.sectionId
-    span.dataset.readerBlockId = op.blockId
-    span.dataset.readerInlineStart = `${op.textStart ?? 0}`
-    span.dataset.readerInlineEnd = `${op.textEnd ?? Array.from(op.text).length}`
-    span.textContent = op.text
-    span.style.position = "absolute"
-    span.style.left = `${op.x}px`
-    span.style.top = `${op.y + metrics.topInset - (metrics.fontBoxAscent - metrics.actualAscent)}px`
-    span.style.width = `${Math.max(1, op.width)}px`
-    span.style.height = `${Math.max(1, metrics.selectionBoxHeight)}px`
-    span.style.font = op.font
-    span.style.lineHeight = `${Math.max(1, metrics.selectionBoxHeight)}px`
-    span.style.whiteSpace = "pre"
-    span.style.color = "transparent"
-    span.style.webkitTextFillColor = "transparent"
-    span.style.userSelect = "text"
-    span.style.webkitUserSelect = "text"
+    const span = document.createElement("span");
+    const metrics = resolveCanvasTextMetrics(
+      op.font,
+      op.text,
+      op.rect.height,
+      measureContext ?? undefined
+    );
+    span.className = "epub-text-run";
+    span.dataset.readerSectionId = op.sectionId;
+    span.dataset.readerBlockId = op.blockId;
+    span.dataset.readerInlineStart = `${op.textStart ?? 0}`;
+    span.dataset.readerInlineEnd = `${op.textEnd ?? Array.from(op.text).length}`;
+    span.textContent = op.text;
+    span.style.position = "absolute";
+    span.style.left = `${op.x}px`;
+    span.style.top = `${op.y + metrics.topInset - (metrics.fontBoxAscent - metrics.actualAscent)}px`;
+    span.style.width = `${Math.max(1, op.width)}px`;
+    span.style.height = `${Math.max(1, metrics.selectionBoxHeight)}px`;
+    span.style.font = op.font;
+    span.style.lineHeight = `${Math.max(1, metrics.selectionBoxHeight)}px`;
+    span.style.whiteSpace = "pre";
+    span.style.color = "transparent";
+    span.style.webkitTextFillColor = "transparent";
+    span.style.userSelect = "text";
+    span.style.webkitUserSelect = "text";
     if (op.underline) {
-      span.style.textDecoration = "underline"
-      span.style.textDecorationColor = "transparent"
+      span.style.textDecoration = "underline";
+      span.style.textDecorationColor = "transparent";
     }
-    fragment.appendChild(span)
+    fragment.appendChild(span);
   }
-  layer.appendChild(fragment)
-  return layer
+  layer.appendChild(fragment);
+  return layer;
 }
 
-const canvasTextMetricsCache = new Map<string, CanvasTextMetrics>()
+const canvasTextMetricsCache = new Map<string, CanvasTextMetrics>();
 
 function resolveCanvasTextMetrics(
   font: string,
@@ -727,83 +807,91 @@ function resolveCanvasTextMetrics(
   rectHeight: number,
   context?: CanvasTextMeasureContext
 ): CanvasTextMetrics {
-  const cacheKey = context ? null : `${font}\u0000${text}\u0000${rectHeight}`
+  const cacheKey = context ? null : `${font}\u0000${text}\u0000${rectHeight}`;
   if (cacheKey) {
-    const cached = canvasTextMetricsCache.get(cacheKey)
+    const cached = canvasTextMetricsCache.get(cacheKey);
     if (cached) {
-      return cached
+      return cached;
     }
   }
 
-  const fontSize = extractFontSize(font)
-  let actualAscent = fontSize * 0.82
-  let fontBoxAscent = actualAscent
-  let selectionBoxHeight = fontSize
-  const measureContext = context ?? createTextMeasureContext()
+  const fontSize = extractFontSize(font);
+  let actualAscent = fontSize * 0.82;
+  let fontBoxAscent = actualAscent;
+  let selectionBoxHeight = fontSize;
+  const measureContext = context ?? createTextMeasureContext();
   if (measureContext && typeof measureContext.measureText === "function") {
-    measureContext.save()
-    measureContext.font = font
-    const measured = measureContext.measureText(text)
-    measureContext.restore()
+    measureContext.save();
+    measureContext.font = font;
+    const measured = measureContext.measureText(text);
+    measureContext.restore();
     if (
       Number.isFinite(measured.actualBoundingBoxAscent) &&
       measured.actualBoundingBoxAscent > 0
     ) {
-      actualAscent = measured.actualBoundingBoxAscent
+      actualAscent = measured.actualBoundingBoxAscent;
     }
     if (
       Number.isFinite(measured.fontBoundingBoxAscent) &&
       measured.fontBoundingBoxAscent > 0
     ) {
-      fontBoxAscent = measured.fontBoundingBoxAscent
+      fontBoxAscent = measured.fontBoundingBoxAscent;
     }
     const fontBoxHeight = sumFiniteMetrics(
       measured.fontBoundingBoxAscent,
       measured.fontBoundingBoxDescent
-    )
+    );
     const actualBoxHeight = sumFiniteMetrics(
       measured.actualBoundingBoxAscent,
       measured.actualBoundingBoxDescent
-    )
+    );
     selectionBoxHeight =
-      fontBoxHeight > 0 ? fontBoxHeight : actualBoxHeight > 0 ? actualBoxHeight : fontSize
+      fontBoxHeight > 0
+        ? fontBoxHeight
+        : actualBoxHeight > 0
+          ? actualBoxHeight
+          : fontSize;
   }
 
   const topInset = Math.min(
     Math.max(fontSize * 0.08, 1),
     Math.max(rectHeight - actualAscent, 0)
-  )
+  );
   const result = {
     fontSize,
     actualAscent,
     fontBoxAscent,
     topInset,
     selectionBoxHeight
-  } satisfies CanvasTextMetrics
+  } satisfies CanvasTextMetrics;
   if (cacheKey) {
-    canvasTextMetricsCache.set(cacheKey, result)
+    canvasTextMetricsCache.set(cacheKey, result);
   }
-  return result
+  return result;
 }
 
 function createTextMeasureContext(): CanvasTextMeasureContext | null {
   if (typeof document !== "undefined") {
-    return document.createElement("canvas").getContext("2d")
+    return document.createElement("canvas").getContext("2d");
   }
   if (typeof OffscreenCanvas !== "undefined") {
-    return new OffscreenCanvas(1, 1).getContext("2d")
+    return new OffscreenCanvas(1, 1).getContext("2d");
   }
-  return null
+  return null;
 }
 
 function sumFiniteMetrics(first?: number, second?: number): number {
-  const safeFirst = typeof first === "number" && Number.isFinite(first) ? first : 0
-  const safeSecond = typeof second === "number" && Number.isFinite(second) ? second : 0
-  return safeFirst + safeSecond
+  const safeFirst =
+    typeof first === "number" && Number.isFinite(first) ? first : 0;
+  const safeSecond =
+    typeof second === "number" && Number.isFinite(second) ? second : 0;
+  return safeFirst + safeSecond;
 }
 
-function sliceByCharacterRange(text: string, start: number, end: number): string {
-  return Array.from(text)
-    .slice(Math.max(0, start), Math.max(0, end))
-    .join("")
+function sliceByCharacterRange(
+  text: string,
+  start: number,
+  end: number
+): string {
+  return Array.from(text).slice(Math.max(0, start), Math.max(0, end)).join("");
 }
