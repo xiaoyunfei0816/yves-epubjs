@@ -17,9 +17,12 @@ const DEFAULT_READING_TITLE = "Open a local EPUB"
 
 export function App(): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const readingSurfaceRef = useRef<HTMLElement | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedFileName, setSelectedFileName] = useState("No file selected")
   const [activeDrawer, setActiveDrawer] = useState<DrawerPanel | null>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [fullscreenAvailable, setFullscreenAvailable] = useState(false)
   const {
     snapshot,
     results,
@@ -105,8 +108,45 @@ export function App(): JSX.Element {
     setDebugMode(activeDrawer === "diagnostics")
   }, [activeDrawer, setDebugMode])
 
+  useEffect(() => {
+    const surface = readingSurfaceRef.current
+    setFullscreenAvailable(
+      Boolean(document.fullscreenEnabled && surface?.requestFullscreen)
+    )
+
+    function syncFullscreenState(): void {
+      setIsFullscreen(document.fullscreenElement === surface)
+    }
+
+    document.addEventListener("fullscreenchange", syncFullscreenState)
+    return () => document.removeEventListener("fullscreenchange", syncFullscreenState)
+  }, [])
+
   function toggleDrawer(panel: DrawerPanel): void {
     setActiveDrawer((current) => (current === panel ? null : panel))
+  }
+
+  async function toggleFullscreen(): Promise<void> {
+    const surface = readingSurfaceRef.current
+    if (!surface || !document.fullscreenEnabled || !surface.requestFullscreen) {
+      return
+    }
+
+    try {
+      if (document.fullscreenElement === surface) {
+        await document.exitFullscreen()
+        return
+      }
+
+      if (document.fullscreenElement) {
+        await document.exitFullscreen()
+        return
+      }
+
+      await surface.requestFullscreen()
+    } catch {
+      setIsFullscreen(document.fullscreenElement === surface)
+    }
   }
 
   return (
@@ -122,6 +162,8 @@ export function App(): JSX.Element {
               {mode === "scroll" ? "section" : "page"} {snapshot.pagination.currentPage} of{" "}
               {snapshot.pagination.totalPages}
             </span>
+            <span className="reading-fact-chip">{bookmarkStatus}</span>
+            <span className="reading-fact-chip">{highlightStatus}</span>
           </div>
         </div>
         <label className="file-picker file-picker-topbar">
@@ -145,7 +187,11 @@ export function App(): JSX.Element {
       </header>
 
       <section className="reading-viewport">
-        <section className="reading-surface">
+        <section
+          ref={readingSurfaceRef}
+          className="reading-surface"
+          data-fullscreen={isFullscreen ? "true" : "false"}
+        >
           <div className="reading-surface-strip">
             <ReaderToolbar
               mode={mode}
@@ -153,6 +199,8 @@ export function App(): JSX.Element {
               totalPages={snapshot.pagination.totalPages}
               pageValue={pageValue}
               hasSavedBookmark={hasSavedBookmark}
+              isFullscreen={isFullscreen}
+              fullscreenAvailable={fullscreenAvailable}
               onPageValueChange={setPageValue}
               onGoToPage={goToPage}
               onPrevious={goToPreviousPage}
@@ -161,11 +209,9 @@ export function App(): JSX.Element {
               onRestoreBookmark={restoreSavedBookmark}
               onAddHighlight={addHighlight}
               onClearHighlights={clearHighlights}
+              onModeChange={handleModeChange}
+              onToggleFullscreen={toggleFullscreen}
             />
-            <div className="reading-surface-status">
-              <span>{bookmarkStatus}</span>
-              <span>{highlightStatus}</span>
-            </div>
           </div>
 
           <div className="reader-stage reader-stage-blueprint">

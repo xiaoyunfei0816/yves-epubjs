@@ -96,6 +96,8 @@ export function ReaderToolbar(props: {
   totalPages: number
   pageValue: string
   hasSavedBookmark: boolean
+  isFullscreen: boolean
+  fullscreenAvailable: boolean
   onPageValueChange: (value: string) => void
   onGoToPage: (page: number) => void | Promise<void>
   onPrevious: () => void | Promise<void>
@@ -104,8 +106,14 @@ export function ReaderToolbar(props: {
   onRestoreBookmark: () => void | Promise<void>
   onAddHighlight: () => void | Promise<void>
   onClearHighlights: () => void
+  onModeChange: (mode: "scroll" | "paginated") => void | Promise<void>
+  onToggleFullscreen: () => void | Promise<void>
 }): JSX.Element {
   const positionLabel = props.mode === "scroll" ? "Section" : "Page"
+  const modeOptions: Array<{ value: "scroll" | "paginated"; label: string }> = [
+    { value: "scroll", label: "Scroll" },
+    { value: "paginated", label: "Paginated" }
+  ]
 
   return (
     <div className="reader-toolbar">
@@ -147,6 +155,34 @@ export function ReaderToolbar(props: {
       <div className="reader-toolbar-group">
         <ToolbarButton onClick={props.onAddHighlight}>Highlight</ToolbarButton>
         <ToolbarButton onClick={props.onClearHighlights}>Clear</ToolbarButton>
+      </div>
+      <div className="reader-toolbar-group reader-toolbar-group-mode" aria-label="Reading mode">
+        {modeOptions.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={`toolbar-mode-button${
+              props.mode === option.value ? " is-active" : ""
+            }`}
+            aria-pressed={props.mode === option.value}
+            onClick={() => {
+              if (props.mode === option.value) {
+                return
+              }
+              void props.onModeChange(option.value)
+            }}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      <div className="reader-toolbar-group reader-toolbar-group-fullscreen">
+        <ToolbarButton
+          disabled={!props.fullscreenAvailable}
+          onClick={props.onToggleFullscreen}
+        >
+          {props.isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+        </ToolbarButton>
       </div>
     </div>
   )
