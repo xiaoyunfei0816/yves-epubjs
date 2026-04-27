@@ -1,6 +1,25 @@
 {
-  "name": "@pretext-epub/core",
+  "name": "@yves-epub/core",
   "version": "0.1.0",
+  "description": "Browser EPUB reader engine with parsing, hybrid rendering, navigation,search, bookmarks, annotations, and reader preferences.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xiaoyunfei0816/yves-epubjs.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/xiaoyunfei0816/yves-epubjs/issues"
+  },
+  "homepage": "https://github.com/xiaoyunfei0816/yves-epubjs#readme",
+  "keywords": [
+    "epub",
+    "reader",
+    "ebook",
+    "typescript",
+    "canvas",
+    "dom"
+  ],
   "private": false,
   "type": "module",
   "main": "./dist/index.cjs",
