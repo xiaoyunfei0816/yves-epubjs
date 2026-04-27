@@ -72,7 +72,9 @@ export class ReaderScrollPositionService {
       return -1
     }
 
-    const renderedSections = collectRenderedSectionEntries(input.container)
+    const renderedSections = collectRenderedSectionEntries(input.container, {
+      includeVirtual: true
+    })
       .map((entry) => {
         const sectionIndex = input.sections.findIndex(
           (section) => section.id === entry.sectionId
@@ -258,12 +260,16 @@ export class ReaderScrollPositionService {
 }
 
 function collectRenderedSectionEntries(
-  container: HTMLElement
+  container: HTMLElement,
+  options: {
+    includeVirtual?: boolean
+  } = {}
 ): RenderedSectionEntry[] {
+  const selector = options.includeVirtual
+    ? "article[data-section-id]"
+    : "article[data-section-id]:not(.epub-section-virtual)"
   return Array.from(
-    container.querySelectorAll<HTMLElement>(
-      "article[data-section-id]:not(.epub-section-virtual)"
-    )
+    container.querySelectorAll<HTMLElement>(selector)
   )
     .map((element) => {
       const sectionId = element.dataset.sectionId

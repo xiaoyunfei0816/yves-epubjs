@@ -59,6 +59,29 @@ describe("ReaderScrollPositionService", () => {
     ).toBe(1)
   })
 
+  it("finds the current section when the viewport lands on a virtual placeholder", () => {
+    const service = new ReaderScrollPositionService()
+    const container = document.createElement("div")
+    container.append(
+      createArticle("section-1", 0, 300),
+      createArticle("section-2", 300, 900, "epub-section-virtual"),
+      createArticle("section-3", 1200, 300)
+    )
+    const sections = [
+      ...createSections(),
+      { id: "section-3", href: "section-3.xhtml", anchors: {}, blocks: [] }
+    ]
+
+    expect(
+      service.findSectionIndexForOffset({
+        container,
+        sections,
+        offset: 640,
+        getSectionHeight: () => 1000
+      })
+    ).toBe(1)
+  })
+
   it("resolves scroll windows and offsets visible render geometry", () => {
     const service = new ReaderScrollPositionService()
     const sections = [
@@ -116,10 +139,12 @@ function createSections(): SectionDocument[] {
 function createArticle(
   sectionId: string,
   offsetTop: number,
-  offsetHeight: number
+  offsetHeight: number,
+  className = ""
 ): HTMLElement {
   const article = document.createElement("article")
   article.dataset.sectionId = sectionId
+  article.className = className
   Object.defineProperty(article, "offsetTop", {
     configurable: true,
     value: offsetTop
