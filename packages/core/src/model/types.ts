@@ -1,7 +1,12 @@
 export type ReadingMode = "scroll" | "paginated";
 export type RenderMode = "canvas" | "dom";
 export type RenditionLayout = "reflowable" | "pre-paginated";
-export type RenditionSpread = "auto" | "none" | "landscape" | "portrait" | "both";
+export type RenditionSpread =
+  | "auto"
+  | "none"
+  | "landscape"
+  | "portrait"
+  | "both";
 export type ReaderSpreadMode = "auto" | "none" | "always";
 export type PageSpreadPlacement = "left" | "right" | "center";
 export type ChapterRenderReason = string;
@@ -422,7 +427,11 @@ export type TextRangeSelector = {
   end: TextRangePoint;
 };
 
-export type DecorationStyle = "highlight" | "underline" | "search-hit" | "active";
+export type DecorationStyle =
+  | "highlight"
+  | "underline"
+  | "search-hit"
+  | "active";
 
 export type DecorationRenderHint = "margin-marker" | "note-icon";
 
@@ -726,7 +735,10 @@ export type ReaderOptions = {
   onPaginatedCenterTap?: (
     input: ReaderEventMap["paginatedCenterTapped"]
   ) => void | Promise<void>;
-  onExternalLink?: (input: ReaderEventMap["externalLinkActivated"]) => void | Promise<void>;
+  onExternalLink?: (
+    input: ReaderEventMap["externalLinkActivated"]
+  ) => void | Promise<void>;
   onSectionRendered?: (input: SectionRenderedEvent) => void | Promise<void>;
   onSectionRelocated?: (input: SectionRelocatedEvent) => void | Promise<void>;
+  allowExternalEmbeddedResources?: boolean;
 };

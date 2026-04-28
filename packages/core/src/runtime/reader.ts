@@ -1,8 +1,5 @@
 import EventEmitter from "eventemitter3";
-import {
-  LayoutEngine,
-  type LayoutResult
-} from "../layout/layout-engine";
+import { LayoutEngine, type LayoutResult } from "../layout/layout-engine";
 import { CanvasRenderer } from "../renderer/canvas-renderer";
 import { DisplayListBuilder } from "../renderer/display-list-builder";
 import {
@@ -270,7 +267,10 @@ export class EpubReader {
   private lastRenderMetrics: RenderMetrics;
   private renderVersion: number;
   private lastChapterRenderDecision: ChapterRenderDecision | null;
-  private readonly imageIntrinsicSizeCache: Map<string, IntrinsicImageSize | null>;
+  private readonly imageIntrinsicSizeCache: Map<
+    string,
+    IntrinsicImageSize | null
+  >;
   private readonly pendingImageIntrinsicSizePaths: Set<string>;
   private lastLocatorRestoreDiagnostics: LocatorRestoreDiagnostics | null;
   private lastFixedLayoutRenderSignature: string | null;
@@ -474,8 +474,7 @@ export class EpubReader {
       resolveDisplayPageNumberToLeafPage: (pageNumber) =>
         this.resolveDisplayPageNumberToLeafPage(pageNumber),
       findPageByNumber: (pageNumber) => this.findPageByNumber(pageNumber),
-      createLocatorForPage: (page) =>
-        this.createLocatorForPage(page),
+      createLocatorForPage: (page) => this.createLocatorForPage(page),
       renderCurrentSection: () => this.renderCurrentSection(),
       emitRelocated: () => this.emitRelocated(),
       setCurrentPageNumber: (pageNumber) => {
@@ -570,8 +569,7 @@ export class EpubReader {
       renderScrollableCanvas: (renderVersion) =>
         this.renderScrollableCanvas(renderVersion),
       scrollToCurrentLocation: () => this.scrollToCurrentLocation(),
-      restoreScrollAnchor: (anchor) =>
-        this.restoreScrollAnchor(anchor),
+      restoreScrollAnchor: (anchor) => this.restoreScrollAnchor(anchor),
       scrollToLocatorAnchor: () => this.scrollToLocatorAnchor(),
       syncCurrentPageFromSection: () => this.syncCurrentPageFromSection(),
       getProgressForCurrentLocator: () => this.getProgressForCurrentLocator(),
@@ -2787,6 +2785,8 @@ export class EpubReader {
           : typeof this.options.container?.clientHeight === "number"
             ? { availableHeight: this.options.container.clientHeight }
             : {}),
+      allowExternalEmbeddedResources:
+        this.options.allowExternalEmbeddedResources === true,
       resolveDomResourceUrl: (path) => this.resolveDomResourceUrl(path)
     });
 
