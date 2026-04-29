@@ -8,6 +8,8 @@ import {
 } from "./reader-pagination"
 import { isDomInlineImageElement } from "./image-render-classification"
 
+const DOM_PAGE_EDGE_TOLERANCE = 0.5
+
 export type DomPaginationSyncResult = {
   pages: ReaderPage[]
   sectionEstimatedHeight: number
@@ -39,14 +41,20 @@ export class ReaderDomPaginationService {
         input.sectionElement.offsetHeight ||
         input.pageHeight
     )
-    const visibleHeight =
+    const rawVisibleHeight =
       nextPage?.sectionId === input.page.sectionId &&
       typeof nextPage.offsetInSection === "number"
+        ? nextPage.offsetInSection - targetOffset
+        : sectionHeight - targetOffset
+    const visibleHeight =
+      nextPage?.sectionId === input.page.sectionId &&
+      rawVisibleHeight > 0 &&
+      rawVisibleHeight < getMinimumDomPageAdvance(input.pageHeight)
         ? Math.max(
             1,
-            Math.min(input.pageHeight, nextPage.offsetInSection - targetOffset)
+            Math.min(input.pageHeight, sectionHeight - targetOffset)
           )
-        : Math.max(1, Math.min(input.pageHeight, sectionHeight - targetOffset))
+        : Math.max(1, Math.min(input.pageHeight, rawVisibleHeight))
     viewport.style.height = `${visibleHeight}px`
     input.sectionElement.style.position = "relative"
     input.sectionElement.style.transform = `translateY(-${targetOffset}px)`
@@ -217,7 +225,9 @@ export function measurePaginatedDomPageOffsets(
   if (lineBands.length === 0) {
     const offsets = [0]
     for (let offset = pageHeight; offset < sectionHeight; offset += pageHeight) {
-      offsets.push(offset)
+      if (shouldKeepPaginatedDomPageOffset(offset, sectionHeight, pageHeight, [])) {
+        offsets.push(offset)
+      }
     }
     return offsets
   }
@@ -236,11 +246,28 @@ export function measurePaginatedDomPageOffsets(
       ? lineBands.find((band) => band.top >= lastFullyVisibleLine.bottom - 0.5)
       : lineBands.find((band) => band.top > currentOffset + 0.5)
     const fallbackOffset = Math.min(sectionHeight, currentOffset + pageHeight)
+    const candidateOffset =
+      nextLine && nextLine.top <= fallbackOffset + DOM_PAGE_EDGE_TOLERANCE
+        ? nextLine.top
+        : fallbackOffset
+    const minimumAdvance = getMinimumDomPageAdvance(pageHeight)
     const nextOffset = Math.min(
       sectionHeight,
-      Math.max(currentOffset + 1, nextLine?.top ?? fallbackOffset)
+      candidateOffset - currentOffset < minimumAdvance
+        ? fallbackOffset
+        : Math.max(currentOffset + 1, candidateOffset)
     )
     if (nextOffset <= currentOffset + 0.5) {
+      break
+    }
+    if (
+      !shouldKeepPaginatedDomPageOffset(
+        nextOffset,
+        sectionHeight,
+        pageHeight,
+        lineBands
+      )
+    ) {
       break
     }
     offsets.push(nextOffset)
@@ -262,6 +289,28 @@ export function resolvePaginatedDomPageIndex(
   }
 
   return 0
+}
+
+function shouldKeepPaginatedDomPageOffset(
+  offset: number,
+  sectionHeight: number,
+  pageHeight: number,
+  lineBands: Array<{ top: number; bottom: number }>
+): boolean {
+  const remainingHeight = sectionHeight - offset
+  if (remainingHeight <= DOM_PAGE_EDGE_TOLERANCE) {
+    return false
+  }
+
+  if (remainingHeight >= getMinimumDomPageAdvance(pageHeight)) {
+    return true
+  }
+
+  return lineBands.some((band) => band.bottom > offset + DOM_PAGE_EDGE_TOLERANCE)
+}
+
+function getMinimumDomPageAdvance(pageHeight: number): number {
+  return Math.max(24, Math.min(80, pageHeight * 0.2))
 }
 
 export function collectPaginatedDomReadableLineBands(

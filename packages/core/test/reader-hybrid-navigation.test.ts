@@ -1020,6 +1020,84 @@ describe("EpubReader hybrid navigation", () => {
     }
   });
 
+  it("does not step into a trailing blank DOM page created by a tiny height remainder", async () => {
+    const originalOffsetHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "offsetHeight"
+    );
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollHeight"
+    );
+
+    try {
+      let currentScrollTop = 0;
+
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+        configurable: true,
+        get() {
+          if (
+            this.classList?.contains("epub-dom-section") &&
+            this.dataset?.sectionId === "section-long-dom"
+          ) {
+            return 862;
+          }
+          return originalOffsetHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+        configurable: true,
+        get() {
+          if (
+            this.classList?.contains("epub-dom-section") &&
+            this.dataset?.sectionId === "section-long-dom"
+          ) {
+            return 862;
+          }
+          return originalScrollHeight?.get?.call(this) ?? 0;
+        }
+      });
+
+      const { reader, container } = createLongDomReaderFixture("paginated");
+      Object.defineProperty(container, "scrollTop", {
+        configurable: true,
+        get() {
+          return currentScrollTop;
+        },
+        set(value: number) {
+          currentScrollTop = value;
+        }
+      });
+
+      await reader.render();
+
+      expect(reader.getRenderMetrics().backend).toBe("dom");
+      expect(reader.getPaginationInfo().totalPages).toBe(2);
+
+      await reader.next();
+      expect(reader.getPaginationInfo().currentPage).toBe(2);
+      expect(
+        container.querySelector<HTMLElement>(".epub-dom-spread")?.dataset
+          .spreadPageStart
+      ).toBe("2");
+
+      await reader.next();
+      expect(reader.getPaginationInfo().currentPage).toBe(2);
+      expect(
+        container.querySelector<HTMLElement>(".epub-dom-spread")?.dataset
+          .spreadPageStart
+      ).toBe("2");
+    } finally {
+      if (originalOffsetHeight) {
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalOffsetHeight);
+      }
+      if (originalScrollHeight) {
+        Object.defineProperty(HTMLElement.prototype, "scrollHeight", originalScrollHeight);
+      }
+    }
+  });
+
   it("starts the next DOM page at the top of overflowing media blocks", async () => {
     const originalGetBoundingClientRect = Object.getOwnPropertyDescriptor(
       HTMLElement.prototype,

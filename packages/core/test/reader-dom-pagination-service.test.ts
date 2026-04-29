@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest"
 import type { SectionDocument } from "../src/model/types"
 import {
   ReaderDomPaginationService,
-  collectPaginatedDomReadableLineBands
+  collectPaginatedDomReadableLineBands,
+  measurePaginatedDomPageOffsets
 } from "../src/runtime/reader-dom-pagination-service"
 import type { ReaderPage } from "../src/runtime/paginated-render-plan"
 
@@ -104,6 +105,22 @@ describe("ReaderDomPaginationService", () => {
         top: 140,
         bottom: 260
       }
+    ])
+  })
+
+  it("does not create a trailing tiny page from section height remainder", () => {
+    const sectionElement = document.createElement("section")
+    sectionElement.className = "epub-dom-section"
+    setElementBox(sectionElement, {
+      top: 0,
+      height: 862,
+      scrollHeight: 862,
+      offsetHeight: 862
+    })
+
+    expect(measurePaginatedDomPageOffsets(sectionElement, 430)).toEqual([
+      0,
+      430
     ])
   })
 })
