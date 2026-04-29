@@ -367,10 +367,14 @@ describe("DomChapterRenderer", () => {
     expect(css).toContain("padding-left: var(--reader-quote-accent-gap);")
     expect(css).toContain("max-height: min(900px, calc(var(--reader-content-viewport-height, 100vh) * 0.78));")
     expect(css).toContain(".epub-dom-section:not(.epub-dom-section-fxl) img {")
+    const inlineImageSelector =
+      '.epub-dom-section:not(.epub-dom-section-fxl) :is(a.footnote, a.noteref, a[epub\\:type~="noteref"], a[role="doc-noteref"], sup, sub, small) img {'
+    expect(css).toContain(inlineImageSelector)
+    expect(css).not.toContain(
+      '.epub-dom-section :where(a.footnote, a.noteref, a[epub\\:type~="noteref"], a[role="doc-noteref"], sup, sub, small) img {'
+    )
     expect(css.indexOf(".epub-dom-section:not(.epub-dom-section-fxl) img {")).toBeLessThan(
-      css.indexOf(
-        '.epub-dom-section :where(a.footnote, a.noteref, a[epub\\:type~="noteref"], a[role="doc-noteref"], sup, sub, small) img {'
-      )
+      css.indexOf(inlineImageSelector)
     )
     expect(css).toContain("display: inline-block;")
     expect(css).toContain("max-height: 1.5em;")

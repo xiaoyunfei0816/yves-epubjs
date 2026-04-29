@@ -122,7 +122,7 @@ export function buildDomChapterNormalizationCss(input: {
     `  display: block;`,
     `  margin: 0 auto;`,
     `}`,
-    `.epub-dom-section :where(a.footnote, a.noteref, a[epub\\:type~="noteref"], a[role="doc-noteref"], sup, sub, small) img {`,
+    `.epub-dom-section:not(.epub-dom-section-fxl) :is(a.footnote, a.noteref, a[epub\\:type~="noteref"], a[role="doc-noteref"], sup, sub, small) img {`,
     `  display: inline-block;`,
     `  max-width: 1.5em;`,
     `  max-height: 1.5em;`,
