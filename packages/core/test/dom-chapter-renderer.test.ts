@@ -353,6 +353,7 @@ describe("DomChapterRenderer", () => {
 
     expect(css).toContain("font-size: 18px;")
     expect(css).toContain("line-height: 1.6;")
+    expect(css).toContain("position: relative;")
     expect(css).toContain('font-family: "Iowan Old Style", serif;')
     expect(css).toContain("--reader-side-padding: 8px;")
     expect(css).toContain("--reader-link-color: #1b4b72;")

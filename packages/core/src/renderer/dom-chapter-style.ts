@@ -22,6 +22,7 @@ export function buildDomChapterNormalizationCss(input: {
     `  color: ${input.theme.color};`,
     `  background: transparent;`,
     `  display: flow-root;`,
+    `  position: relative;`,
     `  font-family: ${input.fontFamily};`,
     `  font-size: ${input.typography.fontSize}px;`,
     `  line-height: ${input.typography.lineHeight};`,
