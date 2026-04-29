@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 import type { SectionDocument } from "../src/model/types"
-import { ReaderDomPaginationService } from "../src/runtime/reader-dom-pagination-service"
+import {
+  ReaderDomPaginationService,
+  collectPaginatedDomReadableLineBands
+} from "../src/runtime/reader-dom-pagination-service"
 import type { ReaderPage } from "../src/runtime/paginated-render-plan"
 
 describe("ReaderDomPaginationService", () => {
@@ -76,6 +79,32 @@ describe("ReaderDomPaginationService", () => {
       "text-2"
     ])
     expect(result?.sectionEstimatedHeight).toBe(900)
+  })
+
+  it("does not count inline images as independent media bands", () => {
+    const sectionElement = document.createElement("section")
+    sectionElement.className = "epub-dom-section"
+    setElementBox(sectionElement, {
+      top: 0,
+      height: 320,
+      scrollHeight: 320,
+      offsetHeight: 320
+    })
+    sectionElement.innerHTML = `
+      <p>Alpha<a class="footnote" href="#note-1"><img id="note" src="note.png"></a>Omega</p>
+      <p><img id="plate" src="plate.png"></p>
+    `
+    const note = sectionElement.querySelector<HTMLElement>("#note")!
+    const plate = sectionElement.querySelector<HTMLElement>("#plate")!
+    setElementBox(note, { top: 24, height: 16 })
+    setElementBox(plate, { top: 140, height: 120 })
+
+    expect(collectPaginatedDomReadableLineBands(sectionElement)).toEqual([
+      {
+        top: 140,
+        bottom: 260
+      }
+    ])
   })
 })
 

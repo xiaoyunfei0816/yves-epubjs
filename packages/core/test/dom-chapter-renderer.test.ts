@@ -366,6 +366,34 @@ describe("DomChapterRenderer", () => {
     expect(css).toContain(".epub-dom-section hr {")
     expect(css).toContain("padding-left: var(--reader-quote-accent-gap);")
     expect(css).toContain("max-height: min(900px, calc(var(--reader-content-viewport-height, 100vh) * 0.78));")
+    expect(css).toContain(".epub-dom-section:not(.epub-dom-section-fxl) img {")
+    expect(css.indexOf(".epub-dom-section:not(.epub-dom-section-fxl) img {")).toBeLessThan(
+      css.indexOf(
+        '.epub-dom-section :where(a.footnote, a.noteref, a[epub\\:type~="noteref"], a[role="doc-noteref"], sup, sub, small) img {'
+      )
+    )
+    expect(css).toContain("display: inline-block;")
+    expect(css).toContain("max-height: 1.5em;")
+  })
+
+  it("keeps fixed-layout section images out of reflowable image normalization", () => {
+    const css = buildDomChapterNormalizationCss({
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography: {
+        fontSize: 18,
+        lineHeight: 1.6,
+        paragraphSpacing: 12
+      },
+      fontFamily: '"Iowan Old Style", serif',
+      renditionLayout: "pre-paginated"
+    })
+
+    expect(css).toContain(".epub-dom-section:not(.epub-dom-section-fxl) img {")
+    expect(css).not.toContain(".epub-dom-section img {")
+    expect(css).toContain(".epub-dom-section-fxl {")
   })
 
   it("rewrites resolved attribute values while serializing dom chapters", () => {

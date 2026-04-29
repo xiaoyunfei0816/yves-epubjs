@@ -8,6 +8,7 @@ export * from "./runtime/publisher-styles";
 export * from "./runtime/reading-language";
 export * from "./runtime/reading-spread";
 export * from "./runtime/accessibility";
+export * from "./runtime/image-render-classification";
 export * from "./runtime/chapter-preprocess";
 export * from "./runtime/chapter-analysis-input";
 export * from "./runtime/chapter-render-decision";

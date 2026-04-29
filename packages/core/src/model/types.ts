@@ -82,6 +82,8 @@ export type TextStyle = {
 export type NodeAttributes = {
   tagName?: string;
   className?: string;
+  role?: string;
+  epubType?: string;
   lang?: string;
   dir?: string;
 };

@@ -15,6 +15,7 @@ const STABLE_ROOT_EXPORTS = [
   "./runtime/reading-language",
   "./runtime/reading-spread",
   "./runtime/accessibility",
+  "./runtime/image-render-classification",
   "./container/resource-container",
   "./container/normalize-input",
   "./container/resource-path",
@@ -67,9 +68,9 @@ describe("core public api surface", () => {
     const rootExports = readRootExports()
 
     expect(rootExports).toEqual([
-      ...STABLE_ROOT_EXPORTS.slice(0, 10),
+      ...STABLE_ROOT_EXPORTS.slice(0, 11),
       ...COMPATIBILITY_ROOT_EXPORTS.slice(0, 6),
-      ...STABLE_ROOT_EXPORTS.slice(10),
+      ...STABLE_ROOT_EXPORTS.slice(11),
       ...COMPATIBILITY_ROOT_EXPORTS.slice(6)
     ])
   })

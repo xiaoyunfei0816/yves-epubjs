@@ -333,6 +333,95 @@ describe("EpubReader annotations", () => {
     })
   })
 
+  it("keeps dom annotation offsets stable when selected text follows an inline note image", () => {
+    const container = document.createElement("div")
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 320
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 220
+    })
+    Object.defineProperty(container, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new DOMRect(0, 0, 320, 220)
+    })
+    container.innerHTML = `
+      <div class="epub-dom-section" data-section-id="section-1">
+        <p data-reader-block-id="text-1">Alpha <a class="footnote" href="#note-1"><img src="OPS/images/note.png" alt="" /></a><span>Omega target</span>.</p>
+      </div>
+    `
+
+    const reader = new EpubReader({ container, mode: "scroll" })
+    ;(reader as unknown as { book: Book; sourceName: string | null }).book = {
+      metadata: { title: "Annotations" },
+      manifest: [],
+      spine: [{ idref: "item-1", href: "OPS/chapter-1.xhtml", linear: true }],
+      toc: [],
+      sections: [
+        {
+          id: "section-1",
+          href: "OPS/chapter-1.xhtml",
+          title: "Chapter 1",
+          anchors: {},
+          blocks: [
+            {
+              id: "text-1",
+              kind: "text",
+              inlines: [
+                { kind: "text", text: "Alpha " },
+                {
+                  kind: "link",
+                  href: "#note-1",
+                  className: "footnote",
+                  children: [
+                    {
+                      kind: "image",
+                      src: "OPS/images/note.png",
+                      alt: ""
+                    }
+                  ]
+                },
+                { kind: "text", text: "Omega target." }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+    ;(reader as unknown as { book: Book; sourceName: string | null }).sourceName = "sample.epub"
+
+    const textNode = container.querySelector("span")?.firstChild ?? null
+    const originalGetSelection = mockDomSelection({
+      text: "Omega target",
+      node: textNode,
+      startOffset: 0,
+      endOffset: 12,
+      rects: [new DOMRect(72, 32, 112, 20)]
+    })
+
+    const annotation = reader.createAnnotationFromSelection({ color: "#2563eb" })
+
+    expect(annotation?.locator.blockId).toBe("text-1")
+    expect(annotation?.quote).toBe("Omega target")
+    expect(annotation?.textRange).toEqual({
+      start: {
+        blockId: "text-1",
+        inlineOffset: 6
+      },
+      end: {
+        blockId: "text-1",
+        inlineOffset: 18
+      }
+    })
+
+    Object.defineProperty(window, "getSelection", {
+      configurable: true,
+      value: originalGetSelection
+    })
+  })
+
   it("exposes host-facing text selection snapshots for active selections", async () => {
     const container = document.createElement("div")
     Object.defineProperty(container, "clientWidth", {

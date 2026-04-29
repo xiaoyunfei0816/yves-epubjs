@@ -15,6 +15,7 @@ const EXPECTED_ROOT_EXPORTS = [
   "./runtime/reading-language",
   "./runtime/reading-spread",
   "./runtime/accessibility",
+  "./runtime/image-render-classification",
   "./runtime/chapter-preprocess",
   "./runtime/chapter-analysis-input",
   "./runtime/chapter-render-decision",

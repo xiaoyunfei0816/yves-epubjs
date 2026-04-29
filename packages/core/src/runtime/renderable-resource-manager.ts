@@ -8,7 +8,7 @@ type RenderableResourceManagerOptions = {
   hasBinary?: (path: string) => boolean | null | undefined
   shouldTrackDomLayoutChanges: () => boolean
   onCanvasResourceResolved: () => void
-  onDomLayoutChange: () => void
+  onDomLayoutChange: (element: HTMLElement | null) => void
 }
 
 export class RenderableResourceManager {
@@ -167,19 +167,27 @@ export class RenderableResourceManager {
 
     if (element instanceof HTMLImageElement) {
       if (element.complete) {
-        this.options.onDomLayoutChange()
+        this.options.onDomLayoutChange(element)
         return
       }
 
-      element.addEventListener("load", () => {
-        this.options.onDomLayoutChange()
-      }, { once: true })
-      element.addEventListener("error", () => {
-        this.options.onDomLayoutChange()
-      }, { once: true })
+      let notified = false
+      const notify = () => {
+        if (notified) {
+          return
+        }
+        notified = true
+        this.options.onDomLayoutChange(element)
+      }
+
+      element.addEventListener("load", notify, { once: true })
+      element.addEventListener("error", notify, { once: true })
+      if (typeof element.decode === "function") {
+        element.decode().then(notify).catch(notify)
+      }
       return
     }
 
-    this.options.onDomLayoutChange()
+    this.options.onDomLayoutChange(element)
   }
 }

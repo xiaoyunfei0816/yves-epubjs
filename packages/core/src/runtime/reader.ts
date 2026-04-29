@@ -398,7 +398,13 @@ export class EpubReader {
       onCanvasResourceResolved: () => {
         this.scheduleDeferredResourceRenderRefresh();
       },
-      onDomLayoutChange: () => {
+      onDomLayoutChange: (element) => {
+        if (element && !this.options.container?.contains(element)) {
+          return;
+        }
+        if (element?.closest(".epub-dom-section-fxl")) {
+          return;
+        }
         if (
           this.mode === "paginated" &&
           this.lastChapterRenderDecision?.mode === "dom"

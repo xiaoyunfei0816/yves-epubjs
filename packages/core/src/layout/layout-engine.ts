@@ -576,6 +576,8 @@ export class LayoutEngine {
                 "",
                 {
                   font,
+                  ...(state.href ? { href: state.href } : {}),
+                  ...(state.title ? { title: state.title } : {}),
                   image: {
                     src: inline.src,
                     ...(inline.alt ? { alt: inline.alt } : {}),
@@ -584,7 +586,11 @@ export class LayoutEngine {
                     height: imageMetrics.height,
                     marginLeft: imageMetrics.marginLeft,
                     marginRight: imageMetrics.marginRight
-                  }
+                  },
+                  ...resolveInlineImageBaselineShift(
+                    effectiveFontSize,
+                    inline.style?.verticalAlign ?? state.verticalAlign
+                  )
                 },
                 0
               )
@@ -890,6 +896,19 @@ function resolveInlineImageMetrics(
     marginLeft: Math.max(0, inline.style?.marginLeft ?? 0),
     marginRight: Math.max(0, inline.style?.marginRight ?? 0)
   };
+}
+
+function resolveInlineImageBaselineShift(
+  fontSize: number,
+  verticalAlign: "baseline" | "middle" | "sub" | "sup" | undefined
+): { baselineShift?: number } {
+  if (verticalAlign === "sup") {
+    return { baselineShift: fontSize * -0.28 }
+  }
+  if (verticalAlign === "sub") {
+    return { baselineShift: fontSize * 0.18 }
+  }
+  return {}
 }
 
 function resolveInlineImageDimension(input: {

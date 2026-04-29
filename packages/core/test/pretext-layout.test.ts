@@ -567,6 +567,77 @@ describe("pretext layout integration", () => {
     expect(omegaOp?.x ?? 0).toBeGreaterThan(imageOp!.rect.x + imageOp!.rect.width + 4.5)
   })
 
+  it("keeps linked inline images clickable on the canvas path", () => {
+    const section: SectionDocument = {
+      id: "section-linked-inline-image",
+      href: "OPS/linked-inline-image.xhtml",
+      title: "Linked Inline Image",
+      anchors: {},
+      blocks: [
+        {
+          id: "text-linked-inline-image",
+          kind: "text",
+          inlines: [
+            { kind: "text", text: "Alpha" },
+            {
+              kind: "link",
+              tagName: "a",
+              className: "footnote",
+              href: "OPS/linked-inline-image.xhtml#note-1",
+              children: [
+                {
+                  kind: "image",
+                  src: "OPS/images/note.png",
+                  alt: "Note",
+                  width: 18,
+                  height: 18
+                }
+              ]
+            },
+            { kind: "text", text: "Omega" }
+          ]
+        }
+      ]
+    }
+
+    const engine = new LayoutEngine()
+    const layout = engine.layout(
+      {
+        section,
+        spineIndex: 0,
+        viewportWidth: 320,
+        viewportHeight: 600,
+        typography,
+        fontFamily: "serif"
+      },
+      "scroll"
+    )
+    const displayList = new DisplayListBuilder().buildSection({
+      section,
+      width: 320,
+      viewportHeight: 600,
+      blocks: layout.blocks,
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography,
+      activeBlockId: undefined
+    })
+    const imageInteraction = displayList.interactions.find(
+      (interaction) => interaction.kind === "image"
+    )
+    const linkInteraction = displayList.interactions.find(
+      (interaction) =>
+        interaction.kind === "link" &&
+        interaction.href === "OPS/linked-inline-image.xhtml#note-1"
+    )
+
+    expect(imageInteraction).toBeTruthy()
+    expect(linkInteraction).toBeTruthy()
+    expect(linkInteraction?.rect).toEqual(imageInteraction?.rect)
+  })
+
   it("renders paginated content to canvas", async () => {
     const container = document.createElement("div");
     Object.defineProperty(container, "clientWidth", {

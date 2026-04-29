@@ -532,6 +532,83 @@ describe("EpubReader hybrid search", () => {
     }
   })
 
+  it("keeps canvas search and progress stable when the target follows an inline note image", async () => {
+    const container = document.createElement("div")
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 320
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 220
+    })
+    document.body.appendChild(container)
+
+    const input = createSharedChapterRenderInput({
+      href: "OPS/inline-note-search.xhtml",
+      content: `<?xml version="1.0" encoding="utf-8"?>
+        <html xmlns="http://www.w3.org/1999/xhtml">
+          <head><title>Inline Note Search</title></head>
+          <body>
+            <section>
+              <p>${"Opening context. ".repeat(260)}</p>
+              <p>
+                Alpha
+                <a class="footnote" epub:type="noteref" href="#note-1">
+                  <img src="OPS/images/note.png" alt="注" width="18" height="18" />
+                </a>
+                Omega inline image search target.
+              </p>
+              <p id="note-1">Footnote target.</p>
+            </section>
+          </body>
+        </html>`
+    })
+    const section: SectionDocument = {
+      ...toCanvasChapterRenderInput(input).section,
+      id: "section-inline-note-search"
+    }
+    const book: Book = {
+      metadata: { title: "Inline Note Search" },
+      manifest: [],
+      spine: [{ idref: "item-1", href: section.href, linear: true }],
+      toc: [],
+      sections: [section]
+    }
+
+    const reader = new EpubReader({ container, mode: "paginated" })
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+      }
+    ).book = book
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+      }
+    ).chapterRenderInputs = [input]
+
+    await reader.render()
+
+    const results = await reader.search("Omega inline image search target")
+    expect(results).toHaveLength(1)
+    expect(results[0]?.matchText).toBe("Omega inline image search target")
+    expect(results[0]?.locator.blockId).toBeTruthy()
+
+    await reader.goToSearchResult(results[0]!)
+
+    expect(reader.getRenderMetrics().backend).toBe("canvas")
+    expect(reader.getPaginationInfo().currentPage).toBeGreaterThan(1)
+    expect(reader.getCurrentLocation()?.blockId).toBe(
+      results[0]?.locator.blockId
+    )
+    expect(
+      reader.mapLocatorToViewport(results[0]!.locator).length
+    ).toBeGreaterThan(0)
+  })
+
   it("navigates canvas search results for nested list blocks to the exact page instead of falling back to coarse progress", async () => {
     const container = document.createElement("div")
     Object.defineProperty(container, "clientWidth", {

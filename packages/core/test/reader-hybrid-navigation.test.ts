@@ -63,6 +63,23 @@ const DOM_MEDIA_CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
     </body>
   </html>`;
 
+const INLINE_NOTE_CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
+  <html xmlns="http://www.w3.org/1999/xhtml">
+    <head><title>Inline Note</title></head>
+    <body>
+      <section>
+        <p>
+          Alpha
+          <a class="footnote" epub:type="noteref" href="#note-1">
+            <img src="OPS/images/note.png" alt="注" width="18" height="18" />
+          </a>
+          Omega.
+        </p>
+        <p id="note-1">Footnote target.</p>
+      </section>
+    </body>
+  </html>`;
+
 function createHybridReaderFixture(mode: "scroll" | "paginated" = "scroll"): {
   reader: EpubReader;
   container: HTMLDivElement;
@@ -252,6 +269,58 @@ function createDomMediaReaderFixture(mode: "scroll" | "paginated" = "paginated")
   };
 }
 
+function createInlineNoteNavigationFixture(): {
+  reader: EpubReader;
+  container: HTMLDivElement;
+} {
+  const container = document.createElement("div");
+  Object.defineProperty(container, "clientWidth", {
+    configurable: true,
+    value: 320
+  });
+  Object.defineProperty(container, "clientHeight", {
+    configurable: true,
+    value: 220
+  });
+  Object.defineProperty(container, "getBoundingClientRect", {
+    configurable: true,
+    value: () => new DOMRect(0, 0, 320, 220)
+  });
+  document.body.appendChild(container);
+
+  const input = createSharedChapterRenderInput({
+    href: "OPS/inline-note.xhtml",
+    content: INLINE_NOTE_CHAPTER
+  });
+  const section: SectionDocument = {
+    ...toCanvasChapterRenderInput(input).section,
+    id: "section-inline-note"
+  };
+  const book: Book = {
+    metadata: { title: "Inline Note Navigation" },
+    manifest: [],
+    spine: [{ idref: "item-1", href: section.href, linear: true }],
+    toc: [],
+    sections: [section]
+  };
+
+  const reader = new EpubReader({ container, mode: "paginated" });
+  (
+    reader as unknown as {
+      book: Book;
+      chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[];
+    }
+  ).book = book;
+  (
+    reader as unknown as {
+      book: Book;
+      chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[];
+    }
+  ).chapterRenderInputs = [input];
+
+  return { reader, container };
+}
+
 describe("EpubReader hybrid navigation", () => {
   it("exposes toc targets with resolved locators for mixed chapters", () => {
     const { reader } = createHybridReaderFixture()
@@ -319,6 +388,41 @@ describe("EpubReader hybrid navigation", () => {
     expect(reader.getCurrentLocation()?.anchorId).toBe("details")
     expect(reader.getCurrentLocation()?.blockId).toBeTruthy()
   })
+
+  it("navigates canvas inline note images through the link interaction", async () => {
+    const { reader, container } = createInlineNoteNavigationFixture();
+
+    await reader.render();
+
+    let linkPoint: { x: number; y: number } | null = null;
+    for (let y = 0; y <= 220 && !linkPoint; y += 4) {
+      for (let x = 0; x <= 320; x += 4) {
+        const hit = reader.hitTest({ x, y });
+        if (
+          hit?.kind === "link" &&
+          hit.href === "OPS/inline-note.xhtml#note-1"
+        ) {
+          linkPoint = { x, y };
+          break;
+        }
+      }
+    }
+
+    expect(linkPoint).toBeTruthy();
+
+    container.querySelector("canvas")?.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        clientX: linkPoint!.x,
+        clientY: linkPoint!.y
+      })
+    );
+    await Promise.resolve();
+
+    expect(reader.getCurrentLocation()?.anchorId).toBe("note-1");
+    expect(reader.getCurrentLocation()?.blockId).toBeTruthy();
+  });
 
   it("uses rendered dom anchor targets for toc jumps before falling back to section progress", async () => {
     const originalOffsetTop = Object.getOwnPropertyDescriptor(

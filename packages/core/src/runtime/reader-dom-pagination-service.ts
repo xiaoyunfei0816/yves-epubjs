@@ -6,6 +6,7 @@ import {
   findPageByNumber,
   findPageForLocator
 } from "./reader-pagination"
+import { isDomInlineImageElement } from "./image-render-classification"
 
 export type DomPaginationSyncResult = {
   pages: ReaderPage[]
@@ -263,7 +264,7 @@ export function resolvePaginatedDomPageIndex(
   return 0
 }
 
-function collectPaginatedDomReadableLineBands(
+export function collectPaginatedDomReadableLineBands(
   sectionElement: HTMLElement
 ): Array<{ top: number; bottom: number }> {
   if (typeof document === "undefined") {
@@ -338,7 +339,7 @@ function collectDomMediaElements(sectionElement: HTMLElement): HTMLElement[] {
     sectionElement.querySelectorAll<HTMLElement>(
       "img, svg, image, object, video, canvas, figure"
     )
-  )
+  ).filter((element) => !isDomInlineImageElement(element))
 }
 
 function collectTextNodes(root: Node): Text[] {

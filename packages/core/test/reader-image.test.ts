@@ -306,6 +306,181 @@ describe("EpubReader image resources", () => {
     URL.revokeObjectURL = originalRevokeObjectURL
   })
 
+  it("ignores DOM image load events from stale detached elements", async () => {
+    const createObjectURL = vi.fn(() => "blob:stale-dom-image")
+    const originalCreateObjectURL = URL.createObjectURL
+
+    URL.createObjectURL = createObjectURL
+
+    const container = document.createElement("div")
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 320
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 320
+    })
+    container.innerHTML =
+      '<div class="epub-dom-section"><img src="OPS/images/stale.png" alt="Stale"></div>'
+    const reader = new EpubReader({ container, mode: "paginated" })
+    ;(
+      reader as unknown as {
+        book: Book
+        lastChapterRenderDecision: { mode: "dom"; score: number; reasons: string[] }
+      }
+    ).book = {
+      metadata: { title: "Stale DOM Layout Change" },
+      manifest: [],
+      spine: [{ idref: "item-1", href: "OPS/chapter.xhtml", linear: true }],
+      toc: [],
+      sections: [
+        {
+          id: "section-1",
+          href: "OPS/chapter.xhtml",
+          anchors: {},
+          blocks: []
+        }
+      ]
+    }
+    ;(
+      reader as unknown as {
+        lastChapterRenderDecision: { mode: "dom"; score: number; reasons: string[] }
+      }
+    ).lastChapterRenderDecision = {
+      mode: "dom",
+      score: 0,
+      reasons: ["test-stale-dom-layout-change"]
+    }
+    const renderSpy = vi.spyOn(
+      reader as unknown as {
+        renderCurrentSection(renderBehavior?: "relocate" | "preserve"): void
+      },
+      "renderCurrentSection"
+    )
+
+    const resources = new InMemoryResourceContainer({
+      "OPS/images/stale.png": new Uint8Array([137, 80, 78, 71])
+    })
+
+    ;(
+      reader as unknown as {
+        resources: typeof resources
+        resolveDomResourceUrl(path: string): string
+      }
+    ).resources = resources
+
+    ;(
+      reader as unknown as {
+        resolveDomResourceUrl(path: string): string
+      }
+    ).resolveDomResourceUrl("OPS/images/stale.png")
+
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const image = container.querySelector("img")
+    image?.remove()
+    image?.dispatchEvent(new Event("load"))
+    await new Promise((resolve) => setTimeout(resolve, 60))
+
+    expect(renderSpy).not.toHaveBeenCalled()
+
+    reader.destroy()
+    URL.createObjectURL = originalCreateObjectURL
+  })
+
+  it("patches fixed-layout DOM images without scheduling reflow pagination", async () => {
+    const createObjectURL = vi.fn(() => "blob:fxl-dom-image")
+    const originalCreateObjectURL = URL.createObjectURL
+
+    URL.createObjectURL = createObjectURL
+
+    const container = document.createElement("div")
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 320
+    })
+    Object.defineProperty(container, "clientHeight", {
+      configurable: true,
+      value: 320
+    })
+    container.innerHTML =
+      '<div class="epub-dom-section epub-dom-section-fxl"><img src="OPS/images/fxl.png" alt="FXL"></div>'
+    const reader = new EpubReader({ container, mode: "paginated" })
+    ;(
+      reader as unknown as {
+        book: Book
+        lastChapterRenderDecision: { mode: "dom"; score: number; reasons: string[] }
+      }
+    ).book = {
+      metadata: { title: "FXL DOM Layout Change" },
+      manifest: [],
+      spine: [{ idref: "item-1", href: "OPS/fxl.xhtml", linear: true }],
+      toc: [],
+      sections: [
+        {
+          id: "section-fxl",
+          href: "OPS/fxl.xhtml",
+          renditionLayout: "pre-paginated",
+          renditionViewport: {
+            width: 1200,
+            height: 1600
+          },
+          anchors: {},
+          blocks: []
+        }
+      ]
+    }
+    ;(
+      reader as unknown as {
+        lastChapterRenderDecision: { mode: "dom"; score: number; reasons: string[] }
+      }
+    ).lastChapterRenderDecision = {
+      mode: "dom",
+      score: 0,
+      reasons: ["fixed-layout-section"]
+    }
+    const renderSpy = vi.spyOn(
+      reader as unknown as {
+        renderCurrentSection(renderBehavior?: "relocate" | "preserve"): void
+      },
+      "renderCurrentSection"
+    )
+
+    const resources = new InMemoryResourceContainer({
+      "OPS/images/fxl.png": new Uint8Array([137, 80, 78, 71])
+    })
+
+    ;(
+      reader as unknown as {
+        resources: typeof resources
+        resolveDomResourceUrl(path: string): string
+      }
+    ).resources = resources
+
+    ;(
+      reader as unknown as {
+        resolveDomResourceUrl(path: string): string
+      }
+    ).resolveDomResourceUrl("OPS/images/fxl.png")
+
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const image = container.querySelector("img")
+    expect(image?.getAttribute("src")).toBe("blob:fxl-dom-image")
+    image?.dispatchEvent(new Event("load"))
+    await new Promise((resolve) => setTimeout(resolve, 60))
+
+    expect(renderSpy).not.toHaveBeenCalled()
+
+    reader.destroy()
+    URL.createObjectURL = originalCreateObjectURL
+  })
+
   it("rewrites svg image xlink:href resources for dom rendering", async () => {
     const createObjectURL = vi.fn(() => "blob:dom-svg-cover")
     const revokeObjectURL = vi.fn()

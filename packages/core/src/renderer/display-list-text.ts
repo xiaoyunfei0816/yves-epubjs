@@ -153,6 +153,17 @@ export function buildPretextBlockDisplay(input: {
           alt: fragment.image.alt,
           locator: input.locator
         })
+        if (fragment.href) {
+          interactions.push({
+            kind: "link",
+            rect: imageRect,
+            sectionId: input.section.id,
+            blockId: input.block.id,
+            href: fragment.href,
+            locator: input.locator,
+            text: fragment.image.alt
+          })
+        }
         cursorX += fragmentWidth
         continue
       }

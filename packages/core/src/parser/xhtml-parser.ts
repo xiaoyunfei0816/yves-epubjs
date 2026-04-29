@@ -53,6 +53,8 @@ function getInlineNodeMetadata(
   const metadata: {
     tagName: string
     className?: string
+    role?: string
+    epubType?: string
     lang?: string
     dir?: string
     style?: ReturnType<typeof resolveElementTextStyle>
@@ -60,11 +62,21 @@ function getInlineNodeMetadata(
     tagName: node.name
   }
   const className = getHtmlElementAttribute(node, "class")
+  const role = getHtmlElementAttribute(node, "role")
+  const epubType =
+    getHtmlElementAttribute(node, "epub:type") ??
+    getHtmlElementAttribute(node, "type")
   const lang = getHtmlElementAttribute(node, "lang")
   const dir = getHtmlElementAttribute(node, "dir")
 
   if (className?.trim()) {
     metadata.className = className.trim()
+  }
+  if (role?.trim()) {
+    metadata.role = role.trim()
+  }
+  if (epubType?.trim()) {
+    metadata.epubType = epubType.trim()
   }
   if (lang?.trim()) {
     metadata.lang = lang.trim()
@@ -96,6 +108,8 @@ function getBlockNodeMetadata(
   const metadata: {
     tagName: string
     className?: string
+    role?: string
+    epubType?: string
     lang?: string
     dir?: string
     style?: ReturnType<typeof resolveElementStyle>
@@ -103,11 +117,21 @@ function getBlockNodeMetadata(
     tagName: node.name
   }
   const className = getHtmlElementAttribute(node, "class")
+  const role = getHtmlElementAttribute(node, "role")
+  const epubType =
+    getHtmlElementAttribute(node, "epub:type") ??
+    getHtmlElementAttribute(node, "type")
   const lang = getHtmlElementAttribute(node, "lang")
   const dir = getHtmlElementAttribute(node, "dir")
 
   if (className?.trim()) {
     metadata.className = className.trim()
+  }
+  if (role?.trim()) {
+    metadata.role = role.trim()
+  }
+  if (epubType?.trim()) {
+    metadata.epubType = epubType.trim()
   }
   if (lang?.trim()) {
     metadata.lang = lang.trim()
