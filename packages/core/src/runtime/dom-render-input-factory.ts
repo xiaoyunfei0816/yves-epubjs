@@ -380,6 +380,11 @@ function resolvePresentationSectionImage(
   section: SectionDocument
 ): { src: string; alt?: string } | null {
   if (section.presentationRole === "cover") {
+    const sectionImage = extractSingleSectionImage(section);
+    if (sectionImage) {
+      return sectionImage;
+    }
+
     const coverImageHref = book?.metadata.coverImageHref;
     if (coverImageHref) {
       return {
@@ -389,10 +394,7 @@ function resolvePresentationSectionImage(
     }
   }
 
-  if (
-    section.presentationRole === "cover" ||
-    section.presentationRole === "image-page"
-  ) {
+  if (section.presentationRole === "image-page") {
     return extractSingleSectionImage(section);
   }
 

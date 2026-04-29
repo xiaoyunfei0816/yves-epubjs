@@ -82,7 +82,50 @@ describe("dom render input factory", () => {
     ).toContain("url('asset:OPS/images/inline-bg.png')");
   });
 
-  it("prefers metadata cover images for cover sections", () => {
+  it("prefers the cover section image over metadata cover images", () => {
+    const content = `<?xml version="1.0"?>
+      <html>
+        <body>
+          <p><img src="images/xhtml-cover.jpg" alt="XHTML Cover"></p>
+        </body>
+      </html>`;
+    const section: SectionDocument = {
+      ...createSection(content, "cover-section", "OPS/Text/cover.xhtml"),
+      presentationRole: "cover"
+    };
+    const input = createSharedChapterRenderInput({
+      href: section.href,
+      content
+    });
+    const book: Book = {
+      metadata: {
+        title: "Factory Book",
+        coverImageHref: "OPS/images/metadata-cover.jpg"
+      },
+      manifest: [],
+      spine: [],
+      toc: [],
+      sections: [section]
+    };
+
+    const renderInput = createDomChapterRenderInput({
+      book,
+      section,
+      input,
+      theme: THEME,
+      typography: TYPOGRAPHY,
+      fontFamily: "serif",
+      publisherStyles: "enabled",
+      resolveDomResourceUrl: (path) => `asset:${path}`
+    });
+
+    expect(renderInput.presentationImageSrc).toBe(
+      "asset:OPS/Text/images/xhtml-cover.jpg"
+    );
+    expect(renderInput.presentationImageAlt).toBe("XHTML Cover");
+  });
+
+  it("falls back to metadata cover images when cover sections have no single image", () => {
     const section: SectionDocument = {
       ...createSection(
         `<?xml version="1.0"?>
