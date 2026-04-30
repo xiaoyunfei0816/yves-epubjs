@@ -41,6 +41,27 @@ describe("resource path utilities", () => {
       "OPS/text/notes.xhtml#note-2"
     );
   });
+
+  it("preserves absolute embedded resource URLs instead of resolving them as book paths", () => {
+    expect(
+      resolveResourcePath(
+        "OPS/text/chapter.xhtml",
+        "https://public.example.com/images/plate.jpg?size=large#view"
+      )
+    ).toBe("https://public.example.com/images/plate.jpg?size=large#view");
+    expect(
+      resolveResourcePath("OPS/text/chapter.xhtml", "//cdn.example.com/a.png")
+    ).toBe("//cdn.example.com/a.png");
+    expect(
+      resolveResourcePath(
+        "OPS/text/chapter.xhtml",
+        "data:image/png;base64,AAAA"
+      )
+    ).toBe("data:image/png;base64,AAAA");
+    expect(
+      resolveResourcePath("OPS/text/chapter.xhtml", "blob:cover-image")
+    ).toBe("blob:cover-image");
+  });
 });
 
 describe("resource mime utilities", () => {

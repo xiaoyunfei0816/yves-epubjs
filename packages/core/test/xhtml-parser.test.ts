@@ -388,6 +388,28 @@ describe("parseXhtmlDocument", () => {
     })
   })
 
+  it("preserves external image resources for canvas and dom rendering", () => {
+    const xml = `<?xml version="1.0"?>
+      <html>
+        <body>
+          <p><img src="https://public.example.com/ei/plate.jpg?token=1" alt="Plate" /></p>
+        </body>
+      </html>`
+
+    const section = parseXhtmlDocument(xml, "OPS/Text/part4.xhtml")
+
+    expect(section.blocks[0]).toMatchObject({
+      kind: "text",
+      inlines: [
+        {
+          kind: "image",
+          src: "https://public.example.com/ei/plate.jpg?token=1",
+          alt: "Plate"
+        }
+      ]
+    })
+  })
+
   it("falls back unknown block tags to child content and preserves supported inline style metadata", () => {
     const xml = `<?xml version="1.0"?>
       <html>
