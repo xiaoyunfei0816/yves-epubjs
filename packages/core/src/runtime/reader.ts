@@ -1309,6 +1309,13 @@ export class EpubReader {
       return null;
     }
 
+    if (this.mode === "scroll") {
+      const scrollHit = this.hitTestScrollableCanvas(point);
+      if (scrollHit) {
+        return scrollHit;
+      }
+    }
+
     const hit = this.canvasRenderer.hitTest(
       {
         sections: this.collectRenderedCanvasSections(),
@@ -1325,6 +1332,53 @@ export class EpubReader {
     }
 
     return this.hitTestDom(point);
+  }
+
+  private hitTestScrollableCanvas(point: Point): HitTestResult | null {
+    if (!this.options.container) {
+      return null;
+    }
+
+    const absoluteY = point.y + this.options.container.scrollTop;
+    const sectionOffsetX = new Map<string, number>();
+    return (
+      [...this.lastInteractionRegions]
+        .reverse()
+        .find((interaction) => {
+          let offsetX = sectionOffsetX.get(interaction.sectionId);
+          if (offsetX === undefined) {
+            offsetX = this.getScrollableCanvasSectionOffsetX(
+              interaction.sectionId
+            );
+            sectionOffsetX.set(interaction.sectionId, offsetX);
+          }
+          const localX = point.x - offsetX;
+          return (
+            localX >= interaction.rect.x &&
+            localX <= interaction.rect.x + interaction.rect.width &&
+            absoluteY >= interaction.rect.y &&
+            absoluteY <= interaction.rect.y + interaction.rect.height
+          );
+        }) ?? null
+    );
+  }
+
+  private getScrollableCanvasSectionOffsetX(sectionId: string): number {
+    if (!this.options.container) {
+      return 0;
+    }
+
+    const sectionElement = this.getSectionElement(sectionId);
+    const canvasElement =
+      sectionElement?.querySelector<HTMLElement>(".epub-text-layer-section") ??
+      sectionElement?.querySelector<HTMLElement>(".epub-canvas-section");
+    if (!canvasElement) {
+      return 0;
+    }
+
+    const containerRect = this.options.container.getBoundingClientRect();
+    const canvasRect = canvasElement.getBoundingClientRect();
+    return canvasRect.left - containerRect.left + this.options.container.scrollLeft;
   }
 
   getVisibleDrawBounds(): VisibleDrawBounds {

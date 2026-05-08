@@ -190,4 +190,80 @@ describe("EpubReader compatibility behavior", () => {
     expect(hit?.kind).toBe("image")
     expect(hit && hit.kind === "image" ? hit.blockId : undefined).toBe("text-inline-image")
   })
+
+  it("hit tests canvas links with absolute scroll coordinates", () => {
+    const container = document.createElement("div")
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      writable: true,
+      value: 500
+    })
+    Object.defineProperty(container, "scrollLeft", {
+      configurable: true,
+      writable: true,
+      value: 0
+    })
+    container.getBoundingClientRect = () =>
+      ({
+        left: 100,
+        top: 0,
+        right: 500,
+        bottom: 600,
+        width: 400,
+        height: 600,
+        x: 100,
+        y: 0,
+        toJSON: () => ({})
+      }) as DOMRect
+    const sectionElement = document.createElement("article")
+    sectionElement.dataset.sectionId = "section-1"
+    const textLayer = document.createElement("div")
+    textLayer.className = "epub-text-layer-section"
+    textLayer.getBoundingClientRect = () =>
+      ({
+        left: 220,
+        top: 0,
+        right: 520,
+        bottom: 600,
+        width: 300,
+        height: 600,
+        x: 220,
+        y: 0,
+        toJSON: () => ({})
+      }) as DOMRect
+    sectionElement.appendChild(textLayer)
+    container.appendChild(sectionElement)
+
+    const reader = new EpubReader({ container, mode: "scroll" })
+    ;(
+      reader as unknown as {
+        lastInteractionRegions: Array<{
+          kind: "link"
+          rect: { x: number; y: number; width: number; height: number }
+          sectionId: string
+          blockId: string
+          href: string
+          locator: undefined
+          text: string
+        }>
+      }
+    ).lastInteractionRegions = [
+      {
+        kind: "link",
+        rect: { x: 120, y: 560, width: 32, height: 22 },
+        sectionId: "section-1",
+        blockId: "text-1",
+        href: "OPS/notes.xhtml#note-12",
+        locator: undefined,
+        text: "[12]"
+      }
+    ]
+
+    const hit = reader.hitTest({ x: 256, y: 71 })
+
+    expect(hit?.kind).toBe("link")
+    expect(hit && hit.kind === "link" ? hit.href : undefined).toBe(
+      "OPS/notes.xhtml#note-12"
+    )
+  })
 })
