@@ -62,6 +62,96 @@ function createDomLinkBook(href: string): {
 }
 
 describe("EpubReader external links", () => {
+  it("resolves relative internal DOM links against the rendered section href", async () => {
+    const container = createContainer()
+    const chapterInput = createSharedChapterRenderInput({
+      href: "OEBPS/Text/chapter_03.xhtml",
+      content: `<?xml version="1.0" encoding="utf-8"?>
+        <html xmlns="http://www.w3.org/1999/xhtml">
+          <body>
+            <p>Alpha<a id="note3" href="../Text/zhushi.xhtml#notef3">[3]</a>Omega</p>
+          </body>
+        </html>`
+    })
+    const notesInput = createSharedChapterRenderInput({
+      href: "OEBPS/Text/zhushi.xhtml",
+      content: `<?xml version="1.0" encoding="utf-8"?>
+        <html xmlns="http://www.w3.org/1999/xhtml">
+          <body>
+            <table>
+              <tr>
+                <td>
+                  <a id="notef3" href="../Text/chapter_03.xhtml#note3">[3]</a>
+                  Note body.
+                </td>
+              </tr>
+            </table>
+          </body>
+        </html>`
+    })
+    const chapterSection: SectionDocument = {
+      ...toCanvasChapterRenderInput(chapterInput).section,
+      id: "section-1"
+    }
+    const notesSection: SectionDocument = {
+      ...toCanvasChapterRenderInput(notesInput).section,
+      id: "section-2"
+    }
+    const reader = new EpubReader({
+      container,
+      mode: "scroll"
+    })
+
+    ;(
+      reader as unknown as {
+        book: Book
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+        currentSectionIndex: number
+      }
+    ).book = {
+      metadata: { title: "Internal Links" },
+      manifest: [],
+      spine: [
+        { idref: "chapter", href: chapterSection.href, linear: true },
+        { idref: "notes", href: notesSection.href, linear: true }
+      ],
+      toc: [],
+      sections: [chapterSection, notesSection]
+    }
+    ;(
+      reader as unknown as {
+        chapterRenderInputs: ReturnType<typeof createSharedChapterRenderInput>[]
+        currentSectionIndex: number
+      }
+    ).chapterRenderInputs = [chapterInput, notesInput]
+    ;(
+      reader as unknown as {
+        currentSectionIndex: number
+      }
+    ).currentSectionIndex = 1
+
+    await reader.render()
+    container
+      .querySelector<HTMLAnchorElement>(
+        'a[href="../Text/chapter_03.xhtml#note3"]'
+      )
+      ?.dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true
+        })
+      )
+    await Promise.resolve()
+
+    expect(reader.getCurrentLocation()).toEqual(
+      expect.objectContaining({
+        spineIndex: 0,
+        blockId: "text-1",
+        anchorId: "note3"
+      })
+    )
+  })
+
   it("activates safe external links through the host callback and event contract", async () => {
     const container = createContainer()
     const callback = vi.fn()

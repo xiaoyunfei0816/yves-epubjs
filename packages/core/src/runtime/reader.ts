@@ -17,6 +17,7 @@ import {
   normalizeEpubInput,
   type EpubInput
 } from "../container/normalize-input";
+import { resolveResourcePath } from "../container/resource-path";
 import type {
   Annotation,
   AnnotationActivatedEvent,
@@ -1378,7 +1379,18 @@ export class EpubReader {
 
     const containerRect = this.options.container.getBoundingClientRect();
     const canvasRect = canvasElement.getBoundingClientRect();
-    return canvasRect.left - containerRect.left + this.options.container.scrollLeft;
+    return (
+      canvasRect.left - containerRect.left + this.options.container.scrollLeft
+    );
+  }
+
+  private resolveDomLinkHref(sectionHref: string, href: string): string {
+    const resolution = classifyNavigationHref(href);
+    if (resolution.kind !== "internal") {
+      return href;
+    }
+
+    return resolveResourcePath(sectionHref, href);
   }
 
   getVisibleDrawBounds(): VisibleDrawBounds {
@@ -3319,7 +3331,7 @@ export class EpubReader {
     if (interaction.kind === "link") {
       event.preventDefault();
       void this.activateLink({
-        href: interaction.href,
+        href: this.resolveDomLinkHref(section.href, interaction.href),
         source: "dom",
         sectionId: section.id
       });
