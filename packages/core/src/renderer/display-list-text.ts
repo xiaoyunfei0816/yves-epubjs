@@ -1,5 +1,6 @@
 import type {
   Locator,
+  PublisherColorOverride,
   SectionDocument,
   TextAlign,
   Theme
@@ -34,6 +35,7 @@ export function buildPretextBlockDisplay(input: {
   width: number;
   theme: Theme;
   styleProfile: ReadingStyleProfile;
+  publisherColorOverride: PublisherColorOverride;
   locator: Locator | undefined;
   resolveImageLoaded: ((src: string) => boolean) | undefined;
   resolveImageUrl: ((src: string) => string) | undefined;
@@ -211,7 +213,9 @@ export function buildPretextBlockDisplay(input: {
         font: fragment.font,
         color: fragment.href
           ? input.styleProfile.link.color
-          : (fragment.color ?? input.block.color ?? input.theme.color),
+          : input.publisherColorOverride === "foreground"
+            ? input.theme.color
+            : (fragment.color ?? input.block.color ?? input.theme.color),
         backgroundColor: fragment.backgroundColor,
         highlightColor: input.highlighted
           ? input.styleProfile.highlight.search

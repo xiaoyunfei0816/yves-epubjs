@@ -309,6 +309,7 @@ export type Theme = {
 };
 
 export type PublisherStylesMode = "enabled" | "disabled";
+export type PublisherColorOverride = "none" | "foreground";
 export type ReadingDirection = "ltr" | "rtl";
 
 export type TypographyOptions = {
@@ -323,6 +324,7 @@ export type TypographyOptions = {
 export type ReaderPreferences = {
   mode?: ReadingMode;
   publisherStyles?: PublisherStylesMode;
+  publisherColorOverride?: PublisherColorOverride;
   experimentalRtl?: boolean;
   spreadMode?: ReaderSpreadMode;
   theme?: Partial<Theme>;
@@ -332,6 +334,7 @@ export type ReaderPreferences = {
 export type ReaderSettings = {
   mode: ReadingMode;
   publisherStyles: PublisherStylesMode;
+  publisherColorOverride: PublisherColorOverride;
   experimentalRtl: boolean;
   spreadMode: ReaderSpreadMode;
   theme: Theme;

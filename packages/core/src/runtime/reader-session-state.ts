@@ -4,6 +4,7 @@ import type {
   ChapterRenderDecision,
   Locator,
   LocatorRestoreDiagnostics,
+  PublisherColorOverride,
   PublisherStylesMode,
   ReaderPreferences,
   ReaderSpreadMode,
@@ -12,78 +13,83 @@ import type {
   Theme,
   TypographyOptions,
   VisibleDrawBounds
-} from "../model/types"
-import type { InteractionRegion } from "../renderer/draw-ops"
-import type { IntrinsicImageSize } from "../utils/image-intrinsic-size"
-import type { ReaderPage } from "./paginated-render-plan"
-import type { SharedChapterRenderInput } from "./chapter-render-input"
+} from "../model/types";
+import type { InteractionRegion } from "../renderer/draw-ops";
+import type { IntrinsicImageSize } from "../utils/image-intrinsic-size";
+import type { ReaderPage } from "./paginated-render-plan";
+import type { SharedChapterRenderInput } from "./chapter-render-input";
 
 type ResourceReader = {
-  readBinary(path: string): Promise<Uint8Array>
-  exists(path: string): boolean
-}
+  readBinary(path: string): Promise<Uint8Array>;
+  exists(path: string): boolean;
+};
 
 export type ReaderSessionState = {
   document: {
-    book: Book | null
-    sourceName: string | null
-    resources: ResourceReader | null
-    chapterRenderInputs: SharedChapterRenderInput[]
-    sectionIndexById: Map<string, number>
-  }
+    book: Book | null;
+    sourceName: string | null;
+    resources: ResourceReader | null;
+    chapterRenderInputs: SharedChapterRenderInput[];
+    sectionIndexById: Map<string, number>;
+  };
   annotations: {
-    annotations: Annotation[]
-  }
+    annotations: Annotation[];
+  };
   view: {
-    preferences: ReaderPreferences
-    mode: "scroll" | "paginated"
-    publisherStyles: PublisherStylesMode
-    experimentalRtl: boolean
-    spreadMode: ReaderSpreadMode
-    debugMode: boolean
-    theme: Theme
-    typography: TypographyOptions
-  }
+    preferences: ReaderPreferences;
+    mode: "scroll" | "paginated";
+    publisherStyles: PublisherStylesMode;
+    publisherColorOverride: PublisherColorOverride;
+    experimentalRtl: boolean;
+    spreadMode: ReaderSpreadMode;
+    debugMode: boolean;
+    theme: Theme;
+    typography: TypographyOptions;
+  };
   position: {
-    locator: Locator | null
-    currentSectionIndex: number
-    pages: ReaderPage[]
-    currentPageNumber: number
-    pendingModeSwitchLocator: Locator | null
-  }
+    locator: Locator | null;
+    currentSectionIndex: number;
+    pages: ReaderPage[];
+    currentPageNumber: number;
+    pendingModeSwitchLocator: Locator | null;
+  };
   render: {
-    lastMeasuredWidth: number
-    lastMeasuredHeight: number
-    sectionEstimatedHeights: number[]
-    scrollWindowStart: number
-    scrollWindowEnd: number
-    lastVisibleBounds: VisibleDrawBounds
-    lastInteractionRegions: InteractionRegion[]
-    lastRenderedSectionIds: string[]
-    lastScrollRenderWindows: Map<string, Array<{ top: number; height: number }>>
-    lastRenderMetrics: RenderMetrics
-    renderVersion: number
-    lastChapterRenderDecision: ChapterRenderDecision | null
-    imageIntrinsicSizeCache: Map<string, IntrinsicImageSize | null>
-    pendingImageIntrinsicSizePaths: Set<string>
-    lastLocatorRestoreDiagnostics: LocatorRestoreDiagnostics | null
-    lastFixedLayoutRenderSignature: string | null
-    lastPresentationRenderSignature: string | null
-  }
+    lastMeasuredWidth: number;
+    lastMeasuredHeight: number;
+    sectionEstimatedHeights: number[];
+    scrollWindowStart: number;
+    scrollWindowEnd: number;
+    lastVisibleBounds: VisibleDrawBounds;
+    lastInteractionRegions: InteractionRegion[];
+    lastRenderedSectionIds: string[];
+    lastScrollRenderWindows: Map<
+      string,
+      Array<{ top: number; height: number }>
+    >;
+    lastRenderMetrics: RenderMetrics;
+    renderVersion: number;
+    lastChapterRenderDecision: ChapterRenderDecision | null;
+    imageIntrinsicSizeCache: Map<string, IntrinsicImageSize | null>;
+    pendingImageIntrinsicSizePaths: Set<string>;
+    lastLocatorRestoreDiagnostics: LocatorRestoreDiagnostics | null;
+    lastFixedLayoutRenderSignature: string | null;
+    lastPresentationRenderSignature: string | null;
+  };
   selection: {
-    textSelectionSnapshot: ReaderTextSelectionSnapshot | null
-    pinnedTextSelectionSnapshot: ReaderTextSelectionSnapshot | null
-  }
-}
+    textSelectionSnapshot: ReaderTextSelectionSnapshot | null;
+    pinnedTextSelectionSnapshot: ReaderTextSelectionSnapshot | null;
+  };
+};
 
 export function createReaderSessionState(input: {
-  preferences: ReaderPreferences
-  mode: "scroll" | "paginated"
-  publisherStyles: PublisherStylesMode
-  experimentalRtl: boolean
-  spreadMode: ReaderSpreadMode
-  theme: Theme
-  typography: TypographyOptions
+  preferences: ReaderPreferences;
+  mode: "scroll" | "paginated";
+  publisherStyles: PublisherStylesMode;
+  publisherColorOverride: PublisherColorOverride;
+  experimentalRtl: boolean;
+  spreadMode: ReaderSpreadMode;
+  theme: Theme;
+  typography: TypographyOptions;
 }): ReaderSessionState {
   return {
     document: {
@@ -100,6 +106,7 @@ export function createReaderSessionState(input: {
       preferences: input.preferences,
       mode: input.mode,
       publisherStyles: input.publisherStyles,
+      publisherColorOverride: input.publisherColorOverride,
       experimentalRtl: input.experimentalRtl,
       spreadMode: input.spreadMode,
       debugMode: false,
@@ -142,5 +149,5 @@ export function createReaderSessionState(input: {
       textSelectionSnapshot: null,
       pinnedTextSelectionSnapshot: null
     }
-  }
+  };
 }

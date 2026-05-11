@@ -1,6 +1,7 @@
 import { resolveResourcePath } from "../container/resource-path";
 import type {
   Book,
+  PublisherColorOverride,
   PublisherStylesMode,
   SectionDocument,
   Theme,
@@ -19,6 +20,7 @@ type DomRenderInputFactoryOptions = {
   typography: TypographyOptions;
   fontFamily: string;
   publisherStyles: PublisherStylesMode;
+  publisherColorOverride?: PublisherColorOverride;
   availableWidth?: number;
   availableHeight?: number;
   allowExternalEmbeddedResources?: boolean;
@@ -103,6 +105,7 @@ export function createDomChapterRenderInput(
             options.input.preprocessed.nodes
           ),
     theme: options.theme,
+    publisherColorOverride: options.publisherColorOverride ?? "none",
     typography: options.typography,
     fontFamily: options.fontFamily,
     ...(typeof options.availableHeight === "number"

@@ -1,14 +1,14 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vitest";
 import {
   DomChapterRenderer,
   buildDomChapterNormalizationCss,
   serializeDomPageViewportAttributes
-} from "../src"
+} from "../src";
 
 describe("DomChapterRenderer", () => {
   it("mounts and clears a dom chapter section", () => {
-    const container = document.createElement("div")
-    const renderer = new DomChapterRenderer()
+    const container = document.createElement("div");
+    const renderer = new DomChapterRenderer();
 
     renderer.render(container, {
       sectionId: "section-1",
@@ -38,25 +38,25 @@ describe("DomChapterRenderer", () => {
           ]
         }
       ]
-    })
+    });
 
-    expect(container.querySelector(".epub-dom-section")).toBeTruthy()
+    expect(container.querySelector(".epub-dom-section")).toBeTruthy();
     expect(
       container.querySelector("style[data-epub-dom-normalization='true']")
-    ).toBeTruthy()
-    expect(container.textContent).toContain("Hello")
+    ).toBeTruthy();
+    expect(container.textContent).toContain("Hello");
 
-    renderer.clear(container)
+    renderer.clear(container);
 
-    expect(container.querySelector(".epub-dom-section")).toBeFalsy()
+    expect(container.querySelector(".epub-dom-section")).toBeFalsy();
     expect(
       container.querySelector("style[data-epub-dom-normalization='true']")
-    ).toBeFalsy()
-  })
+    ).toBeFalsy();
+  });
 
   it("injects linked stylesheet text before normalization css and clears it", () => {
-    const container = document.createElement("div")
-    const renderer = new DomChapterRenderer()
+    const container = document.createElement("div");
+    const renderer = new DomChapterRenderer();
 
     renderer.render(container, {
       sectionId: "section-1",
@@ -85,29 +85,29 @@ describe("DomChapterRenderer", () => {
           children: [{ kind: "text", text: "Hello" }]
         }
       ]
-    })
+    });
 
     const sourceStyle = container.querySelector(
       "style[data-epub-dom-source='OPS/styles/chapter.css']"
-    )
+    );
     const normalizationStyle = container.querySelector(
       "style[data-epub-dom-normalization='true']"
-    )
+    );
 
-    expect(sourceStyle?.textContent).toContain(".epub-dom-section .badge")
-    expect(sourceStyle?.textContent).toContain("height:1.1em")
-    expect(sourceStyle?.textContent).not.toContain("@font-face")
+    expect(sourceStyle?.textContent).toContain(".epub-dom-section .badge");
+    expect(sourceStyle?.textContent).toContain("height:1.1em");
+    expect(sourceStyle?.textContent).not.toContain("@font-face");
     expect(sourceStyle?.compareDocumentPosition(normalizationStyle!)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
-    )
+    );
 
-    renderer.clear(container)
+    renderer.clear(container);
 
-    expect(container.querySelector("style[data-epub-dom-source]")).toBeFalsy()
-  })
+    expect(container.querySelector("style[data-epub-dom-source]")).toBeFalsy();
+  });
 
   it("maps html and body root attributes onto the rendered dom section", () => {
-    const renderer = new DomChapterRenderer()
+    const renderer = new DomChapterRenderer();
 
     const markup = renderer.createMarkup({
       sectionId: "section-1",
@@ -138,17 +138,19 @@ describe("DomChapterRenderer", () => {
           children: [{ kind: "text", text: "Hello" }]
         }
       ]
-    })
+    });
 
     expect(markup).toContain(
       'class="epub-dom-section book-root background-img-center custom-theme"'
-    )
-    expect(markup).toContain('id="page-body"')
-    expect(markup).toContain("background-color: rgb(102, 61, 31); padding: 20px")
-  })
+    );
+    expect(markup).toContain('id="page-body"');
+    expect(markup).toContain(
+      "background-color: rgb(102, 61, 31); padding: 20px"
+    );
+  });
 
   it("scopes body-qualified selectors onto the rendered dom section itself", () => {
-    const renderer = new DomChapterRenderer()
+    const renderer = new DomChapterRenderer();
 
     const markup = renderer.createMarkup({
       sectionId: "section-1",
@@ -187,21 +189,21 @@ describe("DomChapterRenderer", () => {
           children: [{ kind: "text", text: "Hello" }]
         }
       ]
-    })
+    });
 
     expect(markup).toContain(
       ".epub-dom-section.background-img-center-custom-theme{background:#663d1f}"
-    )
+    );
     expect(markup).toContain(
       ".epub-dom-section.background-img-center-custom-theme>main{width:600px}"
-    )
+    );
     expect(markup).toContain(
       ".epub-dom-section.book-root.custom-theme .title{color:#321}"
-    )
-  })
+    );
+  });
 
   it("also routes paginated root background selectors to the page viewport", () => {
-    const renderer = new DomChapterRenderer()
+    const renderer = new DomChapterRenderer();
 
     const markup = renderer.createMarkup(
       {
@@ -241,15 +243,15 @@ describe("DomChapterRenderer", () => {
       {
         rootBackgroundTarget: "page-viewport"
       }
-    )
+    );
 
     expect(markup).toContain(
       ".epub-dom-section.background-img-center-custom-theme,.epub-dom-page-viewport.background-img-center-custom-theme{background:#663d1f}"
-    )
+    );
     expect(markup).toContain(
       ".epub-dom-section.background-img-center-custom-theme>main{width:600px}"
-    )
-  })
+    );
+  });
 
   it("serializes page viewport root classes and background inline style only", () => {
     const attributes = serializeDomPageViewportAttributes(
@@ -280,21 +282,23 @@ describe("DomChapterRenderer", () => {
         pageHeight: 720,
         pageNumberInSection: 3
       }
-    )
+    );
 
     expect(attributes).toContain(
       'class="epub-dom-page-viewport book-root background-img-center custom-theme"'
-    )
-    expect(attributes).toContain('data-page-viewport="true"')
-    expect(attributes).toContain('data-page-number-in-section="3"')
-    expect(attributes).toContain("height: 720px")
-    expect(attributes).toContain("background-image: url(data:image/svg+xml;utf8,&lt;svg&gt;&lt;/svg&gt;)")
-    expect(attributes).toContain("background-color: rgb(102, 61, 31)")
-    expect(attributes).not.toContain("padding: 20px")
-  })
+    );
+    expect(attributes).toContain('data-page-viewport="true"');
+    expect(attributes).toContain('data-page-number-in-section="3"');
+    expect(attributes).toContain("height: 720px");
+    expect(attributes).toContain(
+      "background-image: url(data:image/svg+xml;utf8,&lt;svg&gt;&lt;/svg&gt;)"
+    );
+    expect(attributes).toContain("background-color: rgb(102, 61, 31)");
+    expect(attributes).not.toContain("padding: 20px");
+  });
 
   it("scopes inline style tags to the rendered chapter root", () => {
-    const renderer = new DomChapterRenderer()
+    const renderer = new DomChapterRenderer();
 
     const markup = renderer.createMarkup({
       sectionId: "section-1",
@@ -328,14 +332,14 @@ describe("DomChapterRenderer", () => {
           children: [{ kind: "text", text: "Hello" }]
         }
       ]
-    })
+    });
 
-    expect(markup).not.toContain("@import")
-    expect(markup).toContain(".epub-dom-section>main{margin:0}")
+    expect(markup).not.toContain("@import");
+    expect(markup).toContain(".epub-dom-section>main{margin:0}");
     expect(markup).toContain(
       "@media (min-width:600px){.epub-dom-section h2{color:red}}"
-    )
-  })
+    );
+  });
 
   it("builds normalized css for theme and typography constraints", () => {
     const css = buildDomChapterNormalizationCss({
@@ -349,37 +353,85 @@ describe("DomChapterRenderer", () => {
         paragraphSpacing: 12
       },
       fontFamily: '"Iowan Old Style", serif'
-    })
+    });
 
-    expect(css).toContain("font-size: 18px;")
-    expect(css).toContain("line-height: 1.6;")
-    expect(css).toContain("position: relative;")
-    expect(css).toContain('font-family: "Iowan Old Style", serif;')
-    expect(css).toContain("--reader-side-padding: 8px;")
-    expect(css).toContain("--reader-link-color: #1b4b72;")
-    expect(css).toContain("--reader-caption-color: #475569;")
-    expect(css).toContain(".epub-dom-section table {")
-    expect(css).toContain(".epub-dom-section a {")
+    expect(css).toContain("font-size: 18px;");
+    expect(css).toContain("line-height: 1.6;");
+    expect(css).toContain("position: relative;");
+    expect(css).toContain('font-family: "Iowan Old Style", serif;');
+    expect(css).toContain("--reader-side-padding: 8px;");
+    expect(css).toContain("--reader-link-color: #1b4b72;");
+    expect(css).toContain("--reader-caption-color: #475569;");
+    expect(css).toContain(".epub-dom-section table {");
+    expect(css).toContain(".epub-dom-section a {");
     expect(css).toContain(
       ".epub-dom-section figcaption, .epub-dom-section caption {"
-    )
-    expect(css).toContain(".epub-dom-section mark {")
-    expect(css).toContain(".epub-dom-section hr {")
-    expect(css).toContain("padding-left: var(--reader-quote-accent-gap);")
-    expect(css).toContain("max-height: min(900px, calc(var(--reader-content-viewport-height, 100vh) * 0.78));")
-    expect(css).toContain(".epub-dom-section:not(.epub-dom-section-fxl) img {")
+    );
+    expect(css).toContain(".epub-dom-section mark {");
+    expect(css).toContain(".epub-dom-section hr {");
+    expect(css).toContain("padding-left: var(--reader-quote-accent-gap);");
+    expect(css).toContain(
+      "max-height: min(900px, calc(var(--reader-content-viewport-height, 100vh) * 0.78));"
+    );
+    expect(css).toContain(".epub-dom-section:not(.epub-dom-section-fxl) img {");
     const inlineImageSelector =
-      '.epub-dom-section:not(.epub-dom-section-fxl) :is(a.footnote, a.noteref, a[epub\\:type~="noteref"], a[role="doc-noteref"], sup, sub, small) img {'
-    expect(css).toContain(inlineImageSelector)
+      '.epub-dom-section:not(.epub-dom-section-fxl) :is(a.footnote, a.noteref, a[epub\\:type~="noteref"], a[role="doc-noteref"], sup, sub, small) img {';
+    expect(css).toContain(inlineImageSelector);
     expect(css).not.toContain(
       '.epub-dom-section :where(a.footnote, a.noteref, a[epub\\:type~="noteref"], a[role="doc-noteref"], sup, sub, small) img {'
-    )
-    expect(css.indexOf(".epub-dom-section:not(.epub-dom-section-fxl) img {")).toBeLessThan(
-      css.indexOf(inlineImageSelector)
-    )
-    expect(css).toContain("display: inline-block;")
-    expect(css).toContain("max-height: 1.5em;")
-  })
+    );
+    expect(
+      css.indexOf(".epub-dom-section:not(.epub-dom-section-fxl) img {")
+    ).toBeLessThan(css.indexOf(inlineImageSelector));
+    expect(css).toContain("display: inline-block;");
+    expect(css).toContain("max-height: 1.5em;");
+  });
+
+  it("can override publisher foreground colors while preserving reader semantic colors", () => {
+    const css = buildDomChapterNormalizationCss({
+      theme: {
+        color: "#ecf4ff",
+        background: "#182028"
+      },
+      publisherColorOverride: "foreground",
+      typography: {
+        fontSize: 18,
+        lineHeight: 1.6,
+        paragraphSpacing: 12
+      },
+      fontFamily: '"Iowan Old Style", serif'
+    });
+
+    expect(css).toContain("color: #ecf4ff;");
+    expect(css).toContain("color: inherit !important;");
+    expect(css).toContain(
+      ".epub-dom-section a {\n  color: var(--reader-link-color);"
+    );
+    expect(css).toContain(
+      ".epub-dom-section figcaption, .epub-dom-section caption {"
+    );
+    expect(css).toContain("color: var(--reader-caption-color);");
+    expect(css).toContain(".epub-dom-section :where(svg text, svg tspan) {");
+    expect(css).toContain("fill: currentColor !important;");
+  });
+
+  it("keeps publisher foreground colors intact by default", () => {
+    const css = buildDomChapterNormalizationCss({
+      theme: {
+        color: "#ecf4ff",
+        background: "#182028"
+      },
+      typography: {
+        fontSize: 18,
+        lineHeight: 1.6,
+        paragraphSpacing: 12
+      },
+      fontFamily: '"Iowan Old Style", serif'
+    });
+
+    expect(css).not.toContain("color: inherit !important;");
+    expect(css).not.toContain("fill: currentColor !important;");
+  });
 
   it("keeps fixed-layout section images out of reflowable image normalization", () => {
     const css = buildDomChapterNormalizationCss({
@@ -394,15 +446,15 @@ describe("DomChapterRenderer", () => {
       },
       fontFamily: '"Iowan Old Style", serif',
       renditionLayout: "pre-paginated"
-    })
+    });
 
-    expect(css).toContain(".epub-dom-section:not(.epub-dom-section-fxl) img {")
-    expect(css).not.toContain(".epub-dom-section img {")
-    expect(css).toContain(".epub-dom-section-fxl {")
-  })
+    expect(css).toContain(".epub-dom-section:not(.epub-dom-section-fxl) img {");
+    expect(css).not.toContain(".epub-dom-section img {");
+    expect(css).toContain(".epub-dom-section-fxl {");
+  });
 
   it("rewrites resolved attribute values while serializing dom chapters", () => {
-    const renderer = new DomChapterRenderer()
+    const renderer = new DomChapterRenderer();
 
     const markup = renderer.createMarkup({
       sectionId: "section-1",
@@ -430,14 +482,14 @@ describe("DomChapterRenderer", () => {
           children: []
         }
       ]
-    })
+    });
 
-    expect(markup).toContain('src="blob:OPS/images/cover.jpg"')
-    expect(markup).toContain('alt="Cover"')
-  })
+    expect(markup).toContain('src="blob:OPS/images/cover.jpg"');
+    expect(markup).toContain('alt="Cover"');
+  });
 
   it("adds cover styling hooks for cover sections", () => {
-    const renderer = new DomChapterRenderer()
+    const renderer = new DomChapterRenderer();
 
     const markup = renderer.createMarkup({
       sectionId: "section-cover",
@@ -467,22 +519,22 @@ describe("DomChapterRenderer", () => {
           children: []
         }
       ]
-    })
+    });
 
     expect(markup).toContain(
       "epub-dom-section epub-dom-section-cover epub-dom-cover"
-    )
-    expect(markup).toContain('class="epub-dom-presentation-image"')
-    expect(markup).toContain('src="blob:cover-image"')
-    expect(markup).toContain('data-presentation-width="480"')
-    expect(markup).toContain('data-presentation-height="720"')
-    expect(markup).toContain("--reader-presentation-height: 720px")
-    expect(markup).toContain(".epub-dom-cover .epub-dom-presentation-image")
-    expect(markup).toContain("max-height: 100%;")
-  })
+    );
+    expect(markup).toContain('class="epub-dom-presentation-image"');
+    expect(markup).toContain('src="blob:cover-image"');
+    expect(markup).toContain('data-presentation-width="480"');
+    expect(markup).toContain('data-presentation-height="720"');
+    expect(markup).toContain("--reader-presentation-height: 720px");
+    expect(markup).toContain(".epub-dom-cover .epub-dom-presentation-image");
+    expect(markup).toContain("max-height: 100%;");
+  });
 
   it("renders standalone image pages as centered presentation images", () => {
-    const renderer = new DomChapterRenderer()
+    const renderer = new DomChapterRenderer();
 
     const markup = renderer.createMarkup({
       sectionId: "section-image-page",
@@ -502,17 +554,17 @@ describe("DomChapterRenderer", () => {
       },
       fontFamily: '"Iowan Old Style", serif',
       nodes: []
-    })
+    });
 
-    expect(markup).toContain("epub-dom-section-image-page epub-dom-image-page")
-    expect(markup).toContain('src="blob:title-image"')
-    expect(markup).toContain('data-presentation-width="420"')
-    expect(markup).toContain('data-presentation-height="560"')
-    expect(markup).toContain("object-fit: contain;")
-  })
+    expect(markup).toContain("epub-dom-section-image-page epub-dom-image-page");
+    expect(markup).toContain('src="blob:title-image"');
+    expect(markup).toContain('data-presentation-width="420"');
+    expect(markup).toContain('data-presentation-height="560"');
+    expect(markup).toContain("object-fit: contain;");
+  });
 
   it("adds fixed-layout sizing hooks for pre-paginated sections", () => {
-    const renderer = new DomChapterRenderer()
+    const renderer = new DomChapterRenderer();
 
     const markup = renderer.createMarkup({
       sectionId: "section-fxl",
@@ -543,18 +595,18 @@ describe("DomChapterRenderer", () => {
           children: [{ kind: "text", text: "Fixed layout page" }]
         }
       ]
-    })
+    });
 
-    expect(markup).toContain("epub-dom-section-fxl")
-    expect(markup).toContain('data-rendition-layout="pre-paginated"')
-    expect(markup).toContain('data-fxl-viewport-width="1200"')
-    expect(markup).toContain("--fxl-render-width: 405px")
-    expect(markup).toContain("--fxl-render-height: 540px")
-    expect(markup).toContain(".epub-dom-section-fxl {")
-  })
+    expect(markup).toContain("epub-dom-section-fxl");
+    expect(markup).toContain('data-rendition-layout="pre-paginated"');
+    expect(markup).toContain('data-fxl-viewport-width="1200"');
+    expect(markup).toContain("--fxl-render-width: 405px");
+    expect(markup).toContain("--fxl-render-height: 540px");
+    expect(markup).toContain(".epub-dom-section-fxl {");
+  });
 
   it("serializes the content viewport height hook for regular sections", () => {
-    const renderer = new DomChapterRenderer()
+    const renderer = new DomChapterRenderer();
 
     const markup = renderer.createMarkup({
       sectionId: "section-1",
@@ -578,9 +630,9 @@ describe("DomChapterRenderer", () => {
           children: [{ kind: "text", text: "Hello" }]
         }
       ]
-    })
+    });
 
-    expect(markup).toContain('data-content-height="640"')
-    expect(markup).toContain("--reader-content-viewport-height: 640px")
-  })
-})
+    expect(markup).toContain('data-content-height="640"');
+    expect(markup).toContain("--reader-content-viewport-height: 640px");
+  });
+});

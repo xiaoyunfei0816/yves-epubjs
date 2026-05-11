@@ -6,6 +6,7 @@ import type {
 import type {
   BlockNode,
   Locator,
+  PublisherColorOverride,
   SectionDocument,
   Theme,
   TypographyOptions
@@ -210,6 +211,7 @@ export function buildPageDisplayList(options: {
   viewportHeight: number;
   theme: Theme;
   typography: TypographyOptions;
+  publisherColorOverride?: PublisherColorOverride;
   highlightedBlockIds: Set<string>;
   highlightRangesByBlock?: Map<
     string,
@@ -235,6 +237,7 @@ export function buildPageDisplayList(options: {
     blocks: LayoutBlock[];
     theme: Theme;
     typography: TypographyOptions;
+    publisherColorOverride?: PublisherColorOverride;
     locatorMap: Map<string, Locator>;
     highlightedBlockIds: Set<string>;
     highlightRangesByBlock?: Map<
@@ -255,6 +258,7 @@ export function buildPageDisplayList(options: {
     ) => IntrinsicImageSize | null | undefined;
   }) => SectionDisplayList;
 }): SectionDisplayList {
+  const publisherColorOverride = options.publisherColorOverride ?? "none";
   const blocks = options.page.blocks.map((slice) =>
     slice.type === "pretext"
       ? createPretextSliceBlock(slice.block, slice.lineStart, slice.lineEnd)
@@ -289,6 +293,7 @@ export function buildPageDisplayList(options: {
     blocks,
     theme: options.theme,
     typography: options.typography,
+    publisherColorOverride,
     locatorMap,
     highlightedBlockIds: options.highlightedBlockIds,
     ...(options.highlightRangesByBlock

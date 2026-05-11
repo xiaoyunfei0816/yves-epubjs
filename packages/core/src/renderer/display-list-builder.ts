@@ -3,6 +3,7 @@ import type {
   FigureBlock,
   ListBlock,
   Locator,
+  PublisherColorOverride,
   SectionDocument,
   TableBlock,
   TextAlign,
@@ -51,6 +52,7 @@ type BuilderOptions = {
   blocks: LayoutBlock[];
   theme: Theme;
   typography: TypographyOptions;
+  publisherColorOverride?: PublisherColorOverride;
   locatorMap?: Map<string, Locator>;
   resolveImageLoaded?: (src: string) => boolean;
   resolveImageUrl?: (src: string) => string;
@@ -75,10 +77,12 @@ export class DisplayListBuilder {
     const ops: DrawOp[] = [];
     const interactions: InteractionRegion[] = [];
     const contentWidth = Math.max(120, options.width);
+    const publisherColorOverride = options.publisherColorOverride ?? "none";
 
     for (const block of options.blocks) {
       const underlineColor = options.underlineColorsByBlock?.get(block.id);
-      const underlineRanges = options.underlineRangesByBlock?.get(block.id) ?? [];
+      const underlineRanges =
+        options.underlineRangesByBlock?.get(block.id) ?? [];
       const built =
         block.type === "pretext"
           ? buildPretextBlockDisplay({
@@ -88,6 +92,7 @@ export class DisplayListBuilder {
               width: contentWidth,
               theme: options.theme,
               styleProfile,
+              publisherColorOverride,
               locator: options.locatorMap?.get(block.id),
               resolveImageLoaded: options.resolveImageLoaded,
               resolveImageUrl: options.resolveImageUrl,
@@ -109,6 +114,7 @@ export class DisplayListBuilder {
               theme: options.theme,
               typography: options.typography,
               styleProfile,
+              publisherColorOverride,
               locator: options.locatorMap?.get(block.id),
               resolveImageLoaded: options.resolveImageLoaded,
               resolveImageUrl: options.resolveImageUrl,
@@ -150,6 +156,7 @@ export class DisplayListBuilder {
     theme: Theme;
     typography: TypographyOptions;
     styleProfile: ReadingStyleProfile;
+    publisherColorOverride: PublisherColorOverride;
     locator: Locator | undefined;
     resolveImageLoaded: ((src: string) => boolean) | undefined;
     resolveImageUrl: ((src: string) => string) | undefined;
@@ -178,7 +185,8 @@ export class DisplayListBuilder {
     const blockStyle = resolveNativeBlockRenderStyle({
       block: input.block,
       theme: input.theme,
-      styleProfile: input.styleProfile
+      styleProfile: input.styleProfile,
+      publisherColorOverride: input.publisherColorOverride
     });
     const contentRect = insetNativeBlockRect(rect, blockStyle);
     const ops: DrawOp[] = [];
@@ -563,6 +571,7 @@ export class DisplayListBuilder {
     underlineRanges: BlockUnderlineRange[];
     active: boolean;
     styleProfile: ReadingStyleProfile;
+    publisherColorOverride?: PublisherColorOverride;
   }): TextRunDrawOp[] {
     const fontSize = extractFontSize(input.font);
     const lineHeight = Math.max(fontSize * 1.45, 18);

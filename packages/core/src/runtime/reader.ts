@@ -32,6 +32,7 @@ import type {
   Locator,
   LocatorRestoreDiagnostics,
   Point,
+  PublisherColorOverride,
   PublisherStylesMode,
   PublicationAccessibilitySnapshot,
   ReadingMode,
@@ -245,6 +246,7 @@ export class EpubReader {
   private preferences: ReaderPreferences;
   private mode: "scroll" | "paginated";
   private publisherStyles: PublisherStylesMode;
+  private publisherColorOverride: PublisherColorOverride;
   private experimentalRtl: boolean;
   private spreadMode: ReaderSpreadMode;
   private debugMode: boolean;
@@ -305,6 +307,7 @@ export class EpubReader {
       preferences,
       mode: settings.mode,
       publisherStyles: settings.publisherStyles,
+      publisherColorOverride: settings.publisherColorOverride,
       experimentalRtl: settings.experimentalRtl,
       spreadMode: settings.spreadMode,
       theme: { ...settings.theme },
@@ -319,6 +322,7 @@ export class EpubReader {
     this.preferences = this.sessionState.view.preferences;
     this.mode = this.sessionState.view.mode;
     this.publisherStyles = this.sessionState.view.publisherStyles;
+    this.publisherColorOverride = this.sessionState.view.publisherColorOverride;
     this.experimentalRtl = this.sessionState.view.experimentalRtl;
     this.spreadMode = this.sessionState.view.spreadMode;
     this.debugMode = this.sessionState.view.debugMode;
@@ -1343,24 +1347,22 @@ export class EpubReader {
     const absoluteY = point.y + this.options.container.scrollTop;
     const sectionOffsetX = new Map<string, number>();
     return (
-      [...this.lastInteractionRegions]
-        .reverse()
-        .find((interaction) => {
-          let offsetX = sectionOffsetX.get(interaction.sectionId);
-          if (offsetX === undefined) {
-            offsetX = this.getScrollableCanvasSectionOffsetX(
-              interaction.sectionId
-            );
-            sectionOffsetX.set(interaction.sectionId, offsetX);
-          }
-          const localX = point.x - offsetX;
-          return (
-            localX >= interaction.rect.x &&
-            localX <= interaction.rect.x + interaction.rect.width &&
-            absoluteY >= interaction.rect.y &&
-            absoluteY <= interaction.rect.y + interaction.rect.height
+      [...this.lastInteractionRegions].reverse().find((interaction) => {
+        let offsetX = sectionOffsetX.get(interaction.sectionId);
+        if (offsetX === undefined) {
+          offsetX = this.getScrollableCanvasSectionOffsetX(
+            interaction.sectionId
           );
-        }) ?? null
+          sectionOffsetX.set(interaction.sectionId, offsetX);
+        }
+        const localX = point.x - offsetX;
+        return (
+          localX >= interaction.rect.x &&
+          localX <= interaction.rect.x + interaction.rect.width &&
+          absoluteY >= interaction.rect.y &&
+          absoluteY <= interaction.rect.y + interaction.rect.height
+        );
+      }) ?? null
     );
   }
 
@@ -1717,6 +1719,7 @@ export class EpubReader {
     return {
       mode: this.mode,
       publisherStyles: this.publisherStyles,
+      publisherColorOverride: this.publisherColorOverride,
       experimentalRtl: this.experimentalRtl,
       spreadMode: this.spreadMode,
       theme: { ...this.theme },
@@ -1895,6 +1898,9 @@ export class EpubReader {
     const modeChanged = previousSettings.mode !== nextSettings.mode;
     const publisherStylesChanged =
       previousSettings.publisherStyles !== nextSettings.publisherStyles;
+    const publisherColorOverrideChanged =
+      previousSettings.publisherColorOverride !==
+      nextSettings.publisherColorOverride;
     const experimentalRtlChanged =
       previousSettings.experimentalRtl !== nextSettings.experimentalRtl;
     const spreadModeChanged =
@@ -1910,6 +1916,7 @@ export class EpubReader {
     const didChange =
       modeChanged ||
       publisherStylesChanged ||
+      publisherColorOverrideChanged ||
       experimentalRtlChanged ||
       spreadModeChanged ||
       themeChanged ||
@@ -1920,6 +1927,7 @@ export class EpubReader {
     this.preferences = nextPreferences;
     this.mode = nextSettings.mode;
     this.publisherStyles = nextSettings.publisherStyles;
+    this.publisherColorOverride = nextSettings.publisherColorOverride;
     this.experimentalRtl = nextSettings.experimentalRtl;
     this.spreadMode = nextSettings.spreadMode;
     this.theme = { ...nextSettings.theme };
@@ -2622,6 +2630,7 @@ export class EpubReader {
           blocks: layout.blocks,
           theme: this.theme,
           typography: this.typography,
+          publisherColorOverride: this.publisherColorOverride,
           locatorMap: layout.locatorMap,
           resolveImageLoaded: (src) => this.isImageResourceReady(src),
           resolveImageUrl: (src) => this.resolveCanvasResourceUrl(src),
@@ -2731,6 +2740,7 @@ export class EpubReader {
       viewportHeight: this.options.container?.clientHeight ?? 720,
       theme: this.theme,
       typography: this.typography,
+      publisherColorOverride: this.publisherColorOverride,
       highlightedBlockIds: this.getHighlightedCanvasBlockIdsForSection(
         page.spineIndex
       ),
@@ -2864,6 +2874,7 @@ export class EpubReader {
       typography: this.typography,
       fontFamily: this.getFontFamily(),
       publisherStyles: this.publisherStyles,
+      publisherColorOverride: this.publisherColorOverride,
       ...(typeof fixedLayoutViewportBox?.width === "number"
         ? { availableWidth: fixedLayoutViewportBox.width }
         : typeof presentationViewportBox?.width === "number"
@@ -4290,6 +4301,7 @@ export class EpubReader {
       blocks: layout.blocks,
       theme: this.theme,
       typography: this.typography,
+      publisherColorOverride: this.publisherColorOverride,
       locatorMap: layout.locatorMap,
       resolveImageLoaded: (src) => this.isImageResourceReady(src),
       resolveImageUrl: (src) => this.resolveCanvasResourceUrl(src),
@@ -5399,6 +5411,9 @@ function cloneReaderPreferences(
     ...(preferences.mode ? { mode: preferences.mode } : {}),
     ...(preferences.publisherStyles
       ? { publisherStyles: preferences.publisherStyles }
+      : {}),
+    ...(preferences.publisherColorOverride
+      ? { publisherColorOverride: preferences.publisherColorOverride }
       : {}),
     ...(preferences.experimentalRtl !== undefined
       ? { experimentalRtl: preferences.experimentalRtl }
