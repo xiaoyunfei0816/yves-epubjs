@@ -369,6 +369,14 @@ describe("DomChapterRenderer", () => {
     );
     expect(css).toContain(".epub-dom-section mark {");
     expect(css).toContain(".epub-dom-section hr {");
+    expect(css).toContain(
+      ".epub-dom-section:not(.epub-dom-section-fxl) .epub-dom-media-wrapper {"
+    );
+    expect(css).toContain("display: block !important;");
+    expect(css).toContain(
+      ".epub-dom-section:not(.epub-dom-section-fxl) .epub-dom-media-wrapper > :where(h1, h2, h3, h4, h5, h6, figcaption, caption) {"
+    );
+    expect(css).toContain("writing-mode: horizontal-tb;");
     expect(css).toContain("padding-left: var(--reader-quote-accent-gap);");
     expect(css).toContain(
       "max-height: min(900px, calc(var(--reader-content-viewport-height, 100vh) * 0.78));"
@@ -511,6 +519,56 @@ describe("DomChapterRenderer", () => {
 
     expect(markup).toContain('src="blob:OPS/images/cover.jpg"');
     expect(markup).toContain('alt="Cover"');
+  });
+
+  it("marks direct media wrappers so publisher flex image layouts can be normalized", () => {
+    const renderer = new DomChapterRenderer();
+
+    const markup = renderer.createMarkup({
+      sectionId: "section-1",
+      sectionHref: "OPS/chapter.xhtml",
+      theme: {
+        color: "#1f2328",
+        background: "#fffdf7"
+      },
+      typography: {
+        fontSize: 18,
+        lineHeight: 1.6,
+        paragraphSpacing: 12
+      },
+      fontFamily: '"Iowan Old Style", serif',
+      nodes: [
+        {
+          kind: "element",
+          tagName: "div",
+          attributes: {
+            class: "image-single",
+            align: "center"
+          },
+          children: [
+            {
+              kind: "element",
+              tagName: "img",
+              attributes: {
+                src: "chart.jpg"
+              },
+              children: []
+            },
+            {
+              kind: "element",
+              tagName: "h5",
+              attributes: {},
+              children: [{ kind: "text", text: "图6-2 央行债券持有规模" }]
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(markup).toContain(
+      'class="image-single epub-dom-media-wrapper"'
+    );
+    expect(markup).toContain("图6-2 央行债券持有规模");
   });
 
   it("adds cover styling hooks for cover sections", () => {

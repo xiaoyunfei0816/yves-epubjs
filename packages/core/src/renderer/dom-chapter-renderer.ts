@@ -231,7 +231,16 @@ function serializePreprocessedChapterNode(
     return escapeHtmlText(node.text);
   }
 
-  const attributes = Object.entries(node.attributes)
+  const nodeAttributes = shouldMarkMediaWrapper(node)
+    ? {
+        ...node.attributes,
+        class: mergeClassNames(
+          node.attributes.class,
+          "epub-dom-media-wrapper"
+        )
+      }
+    : node.attributes;
+  const attributes = Object.entries(nodeAttributes)
     .flatMap(([name, value]) => {
       const resolvedValue = resolveAttributeValue
         ? resolveAttributeValue({
@@ -260,6 +269,25 @@ function serializePreprocessedChapterNode(
     resolveAttributeValue,
     styleScopeOptions
   )}</${node.tagName}>`;
+}
+
+function shouldMarkMediaWrapper(node: PreprocessedChapterNode): boolean {
+  if (node.kind === "text") {
+    return false;
+  }
+
+  const tagName = node.tagName.toLowerCase();
+  if (tagName !== "div" && tagName !== "figure") {
+    return false;
+  }
+
+  return node.children.some(
+    (child) =>
+      child.kind !== "text" &&
+      ["img", "svg", "object", "video", "canvas"].includes(
+        child.tagName.toLowerCase()
+      )
+  );
 }
 
 function escapeHtmlText(value: string): string {
