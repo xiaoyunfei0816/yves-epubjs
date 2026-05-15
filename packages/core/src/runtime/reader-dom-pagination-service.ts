@@ -58,15 +58,7 @@ export class ReaderDomPaginationService {
       typeof nextPage.offsetInSection === "number"
         ? nextPage.offsetInSection - targetOffset
         : sectionHeight - targetOffset
-    const visibleHeight =
-      nextPage?.sectionId === input.page.sectionId &&
-      rawVisibleHeight > 0 &&
-      rawVisibleHeight < getMinimumDomPageAdvance(input.pageHeight)
-        ? Math.max(
-            1,
-            Math.min(input.pageHeight, sectionHeight - targetOffset)
-          )
-        : Math.max(1, Math.min(input.pageHeight, rawVisibleHeight))
+    const visibleHeight = Math.max(1, Math.min(input.pageHeight, rawVisibleHeight))
     viewport.style.height = `${visibleHeight}px`
     input.sectionElement.style.position = "relative"
     input.sectionElement.style.transform = `translateY(-${targetOffset}px)`
@@ -382,7 +374,14 @@ function enforceStandaloneMediaPageOffsets(input: {
 
   const nextOffsets = new Set<number>()
   for (const offset of input.offsets) {
-    if (!isOffsetInsideStandaloneMedia(offset, standaloneMediaBands)) {
+    if (
+      !isOffsetInsideStandaloneMedia(offset, standaloneMediaBands) &&
+      !isOffsetTooCloseBeforeStandaloneMedia(
+        offset,
+        standaloneMediaBands,
+        input.pageHeight
+      )
+    ) {
       nextOffsets.add(normalizeDomPageOffset(offset))
     }
   }
@@ -417,6 +416,21 @@ function isOffsetInsideStandaloneMedia(
       offset > band.top + DOM_PAGE_EDGE_TOLERANCE &&
       offset < band.bottom - DOM_PAGE_EDGE_TOLERANCE
   )
+}
+
+function isOffsetTooCloseBeforeStandaloneMedia(
+  offset: number,
+  mediaBands: DomMediaBand[],
+  pageHeight: number
+): boolean {
+  const minimumAdvance = getMinimumDomPageAdvance(pageHeight)
+  return mediaBands.some((band) => {
+    const distanceToMedia = band.top - offset
+    return (
+      distanceToMedia > DOM_PAGE_EDGE_TOLERANCE &&
+      distanceToMedia < minimumAdvance
+    )
+  })
 }
 
 function normalizeDomPageOffset(offset: number): number {
