@@ -224,6 +224,279 @@ describe("ReaderDomPaginationService", () => {
     expect(result?.resolvedPage?.offsetInSection).toBe(620)
   })
 
+  it("keeps the visible standalone media page when measured page numbers shift", () => {
+    const service = new ReaderDomPaginationService()
+    const section = createSection()
+    const container = document.createElement("div")
+    const sectionElement = document.createElement("section")
+    sectionElement.className = "epub-dom-section"
+    sectionElement.dataset.sectionId = section.id
+    container.appendChild(sectionElement)
+    setElementBox(sectionElement, {
+      top: 0,
+      height: 3300,
+      scrollHeight: 3300,
+      offsetHeight: 3300
+    })
+
+    const firstText = document.createElement("p")
+    firstText.dataset.readerBlockId = "text-1"
+    firstText.textContent = "First"
+    setElementBox(firstText, { top: 932, height: 88 })
+    const firstMedia = document.createElement("div")
+    firstMedia.className = "image-single epub-dom-media-wrapper"
+    setElementBox(firstMedia, { top: 1029, height: 791 })
+    const firstImage = document.createElement("img")
+    setElementBox(firstImage, { top: 1029, height: 791 })
+    firstMedia.append(firstImage)
+
+    const secondText = document.createElement("p")
+    secondText.dataset.readerBlockId = "text-2"
+    secondText.textContent = "Second"
+    setElementBox(secondText, { top: 1830, height: 58 })
+    const secondMedia = document.createElement("div")
+    secondMedia.className = "image-single epub-dom-media-wrapper"
+    setElementBox(secondMedia, { top: 1898, height: 791 })
+    const secondImage = document.createElement("img")
+    setElementBox(secondImage, { top: 1898, height: 791 })
+    secondMedia.append(secondImage)
+
+    sectionElement.append(firstText, firstMedia, secondText, secondMedia)
+
+    const result = service.syncMeasuredPaginatedDomPages({
+      container,
+      section,
+      currentSectionIndex: 0,
+      currentPageNumber: 5,
+      pages: [
+        createPage(1, 1, 0),
+        createPage(2, 2, 790),
+        createPage(3, 3, 1200),
+        createPage(4, 4, 1600),
+        createPage(5, 5, 1890)
+      ],
+      pageHeight: 790,
+      locator: {
+        spineIndex: 0,
+        progressInSection: 0.6
+      }
+    })
+
+    expect(result?.resolvedPage?.offsetInSection).toBe(1898)
+  })
+
+  it("keeps the visible standalone media page when the estimated page has image blocks", () => {
+    const service = new ReaderDomPaginationService()
+    const section: SectionDocument = {
+      id: "section-1",
+      href: "section-1.xhtml",
+      anchors: {},
+      blocks: [
+        {
+          id: "image-1",
+          kind: "image",
+          src: "personality-3.png"
+        }
+      ]
+    }
+    const container = document.createElement("div")
+    const sectionElement = document.createElement("section")
+    sectionElement.className = "epub-dom-section"
+    sectionElement.dataset.sectionId = section.id
+    container.appendChild(sectionElement)
+    setElementBox(sectionElement, {
+      top: 0,
+      height: 3300,
+      scrollHeight: 3300,
+      offsetHeight: 3300
+    })
+
+    const firstText = document.createElement("p")
+    firstText.dataset.readerBlockId = "text-1"
+    firstText.textContent = "First"
+    setElementBox(firstText, { top: 932, height: 88 })
+    const firstMedia = document.createElement("div")
+    firstMedia.className = "image-single epub-dom-media-wrapper"
+    setElementBox(firstMedia, { top: 1029, height: 791 })
+    const firstImage = document.createElement("img")
+    setElementBox(firstImage, { top: 1029, height: 791 })
+    firstMedia.append(firstImage)
+
+    const secondText = document.createElement("p")
+    secondText.dataset.readerBlockId = "text-2"
+    secondText.textContent = "Second"
+    setElementBox(secondText, { top: 1830, height: 58 })
+    const secondMedia = document.createElement("div")
+    secondMedia.className = "image-single epub-dom-media-wrapper"
+    setElementBox(secondMedia, { top: 1898, height: 791 })
+    const secondImage = document.createElement("img")
+    setElementBox(secondImage, { top: 1898, height: 791 })
+    secondMedia.append(secondImage)
+
+    sectionElement.append(firstText, firstMedia, secondText, secondMedia)
+
+    const result = service.syncMeasuredPaginatedDomPages({
+      container,
+      section,
+      currentSectionIndex: 0,
+      currentPageNumber: 5,
+      pages: [
+        createPage(1, 1, 0),
+        createPage(2, 2, 790),
+        createPage(3, 3, 1200),
+        createPage(4, 4, 1600),
+        createPage(5, 5, 1890, [
+          {
+            type: "native",
+            block: section.blocks[0]!
+          }
+        ])
+      ],
+      pageHeight: 790,
+      locator: {
+        spineIndex: 0,
+        progressInSection: 0.6
+      }
+    })
+
+    expect(result?.resolvedPage?.offsetInSection).toBe(1898)
+  })
+
+  it("does not snap a previous text page back to a later standalone media page", () => {
+    const service = new ReaderDomPaginationService()
+    const section = createSection()
+    const container = document.createElement("div")
+    const sectionElement = document.createElement("section")
+    sectionElement.className = "epub-dom-section"
+    sectionElement.dataset.sectionId = section.id
+    container.appendChild(sectionElement)
+    setElementBox(sectionElement, {
+      top: 0,
+      height: 1200,
+      scrollHeight: 1200,
+      offsetHeight: 1200
+    })
+
+    const heading = document.createElement("p")
+    heading.dataset.readerBlockId = "text-1"
+    heading.textContent = "Heading"
+    setElementBox(heading, { top: 24, height: 40 })
+    const media = document.createElement("div")
+    media.className = "image-single epub-dom-media-wrapper"
+    setElementBox(media, { top: 240, height: 790 })
+    const image = document.createElement("img")
+    setElementBox(image, { top: 240, height: 790 })
+    media.append(image)
+    sectionElement.append(heading, media)
+
+    const result = service.syncMeasuredPaginatedDomPages({
+      container,
+      section,
+      currentSectionIndex: 0,
+      currentPageNumber: 1,
+      pages: [createPage(1, 1, 0), createPage(2, 2, 240)],
+      pageHeight: 790,
+      locator: {
+        spineIndex: 0,
+        progressInSection: 0
+      }
+    })
+
+    expect(result?.resolvedPage?.offsetInSection).toBe(0)
+  })
+
+  it("preserves an estimated content page instead of snapping to nearby media", () => {
+    const service = new ReaderDomPaginationService()
+    const section = createSection()
+    const container = document.createElement("div")
+    const sectionElement = document.createElement("section")
+    sectionElement.className = "epub-dom-section"
+    sectionElement.dataset.sectionId = section.id
+    container.appendChild(sectionElement)
+    setElementBox(sectionElement, {
+      top: 0,
+      height: 700,
+      scrollHeight: 700,
+      offsetHeight: 700
+    })
+
+    const media = document.createElement("div")
+    media.className = "image-single epub-dom-media-wrapper"
+    setElementBox(media, { top: 40, height: 500 })
+    const image = document.createElement("img")
+    setElementBox(image, { top: 40, height: 500 })
+    media.append(image)
+    sectionElement.append(media)
+
+    const result = service.syncMeasuredPaginatedDomPages({
+      container,
+      section,
+      currentSectionIndex: 0,
+      currentPageNumber: 1,
+      pages: [
+        createPage(1, 1, 0, [
+          {
+            type: "native",
+            block: section.blocks[0]!
+          }
+        ])
+      ],
+      pageHeight: 500,
+      locator: null
+    })
+
+    expect(result?.resolvedPage?.offsetInSection).toBe(0)
+  })
+
+  it("keeps a close preceding text page before a standalone media page", () => {
+    const service = new ReaderDomPaginationService()
+    const section = createSection()
+    const container = document.createElement("div")
+    const sectionElement = document.createElement("section")
+    sectionElement.className = "epub-dom-section"
+    sectionElement.dataset.sectionId = section.id
+    container.appendChild(sectionElement)
+    setElementBox(sectionElement, {
+      top: 0,
+      height: 1500,
+      scrollHeight: 1500,
+      offsetHeight: 1500
+    })
+
+    const firstMedia = document.createElement("div")
+    firstMedia.className = "image-single epub-dom-media-wrapper"
+    setElementBox(firstMedia, { top: 0, height: 360 })
+    const firstImage = document.createElement("img")
+    setElementBox(firstImage, { top: 0, height: 360 })
+    firstMedia.append(firstImage)
+    const text = document.createElement("p")
+    text.dataset.readerBlockId = "text-1"
+    text.textContent = "Close text"
+    setElementBox(text, { top: 360, height: 40 })
+    const media = document.createElement("div")
+    media.className = "image-single epub-dom-media-wrapper"
+    setElementBox(media, { top: 400, height: 790 })
+    const image = document.createElement("img")
+    setElementBox(image, { top: 400, height: 790 })
+    media.append(image)
+    sectionElement.append(firstMedia, text, media)
+
+    const result = service.syncMeasuredPaginatedDomPages({
+      container,
+      section,
+      currentSectionIndex: 0,
+      currentPageNumber: 2,
+      pages: [createPage(1, 1, 400), createPage(2, 2, 360)],
+      pageHeight: 790,
+      locator: {
+        spineIndex: 0,
+        progressInSection: 0.3
+      }
+    })
+
+    expect(result?.resolvedPage?.offsetInSection).toBe(360)
+  })
+
   it("does not count inline images as independent media bands", () => {
     const sectionElement = document.createElement("section")
     sectionElement.className = "epub-dom-section"
@@ -465,6 +738,44 @@ describe("ReaderDomPaginationService", () => {
       670
     ])
   })
+
+  it("keeps readable text between adjacent standalone media pages", () => {
+    const sectionElement = document.createElement("section")
+    sectionElement.className = "epub-dom-section"
+    setElementBox(sectionElement, {
+      top: 0,
+      height: 1900,
+      scrollHeight: 1900,
+      offsetHeight: 1900
+    })
+
+    const first = document.createElement("div")
+    first.className = "image-single epub-dom-media-wrapper"
+    setElementBox(first, { top: 130, height: 790 })
+    const firstImage = document.createElement("img")
+    setElementBox(firstImage, { top: 130, height: 790 })
+    first.append(firstImage)
+
+    const between = document.createElement("p")
+    between.textContent = "Visible text between two illustrations"
+    setElementBox(between, { top: 940, height: 40 })
+
+    const second = document.createElement("div")
+    second.className = "image-single epub-dom-media-wrapper"
+    setElementBox(second, { top: 990, height: 790 })
+    const secondImage = document.createElement("img")
+    setElementBox(secondImage, { top: 990, height: 790 })
+    second.append(secondImage)
+
+    sectionElement.append(first, between, second)
+
+    expect(measurePaginatedDomPageOffsets(sectionElement, 790)).toEqual([
+      0,
+      130,
+      940,
+      990
+    ])
+  })
 })
 
 function createSection(): SectionDocument {
@@ -490,7 +801,8 @@ function createSection(): SectionDocument {
 function createPage(
   pageNumber: number,
   pageNumberInSection: number,
-  offsetInSection: number
+  offsetInSection: number,
+  blocks: ReaderPage["blocks"] = []
 ): ReaderPage {
   return {
     pageNumber,
@@ -500,7 +812,7 @@ function createPage(
     sectionId: "section-1",
     sectionHref: "section-1.xhtml",
     offsetInSection,
-    blocks: []
+    blocks
   }
 }
 

@@ -289,6 +289,7 @@ export class EpubReader {
   private lastFixedLayoutRenderSignature: string | null;
   private lastPresentationRenderSignature: string | null;
   private pendingModeSwitchLocator: Locator | null;
+  private preferLocatorOnNextDomPaginationSync: boolean;
   private textSelectionSnapshot: ReaderTextSelectionSnapshot | null;
   private pinnedTextSelectionSnapshot: ReaderTextSelectionSnapshot | null;
   private readonly handleDocumentSelectionChange = (): void => {
@@ -344,6 +345,7 @@ export class EpubReader {
     this.measuredDomPaginationBySectionId = new Map();
     this.pendingModeSwitchLocator =
       this.sessionState.position.pendingModeSwitchLocator;
+    this.preferLocatorOnNextDomPaginationSync = false;
     this.lastMeasuredWidth = this.sessionState.render.lastMeasuredWidth;
     this.lastMeasuredHeight = this.sessionState.render.lastMeasuredHeight;
     this.sectionEstimatedHeights =
@@ -723,6 +725,14 @@ export class EpubReader {
     }
 
     this.ensurePages();
+    if (this.isAtRenderedPaginatedDomSectionStart()) {
+      this.preferLocatorOnNextDomPaginationSync = true;
+      await this.goToLocation({
+        spineIndex: this.currentSectionIndex - 1,
+        progressInSection: 1
+      });
+      return;
+    }
     const spreadTargetPage =
       this.mode === "paginated"
         ? this.resolveSpreadNavigationTarget("previous")
@@ -731,8 +741,44 @@ export class EpubReader {
       await this.goToLeafPage(spreadTargetPage);
       return;
     }
+    const currentPage = this.findPageByNumber(this.currentPageNumber);
+    if (
+      currentPage &&
+      currentPage.pageNumberInSection <= 1 &&
+      currentPage.spineIndex > 0
+    ) {
+      this.preferLocatorOnNextDomPaginationSync = true;
+      await this.goToLocation({
+        spineIndex: currentPage.spineIndex - 1,
+        progressInSection: 1
+      });
+      return;
+    }
     const previousPage = Math.max(this.currentPageNumber - 1, 1);
     await this.goToLeafPage(previousPage);
+  }
+
+  private isAtRenderedPaginatedDomSectionStart(): boolean {
+    if (!this.book || !this.options.container || this.mode !== "paginated") {
+      return false;
+    }
+
+    if (this.currentSectionIndex <= 0) {
+      return false;
+    }
+
+    const section = this.book.sections[this.currentSectionIndex];
+    if (!section) {
+      return false;
+    }
+
+    const sectionElement =
+      this.options.container.querySelector<HTMLElement>(".epub-dom-section");
+    if (!sectionElement || sectionElement.dataset.sectionId !== section.id) {
+      return false;
+    }
+
+    return Math.abs(readTranslateY(sectionElement)) <= 1;
   }
 
   async goToLocation(locator: Locator): Promise<void> {
@@ -2420,8 +2466,10 @@ export class EpubReader {
       currentPageNumber: this.currentPageNumber,
       pages: this.pages,
       pageHeight: this.getPageHeight(),
-      locator: this.locator
+      locator: this.locator,
+      preferLocatorWhenResolvingPage: this.preferLocatorOnNextDomPaginationSync
     });
+    this.preferLocatorOnNextDomPaginationSync = false;
     if (!result) {
       return null;
     }
@@ -5689,6 +5737,40 @@ function clampProgress(value: number): number {
   }
 
   return Math.max(0, Math.min(value, 1));
+}
+
+function readTranslateY(element: HTMLElement): number {
+  const transform =
+    element.style.transform ||
+    (typeof window !== "undefined"
+      ? window.getComputedStyle(element).transform
+      : "");
+  if (!transform || transform === "none") {
+    return 0;
+  }
+
+  const translateMatch = transform.match(/translateY\((-?\d+(?:\.\d+)?)px\)/);
+  if (translateMatch?.[1]) {
+    return Number.parseFloat(translateMatch[1]);
+  }
+
+  const matrixMatch = transform.match(/matrix\(([^)]+)\)/);
+  if (matrixMatch?.[1]) {
+    const parts = matrixMatch[1]
+      .split(",")
+      .map((part) => Number.parseFloat(part.trim()));
+    return parts[5] ?? 0;
+  }
+
+  const matrix3dMatch = transform.match(/matrix3d\(([^)]+)\)/);
+  if (matrix3dMatch?.[1]) {
+    const parts = matrix3dMatch[1]
+      .split(",")
+      .map((part) => Number.parseFloat(part.trim()));
+    return parts[13] ?? 0;
+  }
+
+  return 0;
 }
 
 function isRenderedDomSectionElement(element: HTMLElement): boolean {

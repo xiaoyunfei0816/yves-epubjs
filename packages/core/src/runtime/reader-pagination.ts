@@ -101,6 +101,13 @@ export function resolveRenderedPage(input: {
     }
   }
 
+  if (input.locator) {
+    const locatorPage = findPageForLocator(input.pages, input.locator)
+    if (locatorPage?.sectionId === input.sectionId) {
+      return locatorPage
+    }
+  }
+
   const currentPage = findCurrentPageForSection({
     pages: input.pages,
     currentPageNumber: input.currentPageNumber,
@@ -108,13 +115,6 @@ export function resolveRenderedPage(input: {
   })
   if (currentPage) {
     return currentPage
-  }
-
-  if (input.locator) {
-    const locatorPage = findPageForLocator(input.pages, input.locator)
-    if (locatorPage?.sectionId === input.sectionId) {
-      return locatorPage
-    }
   }
 
   return input.pages.find((entry) => entry.sectionId === input.sectionId) ?? null

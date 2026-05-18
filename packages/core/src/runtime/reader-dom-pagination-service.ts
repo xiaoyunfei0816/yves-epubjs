@@ -1,4 +1,4 @@
-import type { Locator, SectionDocument } from "../model/types"
+import type { BlockNode, InlineNode, Locator, SectionDocument } from "../model/types"
 import { findBlockById } from "./reader-block-tree"
 import type { PageBlockSlice, ReaderPage } from "./paginated-render-plan"
 import {
@@ -74,6 +74,7 @@ export class ReaderDomPaginationService {
     pages: ReaderPage[]
     pageHeight: number
     locator: Locator | null
+    preferLocatorWhenResolvingPage?: boolean
   }): DomPaginationSyncResult | null {
     if (
       input.section.renditionLayout === "pre-paginated" ||
@@ -198,13 +199,17 @@ export class ReaderDomPaginationService {
         currentPageNumber: input.currentPageNumber,
         sectionId: input.section.id
       })
-      const measuredStandalonePage = previousPage
+      const shouldPreservePreviousContentPage =
+        previousPage && pageHasReadableTextContent(previousPage)
+      const measuredStandalonePage =
+        previousPage && !shouldPreservePreviousContentPage
         ? findMeasuredStandaloneMediaPage({
             pages,
             sectionId: input.section.id,
             previousOffset: previousPage.offsetInSection ?? 0,
             pageHeight: input.pageHeight,
-            mediaBands
+            mediaBands,
+            textLineBands: collectPaginatedDomTextLineBands(sectionElement)
           })
         : null
       const currentPage = findCurrentPageForSection({
@@ -218,7 +223,11 @@ export class ReaderDomPaginationService {
             spineIndex: input.currentSectionIndex
           })
         : null
-      const resolvedPage = currentPage ?? measuredStandalonePage ?? locatorPage
+      const resolvedPage =
+        measuredStandalonePage ??
+        (input.preferLocatorWhenResolvingPage
+          ? (locatorPage ?? currentPage)
+          : (currentPage ?? locatorPage))
 
       return {
         pages,
@@ -242,8 +251,9 @@ export function measurePaginatedDomPageOffsets(
     sectionElement.scrollHeight || sectionElement.offsetHeight || pageHeight
   )
   const maxOffset = Math.max(0, sectionHeight - pageHeight)
-  const lineBands = collectPaginatedDomReadableLineBands(sectionElement)
+  const textLineBands = collectPaginatedDomTextLineBands(sectionElement)
   const mediaBands = collectPaginatedDomMediaBands(sectionElement)
+  const lineBands = mergePaginatedDomBands(textLineBands, mediaBands)
   if (lineBands.length === 0) {
     const offsets = [0]
     for (let offset = pageHeight; offset < sectionHeight; offset += pageHeight) {
@@ -256,7 +266,8 @@ export function measurePaginatedDomPageOffsets(
       mediaBands,
       sectionHeight,
       pageHeight,
-      lineBands: []
+      lineBands: [],
+      textLineBands: []
     })
   }
 
@@ -316,7 +327,8 @@ export function measurePaginatedDomPageOffsets(
     mediaBands,
     sectionHeight,
     pageHeight,
-    lineBands
+    lineBands,
+    textLineBands
   })
 }
 
@@ -326,8 +338,10 @@ function findMeasuredStandaloneMediaPage(input: {
   previousOffset: number
   pageHeight: number
   mediaBands: DomMediaBand[]
+  textLineBands: Array<{ top: number; bottom: number }>
 }): ReaderPage | null {
   const previousPageBottom = input.previousOffset + input.pageHeight
+  const maximumOffsetDistance = getMinimumDomPageAdvance(input.pageHeight)
   const visibleStandaloneMedia = input.mediaBands
     .filter((band) => band.standalonePage)
     .map((band) => ({
@@ -337,6 +351,19 @@ function findMeasuredStandaloneMediaPage(input: {
         Math.max(band.top, input.previousOffset)
     }))
     .filter((entry) => entry.visibleHeight > DOM_PAGE_EDGE_TOLERANCE)
+    .filter(
+      (entry) =>
+        Math.abs(entry.band.top - input.previousOffset) <=
+        maximumOffsetDistance
+    )
+    .filter(
+      (entry) =>
+        !input.textLineBands.some(
+          (line) =>
+            line.bottom > input.previousOffset + DOM_PAGE_EDGE_TOLERANCE &&
+            line.top < entry.band.top - DOM_PAGE_EDGE_TOLERANCE
+        )
+    )
     .sort((left, right) => {
       if (left.visibleHeight !== right.visibleHeight) {
         return right.visibleHeight - left.visibleHeight
@@ -364,6 +391,7 @@ function enforceStandaloneMediaPageOffsets(input: {
   sectionHeight: number
   pageHeight: number
   lineBands: Array<{ top: number; bottom: number }>
+  textLineBands: Array<{ top: number; bottom: number }>
 }): number[] {
   const standaloneMediaBands = input.mediaBands.filter(
     (band) => band.standalonePage
@@ -379,7 +407,8 @@ function enforceStandaloneMediaPageOffsets(input: {
       !isOffsetTooCloseBeforeStandaloneMedia(
         offset,
         standaloneMediaBands,
-        input.pageHeight
+        input.pageHeight,
+        input.textLineBands
       )
     ) {
       nextOffsets.add(normalizeDomPageOffset(offset))
@@ -421,14 +450,21 @@ function isOffsetInsideStandaloneMedia(
 function isOffsetTooCloseBeforeStandaloneMedia(
   offset: number,
   mediaBands: DomMediaBand[],
-  pageHeight: number
+  pageHeight: number,
+  textLineBands: Array<{ top: number; bottom: number }>
 ): boolean {
   const minimumAdvance = getMinimumDomPageAdvance(pageHeight)
   return mediaBands.some((band) => {
     const distanceToMedia = band.top - offset
+    const hasReadableTextBeforeMedia = textLineBands.some(
+      (line) =>
+        line.bottom > offset + DOM_PAGE_EDGE_TOLERANCE &&
+        line.top < band.top - DOM_PAGE_EDGE_TOLERANCE
+    )
     return (
       distanceToMedia > DOM_PAGE_EDGE_TOLERANCE &&
-      distanceToMedia < minimumAdvance
+      distanceToMedia < minimumAdvance &&
+      !hasReadableTextBeforeMedia
     )
   })
 }
@@ -558,6 +594,15 @@ function getMinimumDomPageAdvance(pageHeight: number): number {
 export function collectPaginatedDomReadableLineBands(
   sectionElement: HTMLElement
 ): Array<{ top: number; bottom: number }> {
+  return mergePaginatedDomBands(
+    collectPaginatedDomTextLineBands(sectionElement),
+    collectPaginatedDomMediaBands(sectionElement)
+  )
+}
+
+function collectPaginatedDomTextLineBands(
+  sectionElement: HTMLElement
+): Array<{ top: number; bottom: number }> {
   if (typeof document === "undefined") {
     return []
   }
@@ -568,11 +613,11 @@ export function collectPaginatedDomReadableLineBands(
     const hasText = collectTextNodes(element).some((textNode) =>
       (textNode.textContent ?? "").trim()
     )
-    const rects = hasText
-      ? measureDomRangeLineBands(element)
-      : [element.getBoundingClientRect()]
+    const rects = hasText ? measureDomRangeLineBands(element) : []
+    const measuredRects =
+      rects.length > 0 ? rects : [element.getBoundingClientRect()]
 
-    for (const rect of rects) {
+    for (const rect of measuredRects) {
       if (rect.height <= 0 || rect.width <= 0) {
         continue
       }
@@ -585,7 +630,18 @@ export function collectPaginatedDomReadableLineBands(
     }
   }
 
-  addBands(bands, collectPaginatedDomMediaBands(sectionElement))
+  return [...bands.values()].sort((left, right) =>
+    left.top === right.top ? left.bottom - right.bottom : left.top - right.top
+  )
+}
+
+function mergePaginatedDomBands(
+  textBands: Array<{ top: number; bottom: number }>,
+  mediaBands: Array<{ top: number; bottom: number }>
+): Array<{ top: number; bottom: number }> {
+  const bands = new Map<string, { top: number; bottom: number }>()
+  addBands(bands, textBands)
+  addBands(bands, mediaBands)
 
   return [...bands.values()].sort((left, right) =>
     left.top === right.top ? left.bottom - right.bottom : left.top - right.top
@@ -732,6 +788,83 @@ function collectTextNodes(root: Node): Text[] {
     current = walker.nextNode()
   }
   return textNodes
+}
+
+function pageHasReadableTextContent(page: ReaderPage): boolean {
+  return page.blocks.some((slice) => {
+    if (slice.type === "pretext") {
+      return slice.block.lines.some((line) =>
+        line.fragments.some((fragment) => fragment.text.trim())
+      )
+    }
+
+    return blockHasReadableTextContent(slice.block)
+  })
+}
+
+function blockHasReadableTextContent(block: BlockNode): boolean {
+  switch (block.kind) {
+    case "text":
+    case "heading":
+      return inlinesHaveReadableText(block.inlines)
+    case "code":
+      return block.text.trim().length > 0
+    case "quote":
+    case "aside":
+    case "nav":
+      return blocksHaveReadableText(block.blocks)
+    case "figure":
+      return (
+        blocksHaveReadableText(block.blocks) ||
+        blocksHaveReadableText(block.caption ?? [])
+      )
+    case "list":
+      return block.items.some((item) => blocksHaveReadableText(item.blocks))
+    case "table":
+      return (
+        blocksHaveReadableText(block.caption ?? []) ||
+        block.rows.some((row) =>
+          row.cells.some((cell) => blocksHaveReadableText(cell.blocks))
+        )
+      )
+    case "definition-list":
+      return block.items.some(
+        (item) =>
+          blocksHaveReadableText(item.term) ||
+          item.descriptions.some((description) =>
+            blocksHaveReadableText(description)
+          )
+      )
+    default:
+      return false
+  }
+}
+
+function blocksHaveReadableText(blocks: BlockNode[]): boolean {
+  return blocks.some((block) => blockHasReadableTextContent(block))
+}
+
+function inlinesHaveReadableText(inlines: InlineNode[]): boolean {
+  return inlines.some((inline) => {
+    switch (inline.kind) {
+      case "text":
+      case "code":
+        return inline.text.trim().length > 0
+      case "link":
+      case "emphasis":
+      case "strong":
+      case "span":
+      case "sub":
+      case "sup":
+      case "small":
+      case "mark":
+      case "del":
+      case "ins":
+        return inlinesHaveReadableText(inline.children)
+      default:
+        return false
+    }
+  })
 }
 
 function escapeAttributeSelectorValue(value: string): string {
